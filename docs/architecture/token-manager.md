@@ -265,14 +265,22 @@ configured provider in this order:
    `azure-ai-inference` is derived from any registered `azure-ai-foundry`
    key.
 3. **GitHub Copilot SDK** — `GITHUB_TOKEN` or a registered classic PAT/OAuth
-   token with the `copilot-sdk` capability. This is the preferred
-   GitHub-backed provider.
+   token with the `copilot-sdk` capability. This is a convenience path for
+   desktop and straightforward self-hosted installations: the same GitHub
+   OAuth flow can enable Portal AI without a separately provisioned inference
+   endpoint.
 4. **GitHub Models (legacy fallback)** — `GITHUB_MODELS_API_KEY`, a registered
    `github-models` token, or the legacy `GITHUB_TOKEN` path.
 
 Each successful acquisition logs the selected source. GitHub Models remains
 available for compatibility, but new deployments should use Foundry or Copilot
 SDK credentials.
+
+For production deployments, prefer Foundry or another direct chat-completions
+endpoint over Copilot SDK. The SDK launches Copilot CLI child processes and
+requires Scope to operate a bounded client pool, whereas a direct endpoint
+avoids subprocess lifecycle and pool-capacity overhead and exposes native
+inference controls.
 
 ### Copilot SDK request isolation
 
@@ -283,6 +291,12 @@ requests and child processes do not wait indefinitely. A request borrows one
 client, creates a **one-shot** session, sends one prompt, then disconnects and
 deletes the session in `finally` before returning the client to the pool.
 Session cleanup therefore runs after success, provider errors, and timeouts.
+
+The pool exists because the SDK runtime is not in-process: every pooled client
+owns a Copilot CLI child process. This tradeoff streamlines desktop setup, but
+production capacity planning must account for the child processes' memory,
+startup, health-check, and idle-eviction behavior. A direct inference endpoint
+is therefore the recommended production architecture.
 
 The session is intentionally isolated from coding-agent behavior:
 

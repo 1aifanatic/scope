@@ -61,6 +61,14 @@ Foundry, the GitHub Copilot SDK, and a legacy GitHub Models fallback. The
 **first source that returns a credential wins**; later sources are not
 consulted.
 
+The Copilot SDK provider is primarily a **desktop and simple self-hosting
+convenience**: a GitHub OAuth flow can enable Portal AI without provisioning a
+separate inference resource. The SDK runs a Copilot CLI child process and Scope
+must maintain a bounded pool of those processes. For production deployments,
+prefer Azure AI Foundry or another direct chat-completions endpoint, which
+avoids subprocess lifecycle and pool-capacity overhead and exposes native
+inference controls.
+
 | # | Source | Trigger | `via` log tag |
 |---|--------|---------|---------------|
 | 1 | Azure AI Foundry via env vars | `AZURE_AI_INFERENCE_ENDPOINT` + `AZURE_AI_INFERENCE_API_KEY` both set | `azure-ai-foundry-env` |
@@ -99,6 +107,12 @@ or repository/workspace context. The Copilot CLI child process receives a
 sanitized environment with only the runtime and authentication variables it
 needs; the API service's unrelated credentials are not forwarded. Sessions are
 never reused across Portal AI requests.
+
+These controls make the SDK path practical for desktop use and smaller
+self-hosted installations, but they do not remove the cost of running child
+processes in the API container. Production operators should normally configure
+Foundry or a direct completion endpoint instead of sizing and operating a
+Copilot runtime pool.
 
 The Copilot SDK adapter preserves the Portal operation's system prompt and user
 prompt. Its model resolves independently from the REST default, in this order:
