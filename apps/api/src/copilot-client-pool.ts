@@ -129,6 +129,19 @@ function isRetryableCopilotError(error: unknown): boolean {
   ].some((pattern) => text.includes(pattern));
 }
 
+function isCopilotCredentialFailure(error: unknown): boolean {
+  const text = errorText(error).toLowerCase();
+  return [
+    "authentication",
+    "unauthorized",
+    "forbidden",
+    "invalid token",
+    "not entitled",
+    "copilot license",
+    "no available models",
+  ].some((pattern) => text.includes(pattern));
+}
+
 async function withTimeout<T>(
   operation: Promise<T>,
   timeoutMs: number,
@@ -184,7 +197,12 @@ export class PortalCopilotClientPool {
       min: 0,
       max,
       acquireTimeoutMillis,
-      createTimeoutMillis: this.startupTimeoutMs,
+      // createResource owns the startup deadline and force-stops a partial
+      // client before rejecting. Keep Tarn's outer deadline longer so it never
+      // abandons a creator that is still cleaning up and starts a replacement
+      // beyond the configured pool maximum.
+      createTimeoutMillis:
+        this.startupTimeoutMs + this.shutdownTimeoutMs + 1_000,
       destroyTimeoutMillis: this.shutdownTimeoutMs,
       idleTimeoutMillis: positiveInt(
         "PORTAL_COPILOT_IDLE_TIMEOUT_MS",
@@ -308,20 +326,14 @@ export class PortalCopilotClientPool {
     this.resourcesCreated += 1;
 
     try {
-      await withTimeout(
-        client.start(),
-        this.startupTimeoutMs,
-        `Copilot CLI did not start within ${this.startupTimeoutMs}ms`,
-      );
-      await withTimeout(
-        client.ping("scope-portal-ai-ready"),
-        this.startupTimeoutMs,
-        `Copilot CLI did not respond within ${this.startupTimeoutMs}ms`,
-      );
       const models = await withTimeout(
-        client.listModels(),
+        (async () => {
+          await client.start();
+          await client.ping("scope-portal-ai-ready");
+          return client.listModels();
+        })(),
         this.startupTimeoutMs,
-        `Copilot model discovery did not finish within ${this.startupTimeoutMs}ms`,
+        `Copilot CLI startup did not finish within ${this.startupTimeoutMs}ms`,
       );
       const preferred = [
         "gpt-5.4-mini",
@@ -343,6 +355,12 @@ export class PortalCopilotClientPool {
     } catch (error) {
       resource.healthy = false;
       await this.destroyResource(resource, true);
+      if (isCopilotCredentialFailure(error)) {
+        throw new CopilotCredentialUnavailableError(
+          `Copilot SDK credential cannot provide Portal AI completions: ${errorText(error)}`,
+          { cause: error },
+        );
+      }
       throw error;
     }
   }

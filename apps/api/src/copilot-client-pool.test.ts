@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   mkdtemp: vi.fn(),
   rm: vi.fn(),
   ping: vi.fn(),
+  models: [{ id: "test-default-model", name: "Test Default", capabilities: {} }],
   sessionFactory: vi.fn(),
 }));
 
@@ -35,9 +36,7 @@ vi.mock("@github/copilot-sdk", () => ({
   CopilotClient: class implements MockClient {
     start = vi.fn(async () => undefined);
     ping = vi.fn((message: string) => mocks.ping(message));
-    listModels = vi.fn(async () => [
-      { id: "test-default-model", name: "Test Default", capabilities: {} },
-    ]);
+    listModels = vi.fn(async () => mocks.models);
     createSession = vi.fn((options: Record<string, unknown>) =>
       mocks.sessionFactory(options),
     );
@@ -67,7 +66,10 @@ vi.mock("shared", () => ({
   withRetry: <T>(operation: () => Promise<T>) => operation(),
 }));
 
-import { PortalCopilotClientPool } from "./copilot-client-pool.js";
+import {
+  CopilotCredentialUnavailableError,
+  PortalCopilotClientPool,
+} from "./copilot-client-pool.js";
 
 const pools: PortalCopilotClientPool[] = [];
 let sessionNumber = 0;
@@ -109,6 +111,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.clientOptions.length = 0;
   mocks.clients.length = 0;
+  mocks.models = [
+    { id: "test-default-model", name: "Test Default", capabilities: {} },
+  ];
   pools.length = 0;
   sessionNumber = 0;
   vi.stubEnv("PORTAL_COPILOT_POOL_SIZE", "1");
@@ -251,6 +256,20 @@ describe("PortalCopilotClientPool", () => {
     });
     await expect(complete(pool)).rejects.toThrow(
       "Copilot SDK pool is shutting down",
+    );
+  });
+
+  it("treats an account with no Copilot models as an unavailable credential", async () => {
+    mocks.models = [];
+    const pool = makePool();
+
+    await expect(complete(pool)).rejects.toBeInstanceOf(
+      CopilotCredentialUnavailableError,
+    );
+    expect(mocks.clients[0].forceStop).toHaveBeenCalledOnce();
+    expect(mocks.rm).toHaveBeenCalledWith(
+      "/scope-tests/runtime",
+      { recursive: true, force: true },
     );
   });
 });

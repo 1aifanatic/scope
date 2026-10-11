@@ -156,6 +156,18 @@ describe("completePortalLlm provider resolution", () => {
     expect(mocks.modelPost).toHaveBeenCalledOnce();
   });
 
+  it("uses an explicit GitHub Models key when no Copilot credential is configured", async () => {
+    vi.stubEnv("GITHUB_MODELS_API_KEY", "github-models-key");
+    mocks.modelPost.mockResolvedValue(completion("from-github-models-env"));
+
+    await expect(completePortalLlm(request)).resolves.toBe(
+      "from-github-models-env",
+    );
+
+    expect(mocks.copilotComplete).not.toHaveBeenCalled();
+    expect(mocks.modelPost).toHaveBeenCalledOnce();
+  });
+
   it("does not hide an inference failure by falling through to another provider", async () => {
     vi.stubEnv("AZURE_AI_INFERENCE_ENDPOINT", "https://foundry.example.test/models");
     vi.stubEnv("AZURE_AI_INFERENCE_API_KEY", "foundry-key");
