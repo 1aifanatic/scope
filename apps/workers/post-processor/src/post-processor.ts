@@ -4,6 +4,7 @@
 import type { DequeuedMessageItem } from "@azure/storage-queue";
 import { BaseQueueProcessor, BlobStorage, type BaseQueueProcessorConfig, type LogEvent, type VisibilityHeartbeat } from "shared";
 import type { RequestDocument, HandlerRunStatus } from "shared";
+import { trackMetric, trackEvent } from "telemetry";
 import type { PostProcessHandler, PostProcessorMessage, HandlerContext } from "./types.js";
 
 export interface PostProcessorConfig extends BaseQueueProcessorConfig {
@@ -19,6 +20,7 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
   private handlers = new Map<string, PostProcessHandler>();
   private blobStorage: BlobStorage;
   private apiBaseUrl?: string;
+  private static coldStartTracked = false;
 
   constructor(config: PostProcessorConfig) {
     super(config, "post-processor");
@@ -88,6 +90,17 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
     log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>,
     payload?: Record<string, unknown>,
   ): Promise<void> {
+    const processStart = Date.now();
+
+    if (!PostProcessor.coldStartTracked) {
+      PostProcessor.coldStartTracked = true;
+      trackMetric({
+        name: "post_processor.cold_start_ms",
+        value: process.uptime() * 1000,
+        properties: { service: "post-processor" },
+      });
+    }
+
     if (!this.isPostProcessorMessage(payload)) {
       await log("warn", "Message missing 'type' field, discarding");
       await this.safeDeleteMessage(message.messageId, heartbeat.stop());
@@ -151,6 +164,10 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
 
     try {
       await log("info", `Running handler: ${msg.type}`);
+      trackEvent({
+        name: "post_processor.processing_started",
+        properties: { handlerType: msg.type, requestId: doc._id },
+      });
 
       const ctx: HandlerContext = {
         blobStorage: this.blobStorage,
@@ -188,6 +205,15 @@ export class PostProcessor extends BaseQueueProcessor<RequestDocument> {
       }
 
       await log("info", `Post-processing complete (v${handler.version})`);
+      trackMetric({
+        name: "post_processor.processing_duration_ms",
+        value: Date.now() - processStart,
+        properties: { service: "post-processor", handlerType: msg.type },
+      });
+      trackEvent({
+        name: "post_processor.processing_completed",
+        properties: { handlerType: msg.type, requestId: doc._id },
+      });
 
       // Notify the scheduler that this handler is done (best-effort)
       await this.notifyHandlerComplete(doc._id, doc.run?._id ?? "", handlerId, "done");

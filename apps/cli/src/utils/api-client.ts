@@ -33,11 +33,22 @@ import { normalizeUrl } from "./shared.js";
 
 /** Init accepted by {@link apiFetch}. Adds a couple of client-only knobs to `RequestInit`. */
 export interface ApiFetchInit extends RequestInit {
+  /** Redact entire request/response log bodies when registering or validating credentials. */
+  sensitiveBody?: boolean;
   /**
    * Skip `Authorization` header injection for this request (e.g. truly public
    * endpoints). Defaults to `false` — every Scope API call is authenticated.
    */
   skipAuth?: boolean;
+  /**
+   * Project id to scope this request to. When set, it is appended as a
+   * `projectId=<id>` query parameter (joined with `?` or `&` as needed). The
+   * Scope API requires this on every scoped resource call and never assumes a
+   * default, so scoped commands resolve a concrete id (see
+   * {@link file://./config.ts resolveProjectId}/`requireProjectId`) and pass it
+   * here. Point-read and unscoped calls omit it.
+   */
+  projectId?: string;
 }
 
 /**
@@ -387,6 +398,19 @@ function resolveApiPath(path: string): string {
   return `${apiBasePath}${rel}`;
 }
 
+/**
+ * Append a `projectId=<id>` query parameter to an already-resolved path,
+ * choosing `?` or `&` depending on whether the path already has a query string.
+ * A blank/undefined id is a no-op so unscoped and point-read calls pass through
+ * unchanged.
+ */
+function withProjectId(path: string, projectId: string | undefined): string {
+  const id = projectId?.trim();
+  if (!id) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}projectId=${encodeURIComponent(id)}`;
+}
+
 function newCorrelationId(): string {
   if (typeof globalThis.crypto?.randomUUID === "function") {
     return globalThis.crypto.randomUUID();
@@ -450,23 +474,23 @@ function getClient(): KyInstance {
  * @returns The `fetch` `Response`. Callers keep their existing
  *          `response.ok` / `response.json()` / streaming handling.
  */
-export async function apiFetch(baseUrl: string, path: string, init?: ApiFetchInit): Promise<Response> {
-  const url = `${normalizeUrl(baseUrl)}${resolveApiPath(path)}`;
+export async function apiFetch(baseUrl: string | undefined, path: string, init?: ApiFetchInit): Promise<Response> {
+  const url = `${normalizeUrl(baseUrl)}${withProjectId(resolveApiPath(path), init?.projectId)}`;
 
   const headers = new Headers(init?.headers);
   if (init?.skipAuth) headers.set(SKIP_AUTH_HEADER, "1");
 
   // Strip our client-only fields before handing the init to ky.
-  const { skipAuth: _skipAuth, ...rest } = init ?? {};
+  const { skipAuth: _skipAuth, projectId: _projectId, sensitiveBody: _sensitiveBody, ...rest } = init ?? {};
   const finalInit: RequestInit = { ...rest, headers };
 
-  let response = await dispatch(url, finalInit, init?.body);
+  let response = await dispatch(url, finalInit, init?.body, init?.sensitiveBody);
 
   if (response.status === 401 && reauthHandler) {
     const shouldRetry = await reauthHandler(response);
     if (shouldRetry) {
       // Re-dispatch: the auth hook re-resolves the (possibly refreshed) token.
-      response = await dispatch(url, finalInit, init?.body);
+      response = await dispatch(url, finalInit, init?.body, init?.sensitiveBody);
     }
   }
 
@@ -474,7 +498,7 @@ export async function apiFetch(baseUrl: string, path: string, init?: ApiFetchIni
 }
 
 /** Single request attempt through `ky`, wrapped with logging-sink instrumentation. */
-async function dispatch(url: string, init: RequestInit, originalBody: BodyInit | null | undefined): Promise<Response> {
+async function dispatch(url: string, init: RequestInit, originalBody: BodyInit | null | undefined, sensitiveBody = false): Promise<Response> {
   const send = getClient();
   if (!logSink) {
     return send(url, init);
@@ -487,7 +511,7 @@ async function dispatch(url: string, init: RequestInit, originalBody: BodyInit |
     method: (init.method ?? "GET").toUpperCase(),
     url,
     requestHeaders: redactedRequestHeaders(init.headers),
-    requestBody: previewBody(originalBody),
+    requestBody: sensitiveBody ? REDACTED : previewBody(originalBody),
   };
 
   try {
@@ -496,7 +520,7 @@ async function dispatch(url: string, init: RequestInit, originalBody: BodyInit |
     // Gated on content type/length so binary and streaming bodies aren't buffered.
     let responseBody: string | undefined;
     try {
-      responseBody = await captureResponseBody(response);
+      responseBody = sensitiveBody ? REDACTED : await captureResponseBody(response);
     } catch {
       responseBody = undefined;
     }

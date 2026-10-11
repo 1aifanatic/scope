@@ -23,6 +23,7 @@ const CONFIG = {
 function makeDoc(overrides: Partial<RequestDocument["run"]> = {}): RequestDocument {
   return {
     _id: "req-1",
+    projectId: "project",
     scenario: { task: "task", criteria: [] },
     workerType: "post-processor",
     createdAt: new Date(),
