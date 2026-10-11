@@ -480,7 +480,13 @@ export class PortalCopilotClientPool {
 
     try {
       if (force) {
-        await resource.client.forceStop().catch(() => undefined);
+        await withTimeout(
+          resource.client.forceStop(),
+          this.shutdownTimeoutMs,
+          `Copilot CLI force-stop did not finish within ${this.shutdownTimeoutMs}ms`,
+        ).catch((error) => {
+          console.warn(`[portal-copilot-pool] force-stop failed: ${errorText(error)}`);
+        });
       } else {
         const errors = await withTimeout(
           resource.client.stop(),
@@ -495,7 +501,11 @@ export class PortalCopilotClientPool {
       }
     } catch (error) {
       console.warn(`[portal-copilot-pool] stop failed: ${errorText(error)}`);
-      await resource.client.forceStop().catch(() => undefined);
+      await withTimeout(
+        resource.client.forceStop(),
+        this.shutdownTimeoutMs,
+        `Copilot CLI force-stop did not finish within ${this.shutdownTimeoutMs}ms`,
+      ).catch(() => undefined);
     } finally {
       await rm(resource.rootDirectory, { recursive: true, force: true }).catch((error) => {
         console.warn(`[portal-copilot-pool] temp cleanup failed: ${errorText(error)}`);
