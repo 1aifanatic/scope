@@ -328,11 +328,11 @@ describe("createHttpServer", () => {
     servers.push(server);
 
     const doc = {
-      _id: "pp-example",
+      _id: "pp-taxonomy",
       type: "post-process-handler",
       version: 1,
-      queue: "pp-example-queue",
-      selector: "example",
+      queue: "pp-taxonomy-queue",
+      selector: "taxonomy",
       autoBackfill: false,
       dependsOn: ["pp-atif"],
     };
@@ -344,7 +344,7 @@ describe("createHttpServer", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, handlerId: "pp-example" });
+    expect(await response.json()).toEqual({ ok: true, handlerId: "pp-taxonomy" });
     expect(handler.registerHandler).toHaveBeenCalledWith(doc);
   });
 

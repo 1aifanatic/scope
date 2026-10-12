@@ -187,6 +187,7 @@ export interface RunState {
    * instead. Empty/absent when no run-subject observations were selected.
    */
   observationResults?: CriterionResult[];
+  taxonomyUrl?: string;
 }
 
 export interface Run {
