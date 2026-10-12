@@ -24,31 +24,37 @@ This README covers phases 2 and 3. For infrastructure, see the
 
 ## Deploy the core app
 
-1. List deployments in your resource group and pick one:
+Deployed with `deploy/azure/`'s Bicep? Generate `my-values.yaml` from its
+outputs:
 
-   ```bash
-   az deployment group list \
-     --resource-group <resource-group-name> \
-     --query "[].{name:name, timestamp:properties.timestamp}" -o table
-   ```
+```bash
+./scripts/generate-values-from-bicep.sh --resource-group <resource-group-name>
+```
 
-2. Run the install script with both the resource group and the deployment
-   name you chose. It reads that deployment's outputs, generates a values
-   file from them, and installs the chart:
+It auto-picks the right deployment — nested Bicep modules (e.g. a
+`keyvault` module) can show up as separate deployments and re-expose a
+subset of the same output names, so it filters on a combination only the
+root deployment has, then takes the most recent match. Pass
+`--deployment-name <name>` to override. Run
+`./scripts/generate-values-from-bicep.sh --help` for all options (custom
+image registry, output path, etc.).
 
-   ```bash
-   ./scripts/bootstrap-core.sh \
-     --resource-group <resource-group-name> \
-     --deployment-name <deployment-name>
-   ```
+Not using the Bicep template? Hand-author `my-values.yaml` instead — see
+[Configuration](./CONFIGURATION.md).
 
-   Run `./scripts/bootstrap-core.sh --help` for all options (custom image
-   registry, reusing an edited values file, etc.).
+Either way, install the chart the same way:
 
-3. Add any bring-your-own secrets (GitHub token, Anthropic API key) that
-   Bicep doesn't provision. See
-   [Bring your own secrets](./CONFIGURATION.md#bring-your-own-secrets) for
-   your options.
+```bash
+helm upgrade --install scope deploy/helm/scope \
+  --namespace scope --create-namespace \
+  -f my-values.yaml \
+  --wait --timeout 5m
+```
+
+Then add any bring-your-own secrets (GitHub token, Anthropic API key) that
+Bicep doesn't provision. See
+[Bring your own secrets](./CONFIGURATION.md#bring-your-own-secrets) for
+your options.
 
 ## Bring workers online
 
