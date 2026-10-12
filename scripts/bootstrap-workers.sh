@@ -26,7 +26,14 @@
 #   --release <name>         Helm release name (default: scope)
 #   --chart <path>           Helm chart path (default: deploy/helm/scope,
 #                            relative to repo root)
-#   --image-tag <tag>        Tag to build/push/deploy (default: latest)
+#   --image-tag <tag>        Tag to build/push/deploy (default: a unique tag
+#                            derived from the current git commit, e.g.
+#                            a1b2c3d or a1b2c3d-dirty). Rerunning this script
+#                            with the mutable "latest" tag would push new
+#                            image content without changing the rendered
+#                            Deployment PodTemplate, so Helm would leave the
+#                            old pods running — see deploy/helm/scope/
+#                            README.md "Phase 3" for details.
 #   --values-file <path>     Same values override file passed to the
 #                            original `helm install ... -f <path>` (see
 #                            README.md "Install (Phase 2)"). Strongly
@@ -50,7 +57,19 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 NAMESPACE="scope"
 RELEASE_NAME="scope"
 CHART_PATH="deploy/helm/scope"
-IMAGE_TAG="latest"
+# Default to a unique tag derived from the current commit so each run
+# produces a distinct tag and the rendered Deployment PodTemplate actually
+# changes (a mutable tag like "latest" lets Helm think nothing changed and
+# leave old pods running — see --image-tag help above). Falls back to a
+# timestamp if this isn't a git checkout.
+if git -C "$REPO_ROOT" rev-parse --short HEAD >/dev/null 2>&1; then
+  IMAGE_TAG="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
+  if ! git -C "$REPO_ROOT" diff --quiet HEAD -- 2>/dev/null; then
+    IMAGE_TAG="${IMAGE_TAG}-dirty"
+  fi
+else
+  IMAGE_TAG="$(date +%Y%m%d%H%M%S)"
+fi
 VALUES_FILE=""
 ACR_NAME=""
 SKIP_COPILOT=false
@@ -65,7 +84,7 @@ die() {
 }
 
 usage() {
-  sed -n '2,44p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,51p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [ "$#" -gt 0 ]; do
