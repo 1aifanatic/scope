@@ -7,7 +7,7 @@ Deploys the Scope application onto the AKS cluster that
 |---|---|---|
 | 1. Infrastructure | AKS, Cosmos DB, Key Vault, Redis, Storage, ACR, networking | `deploy/azure/` (Bicep) |
 | 2. Core app | api, portal, judge, token-manager, scheduler, report-generator | This chart |
-| 3. Coding-agent workers | Worker images, secrets, agent registration | `scripts/bootstrap-workers.sh` |
+| 3. Coding-agent workers | Worker images, agent registration | `scripts/bootstrap-workers.sh` |
 
 This README covers phases 2 and 3.
 
@@ -49,9 +49,10 @@ ACP coding-agent workers are disabled by default:
 ./scripts/bootstrap-workers.sh --acr <acrName>
 ```
 
-Builds + pushes both worker images, registers their credentials, enables
-their Deployments, and registers both agents with the API. See
-[Workers](./WORKERS.md) for flags and details.
+Builds + pushes both worker images, enables their Deployments, and
+registers both agents with the API. Register the GitHub token/Anthropic
+API key they need yourself via the Portal's **Secrets** tab (or
+`POST /api/v1/keys`) — see [Workers](./WORKERS.md) for flags and details.
 
 ## Verify
 

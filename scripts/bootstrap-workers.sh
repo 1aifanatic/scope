@@ -6,11 +6,15 @@
 # coder-acp-claude-code) on top of an already-`helm install`ed Scope
 # release (see deploy/helm/scope/README.md "Phase 1/2"). This is the
 # single entry point for "Phase 3": it builds + pushes both worker images
-# to your ACR, registers the GitHub/Anthropic credentials they need with
-# Token Manager, flips them on via `helm upgrade`, and registers each agent
+# to your ACR, flips them on via `helm upgrade`, and registers each agent
 # with the API. You should not need to run any `az acr build`/`helm
 # upgrade --set workers...`/`register-agent.sh` commands by hand — this
 # script wraps all of them.
+#
+# This script does NOT register worker credentials (GitHub token,
+# Anthropic API key). Add those yourself via the Portal's "Create Token"
+# page (or POST /api/v1/keys directly) after the workers are up — see
+# deploy/helm/scope/WORKERS.md.
 #
 # Usage:
 #   scripts/bootstrap-workers.sh --acr <acrLoginServerOrName> [options]
@@ -36,19 +40,8 @@
 #   --skip-copilot           Skip the coder-acp-copilot worker entirely
 #   --skip-claude-code       Skip the coder-acp-claude-code worker entirely
 #   --skip-build             Reuse already-pushed images; skip `az acr build`
-#   --skip-secrets           Skip the credential prompts/registration step
 #   --skip-agent-registration
 #                            Skip the scripts/register-agent.sh step
-#   -y, --yes                Non-interactive: never prompt (requires
-#                            GITHUB_TOKEN/ANTHROPIC_API_KEY env vars, or
-#                            use --skip-secrets)
-#
-# Environment variables (read instead of prompting, if set):
-#   GITHUB_TOKEN, ANTHROPIC_API_KEY
-#
-# Credentials are sent once to the already-running Token Manager over a
-# temporary `kubectl port-forward` to the `api` Service and are never
-# written to disk by this script.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,9 +56,7 @@ ACR_NAME=""
 SKIP_COPILOT=false
 SKIP_CLAUDE_CODE=false
 SKIP_BUILD=false
-SKIP_SECRETS=false
 SKIP_AGENT_REGISTRATION=false
-NON_INTERACTIVE=false
 
 log() { printf '\n==> %s\n' "$1"; }
 die() {
@@ -74,7 +65,7 @@ die() {
 }
 
 usage() {
-  sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,44p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [ "$#" -gt 0 ]; do
@@ -115,16 +106,8 @@ while [ "$#" -gt 0 ]; do
       SKIP_BUILD=true
       shift
       ;;
-    --skip-secrets)
-      SKIP_SECRETS=true
-      shift
-      ;;
     --skip-agent-registration)
       SKIP_AGENT_REGISTRATION=true
-      shift
-      ;;
-    -y | --yes)
-      NON_INTERACTIVE=true
       shift
       ;;
     -h | --help)
@@ -149,44 +132,17 @@ if [ -n "$VALUES_FILE" ] && [ ! -f "$VALUES_FILE" ]; then
   die "--values-file not found: $VALUES_FILE"
 fi
 
-for bin in az helm kubectl curl node; do
+for bin in az helm kubectl curl; do
   command -v "$bin" >/dev/null 2>&1 || die "$bin is required on PATH"
 done
 if [ "$SKIP_AGENT_REGISTRATION" = false ] && ! command -v yq >/dev/null 2>&1; then
   die "yq is required for agent registration (brew install yq), or pass --skip-agent-registration"
 fi
 
-# -----------------------------------------------------------------------------
-# 1. Prompt for worker credentials up front (before any build/deploy work),
-#    so the whole run can proceed unattended once started.
-# -----------------------------------------------------------------------------
-if [ "$SKIP_SECRETS" = false ]; then
-  if [ -z "${GITHUB_TOKEN:-}" ] && [ "$SKIP_COPILOT" = false ]; then
-    if [ "$NON_INTERACTIVE" = true ]; then
-      die "GITHUB_TOKEN is required (non-interactive mode); export it, use --skip-copilot, or --skip-secrets"
-    fi
-    echo "coder-acp-copilot needs a GitHub token (classic or fine-grained PAT) to drive the Copilot CLI."
-    echo "Leave blank to skip registering a credential now (you can add one later via the Portal's 'Create Token' page)."
-    read -r -s -p "GitHub token: " GITHUB_TOKEN
-    echo
-  fi
-  if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ "$SKIP_CLAUDE_CODE" = false ]; then
-    if [ "$NON_INTERACTIVE" = true ]; then
-      die "ANTHROPIC_API_KEY is required (non-interactive mode); export it, use --skip-claude-code, or --skip-secrets"
-    fi
-    echo "coder-acp-claude-code needs an Anthropic API key to drive the Claude Agent SDK."
-    echo "Leave blank to skip registering a credential now (you can add one later via the Portal's 'Create Token' page)."
-    read -r -s -p "Anthropic API key: " ANTHROPIC_API_KEY
-    echo
-  fi
-fi
-GITHUB_TOKEN="${GITHUB_TOKEN:-}"
-ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
-
 cd "$REPO_ROOT"
 
 # -----------------------------------------------------------------------------
-# 2. Build + push worker images to ACR (az acr build — no local Docker
+# 1. Build + push worker images to ACR (az acr build — no local Docker
 #    needed).
 # -----------------------------------------------------------------------------
 if [ "$SKIP_BUILD" = false ]; then
@@ -211,8 +167,8 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 3. Temporary port-forward to the API, used for both credential
-#    registration and agent registration below.
+# 2. Temporary port-forward to the API, used for agent registration
+#    below.
 # -----------------------------------------------------------------------------
 API_LOCAL_PORT=18080
 API_URL="http://127.0.0.1:$API_LOCAL_PORT"
@@ -241,39 +197,8 @@ stop_port_forward() {
 }
 trap stop_port_forward EXIT
 
-register_secret() {
-  type="$1"
-  value="$2"
-  label="$3"
-  [ -n "$value" ] || {
-    echo "No $label provided — skipping credential registration (register one later via the Portal's 'Create Token' page)."
-    return 0
-  }
-  start_port_forward
-  log "Registering $label with Token Manager"
-  payload=$(SCOPE_SECRET_TYPE="$type" SCOPE_SECRET_VALUE="$value" node -e \
-    'process.stdout.write(JSON.stringify({type: process.env.SCOPE_SECRET_TYPE, value: process.env.SCOPE_SECRET_VALUE}))')
-  status=$(curl -sS -o /tmp/scope-bootstrap-workers-register.json -w '%{http_code}' \
-    -X POST "$API_URL/api/v1/keys" \
-    -H 'Content-Type: application/json' \
-    --data-binary "$payload")
-  case "$status" in
-    2??) echo "Registered $label." ;;
-    *)
-      echo "Failed to register $label (HTTP $status):" >&2
-      cat /tmp/scope-bootstrap-workers-register.json >&2
-      return 1
-      ;;
-  esac
-}
-
-if [ "$SKIP_SECRETS" = false ]; then
-  [ "$SKIP_COPILOT" = false ] && register_secret "github-pat-classic" "$GITHUB_TOKEN" "GitHub token"
-  [ "$SKIP_CLAUDE_CODE" = false ] && register_secret "anthropic-api-key" "$ANTHROPIC_API_KEY" "Anthropic API key"
-fi
-
 # -----------------------------------------------------------------------------
-# 4. Enable the worker Deployments via `helm upgrade` (chart already has
+# 3. Enable the worker Deployments via `helm upgrade` (chart already has
 #    them templated, gated on workers.<name>.enabled — see
 #    deploy/helm/scope/templates/workers/).
 # -----------------------------------------------------------------------------
@@ -318,7 +243,7 @@ if [ "${#HELM_SET_ARGS[@]}" -gt 0 ]; then
 fi
 
 # -----------------------------------------------------------------------------
-# 5. Register each enabled agent with the API. Uses the *-dev.yaml version
+# 4. Register each enabled agent with the API. Uses the *-dev.yaml version
 #    manifests shipped in-repo — fine for chart smoke-testing; for a real
 #    deployment, register a version manifest whose imageTag/queueName match
 #    what you actually built above, and keep

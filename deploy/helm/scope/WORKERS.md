@@ -15,26 +15,31 @@ the intended production pattern). Bring them online with one command:
 This:
 
 1. Builds and pushes both worker images with `az acr build`.
-2. Prompts for the GitHub PAT and Anthropic API key they need, and
-   registers them through the Token Manager API.
-3. Runs `helm upgrade` to point each worker's image fields at the image it
+2. Runs `helm upgrade` to point each worker's image fields at the image it
    just built, and flips `workers.<name>.enabled: true`.
-4. Waits for both Deployments to roll out.
-5. Registers both agent types with the API (`scripts/register-agent.sh`).
+3. Waits for both Deployments to roll out.
+4. Registers both agent types with the API (`scripts/register-agent.sh`).
+
+The script does **not** register worker credentials. Add the GitHub PAT
+and/or Anthropic API key each worker needs through the Portal's **Secrets**
+tab (**Register key**) after the workers are up — see "Registering
+credentials" below.
 
 Run `./scripts/bootstrap-workers.sh --help` for all flags, including
-`--skip-build`, `--skip-secrets`, `--skip-copilot`, `--skip-claude-code`,
-`--skip-agent-registration`, `-y`/`--yes` for non-interactive use, and
-custom `--namespace`/`--release`/`--chart`/`--image-tag`.
+`--skip-build`, `--skip-copilot`, `--skip-claude-code`,
+`--skip-agent-registration`, and custom
+`--namespace`/`--release`/`--chart`/`--image-tag`.
 
 > Pass `--values-file <path>` so the upgrade re-merges your original values
 > override file against the chart's current defaults, instead of freezing a
 > historical `--reuse-values` snapshot (which silently drops any default key
 > added to `values.yaml` after your first `helm install`).
 
-## Registering credentials another way
+## Registering credentials
 
-You don't have to go through the script's prompts:
+Workers need a GitHub PAT (`coder-acp-copilot`) and/or an Anthropic API key
+(`coder-acp-claude-code`) to drive their respective CLIs/SDKs. Register
+these yourself, through either:
 
 - The Portal's **Secrets** tab (**Register key**), or a direct
   `POST /api/v1/keys` call against the API, writes straight to Key Vault
