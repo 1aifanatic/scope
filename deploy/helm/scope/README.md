@@ -24,53 +24,28 @@ This README covers phases 2 and 3. For infrastructure, see the
 
 ## Deploy the core app
 
-1. Get the Bicep deployment's outputs:
+1. List deployments in your resource group and pick one:
 
    ```bash
-   az deployment group show \
+   az deployment group list \
      --resource-group <resource-group-name> \
-     --name <deployment-name> \
-     --query properties.outputs -o json
+     --query "[].{name:name, timestamp:properties.timestamp}" -o table
    ```
 
-2. Create a values file from those outputs:
-
-   ```yaml
-   # my-values.yaml
-   azure:
-     tenantId: <tenantId>
-     keyVaultName: <keyVaultName>
-     keyVaultUri: <keyVaultUri>
-     workloadIdentityClientId: <workloadIdentityClientId>
-     serviceAccountName: <workloadIdentityServiceAccountName>
-     storageAccountName: <storageAccountName>
-     redisHostName: <redisHostName>
-
-   api:
-     ingress:
-       enabled: true
-       host: api.example.com
-
-   portal:
-     ingress:
-       enabled: true
-       host: app.example.com
-   ```
-
-3. Install the chart:
+2. Run the install script with both the resource group and the deployment
+   name you chose. It reads that deployment's outputs, generates a values
+   file from them, and installs the chart:
 
    ```bash
-   kubectl create namespace scope
-   helm install scope deploy/helm/scope -n scope -f my-values.yaml
+   ./scripts/bootstrap-core.sh \
+     --resource-group <resource-group-name> \
+     --deployment-name <deployment-name>
    ```
 
-   Images come from `ghcr.io/microsoft` by default. To use your own fork's
-   published images instead, add
-   `--set global.imageRegistry=ghcr.io/<your-fork-owner>`.
+   Run `./scripts/bootstrap-core.sh --help` for all options (custom image
+   registry, reusing an edited values file, etc.).
 
-   Database migrations run automatically as part of the install.
-
-4. Add any bring-your-own secrets (GitHub token, Anthropic API key) that
+3. Add any bring-your-own secrets (GitHub token, Anthropic API key) that
    Bicep doesn't provision. See
    [Bring your own secrets](./CONFIGURATION.md#bring-your-own-secrets) for
    your options.

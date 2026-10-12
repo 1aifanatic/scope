@@ -1,8 +1,10 @@
 # Workers
 
 The ACP coding-agent workers (`coder-acp-copilot`, `coder-acp-claude-code`)
-are disabled by default in this chart — no MCPJungle/AI Gateway/Kubedock
-sidecars are templated yet (see
+are disabled by default in this chart. Each gets an MCPJungle MCP-gateway
+sidecar (`workers.<name>.mcpGateway`, enabled by default — see "MCP-gateway
+sidecar" below); the AI Gateway/DevProxy sidecar and Kubedock are not
+templated yet (see
 [`docs/architecture/kubedock.md`](../../docs/architecture/kubedock.md) for
 the intended production pattern). Bring them online with one command:
 
@@ -34,9 +36,9 @@ custom `--namespace`/`--release`/`--chart`/`--image-tag`.
 
 You don't have to go through the script's prompts:
 
-- The Portal's **Create Token** page, or a direct `POST /api/v1/keys` call
-  against the API, writes straight to Key Vault through token-manager's
-  workload identity. No chart changes needed.
+- The Portal's **Secrets** tab (**Register key**), or a direct
+  `POST /api/v1/keys` call against the API, writes straight to Key Vault
+  through token-manager's workload identity. No chart changes needed.
 - Populating `secrets.keyVaultSecretNames.githubToken`/`.anthropicApiKey` in
   Key Vault yourself also works, as a static fallback — the worker only
   falls back to it when Token Manager has no credential registered.
@@ -50,15 +52,35 @@ ConfigMap/Secret and Key Vault CSI mount the rest of the app uses. The
 script just flips `workers.<name>.enabled: true` and sets
 `workers.<name>.image.registry`/`.tag` with `helm upgrade --set`.
 
-These are minimal background Storage Queue consumers only:
+These are minimal background Storage Queue consumers, plus an MCPJungle
+MCP-gateway sidecar:
 
-- No MCPJungle MCP-gateway sidecar (MCP server support).
 - No AI Gateway/DevProxy sidecar (HAR capture).
 - No Kubedock (in-task `docker build`/`docker run` support — see
   [`docs/architecture/kubedock.md`](../../docs/architecture/kubedock.md)
   for the intended production pattern).
 
-Scenarios needing those features aren't supported by this chart yet.
+Scenarios needing those two features aren't supported by this chart yet.
+
+## MCP-gateway sidecar
+
+Each worker Pod runs an [MCPJungle](https://github.com/mcpjungle/mcpjungle)
+sidecar (`workers.<name>.mcpGateway`, enabled by default) that aggregates
+MCP servers for the worker, mirroring docker-compose's
+`mcp-gateway-copilot`/`mcp-gateway-claude-code` services:
+
+- Templated as a **native sidecar** (`initContainers` entry with
+  `restartPolicy: Always`, GA since Kubernetes 1.29) rather than a regular
+  container, so kubelet starts it first and holds the Pod at `NotReady`
+  until its `/health` readiness probe passes — the worker's first task
+  never races a gateway that isn't listening yet.
+- Shares an `emptyDir` volume mounted at `/workspace` with the worker
+  container (compose's `copilot_workspace`/`claude_workspace` volumes).
+- The worker reaches it at `http://localhost:8080` (same Pod — no
+  `Service` object needed).
+
+Set `workers.<name>.mcpGateway.enabled: false` only if your scenarios never
+configure MCP servers.
 
 ## Agent versions
 

@@ -3,7 +3,10 @@
 #
 # This chart is designed to be deployed against the AKS cluster provisioned by
 # deploy/azure/ (the "Deploy to Azure" Bicep template). Values under `azure:`
-# correspond directly to that template's outputs:
+# correspond directly to that template's outputs. Run
+# scripts/bootstrap-core.sh --resource-group <rg> to generate a values file
+# from those outputs automatically (see README.md "Deploy the core app")
+# instead of transcribing them by hand:
 #
 #   az deployment group show -g <rg> -n <deployment> --query properties.outputs
 #
@@ -15,6 +18,7 @@
 #   azure.tenantId                  <- your Azure AD tenant ID
 #   azure.storageAccountName        <- output storageAccountName
 #   azure.redisHostName             <- output redisHostName
+#   azure.redisPort                 <- output redisPort
 #
 # This repo ships ONE values.yaml with sane open-source defaults. There are no
 # per-environment overlay files in-repo — layer your own `-f my-values.yaml`
@@ -65,13 +69,14 @@ azure:
   # (system:serviceaccount:<namespace>:<serviceAccountName>).
   serviceAccountName: scope-workload-identity
   storageAccountName: ""
-  # Hostname of the Azure Cache for Redis instance (output redisHostName).
-  # Non-secret — goes straight into the common-env ConfigMap as REDIS_HOST.
-  # Azure Cache for Redis only accepts TLS on 6380, so redisPort/redisTls
-  # below are fixed for that output; override only if you point this chart
-  # at a non-Azure Redis (e.g. plain 6379, no TLS).
+  # Hostname of the Azure Managed Redis (redisEnterprise) instance (output
+  # redisHostName). Non-secret — goes straight into the common-env ConfigMap
+  # as REDIS_HOST. Always TLS-only, but the port is per-deployment (the
+  # Bicep template's `output redisPort` varies by SKU/region) — always set
+  # this from that output rather than relying on the default below, which is
+  # only a placeholder.
   redisHostName: ""
-  redisPort: 6380
+  redisPort: 10000
   redisTls: true
 
 # Secret object names as they exist in Key Vault, synced into a single K8s
@@ -82,14 +87,22 @@ azure:
 # an access *key*, not a connection string, so it pairs with
 # `azure.redisHostName`/`redisPort`/`redisTls` above to form the discrete
 # REDIS_HOST/PORT/PASSWORD/TLS env vars every service actually reads). The
-# rest are bring-your-own (add them to the Key Vault before or after install).
+# rest are bring-your-own, and default to "" (skipped — see the comment in
+# templates/secretproviderclass.yaml) because they don't exist in Key Vault
+# yet on a fresh install. The Azure provider fails the *entire* CSI mount if
+# any listed object is missing, which would otherwise block every pod that
+# mounts kv-secrets (api, judge, token-manager, scheduler, report-generator,
+# and the db-migrate hook) — not just the workers that actually need these.
+# Once you've created the Key Vault secrets (see CONFIGURATION.md "Bring
+# your own secrets"), set these to the real object names with `helm upgrade`
+# to start syncing them.
 secrets:
   k8sSecretName: scope-secrets
   keyVaultSecretNames:
     mongoConnectionString: cosmos-connection-string
     redisPassword: redis-primary-key
-    githubToken: github-token
-    anthropicApiKey: anthropic-api-key
+    githubToken: ""
+    anthropicApiKey: ""
 
 # -----------------------------------------------------------------------------
 # Per-service configuration. Each service supports `enabled`, `image`,
@@ -194,12 +207,11 @@ workers:
       limits: { cpu: "500m", memory: 512Mi }
   # ACP coding-agent workers are intentionally disabled by default and kept
   # out of the main `helm install`. They are not published to GHCR (their
-  # images need the Kubedock/MCP-gateway sidecar story in
-  # docs/architecture/kubedock.md, which this chart does not yet template)
-  # and are built/pushed to the Bicep-provisioned ACR as "Phase 3" — see
-  # deploy/helm/scope/README.md. Set `enabled: true` and `image.registry` to
-  # your ACR login server (`az acr build` pushes there) only once you're
-  # ready to deploy them.
+  # images need the Kubedock sidecar story in docs/architecture/kubedock.md,
+  # which this chart does not yet template) and are built/pushed to the
+  # Bicep-provisioned ACR as "Phase 3" — see deploy/helm/scope/README.md.
+  # Set `enabled: true` and `image.registry` to your ACR login server
+  # (`az acr build` pushes there) only once you're ready to deploy them.
   coderAcpCopilot:
     enabled: false
     image:
@@ -220,6 +232,21 @@ workers:
     resources:
       requests: { cpu: 500m, memory: 512Mi }
       limits: { cpu: "1", memory: 1Gi }
+    # MCPJungle sidecar (MCP-server aggregation) — mirrors docker-compose's
+    # mcp-gateway-copilot service. Templated as a native sidecar
+    # (initContainer with restartPolicy: Always, GA since K8s 1.29) so
+    # kubelet holds the Pod at NotReady until the gateway's health check
+    # passes, instead of racing the worker's first task. Disable only if
+    # your scenarios never configure MCP servers.
+    mcpGateway:
+      enabled: true
+      image:
+        registry: ghcr.io
+        repository: mcpjungle/mcpjungle
+        tag: latest-stdio
+      resources:
+        requests: { cpu: 250m, memory: 256Mi }
+        limits: { cpu: "500m", memory: 512Mi }
   coderAcpClaudeCode:
     enabled: false
     image:
@@ -234,6 +261,16 @@ workers:
     resources:
       requests: { cpu: 500m, memory: 512Mi }
       limits: { cpu: "1", memory: 1Gi }
+    # See workers.coderAcpCopilot.mcpGateway above.
+    mcpGateway:
+      enabled: true
+      image:
+        registry: ghcr.io
+        repository: mcpjungle/mcpjungle
+        tag: latest-stdio
+      resources:
+        requests: { cpu: 250m, memory: 256Mi }
+        limits: { cpu: "500m", memory: 512Mi }
 
 jobs:
   dbMigrate:

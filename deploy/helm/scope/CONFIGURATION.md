@@ -3,6 +3,36 @@
 Details on values.yaml conventions and image registries. For the install
 steps, see the [README](./README.md).
 
+## Bring your own secrets
+
+Port-forward the Portal if it isn't already running (see README "Verify"):
+
+```bash
+kubectl -n scope port-forward svc/scope-portal 5100:80
+```
+
+Then, at <http://localhost:5100>:
+
+1. Go to the **Secrets** tab.
+2. Click **Register key**.
+3. Add your GitHub token and Anthropic API key.
+
+> See [Workers](./WORKERS.md#registering-credentials-another-way) for other
+> ways to register these credentials (a raw Key Vault secret, or the API
+> directly).
+
+### GitHub OAuth token for the Copilot worker
+
+The `coder-acp-copilot` worker needs a scopeless GitHub OAuth token (not a
+personal access token). Generate one with:
+
+```bash
+pnpm get-copilot-token
+```
+
+Follow the device-code prompt to approve access, then register the printed
+token as the GitHub secret key in the Portal's **Secrets** tab above.
+
 ## Values conventions
 
 See [`values.yaml`](./values.yaml) for the full set of configurable values.
@@ -37,36 +67,6 @@ helm install scope deploy/helm/scope -n scope \
 The two ACP worker images are different — they're never published to GHCR.
 `scripts/bootstrap-workers.sh` builds and pushes them to the ACR instance
 `deploy/azure/` provisions. See [Workers](./WORKERS.md).
-
-## Bring your own secrets
-
-`deploy/azure/` pre-populates Key Vault with everything the core app
-needs — Cosmos DB connection string, Redis access key, and so on. Two
-secrets are bring-your-own, since they depend on your accounts, not the
-infrastructure:
-
-- `githubToken` (Key Vault secret name: `github-token`)
-- `anthropicApiKey` (Key Vault secret name: `anthropic-api-key`)
-
-The ACP workers (see [Workers](./WORKERS.md)) and the portal's GitHub
-Models fallback read these directly as plain `GITHUB_TOKEN`/
-`ANTHROPIC_API_KEY` env vars. Set them with:
-
-```bash
-az keyvault secret set --vault-name <keyVaultName> --name github-token --value <pat>
-az keyvault secret set --vault-name <keyVaultName> --name anthropic-api-key --value <key>
-```
-
-Then restart the pods that read them, since Key Vault values only sync on
-pod start:
-
-```bash
-kubectl rollout restart deployment -n scope
-```
-
-`scripts/bootstrap-workers.sh` prompts for and registers these credentials
-for you — see [Workers](./WORKERS.md) for that (and a more capable
-alternative through the Token Manager API).
 
 ## Not covered
 

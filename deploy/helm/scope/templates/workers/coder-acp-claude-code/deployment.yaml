@@ -23,18 +23,47 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.workers.coderAcpClaudeCode.mcpGateway.enabled }}
+      # Native sidecar (GA since K8s 1.29): kubelet starts this before the
+      # main container and holds the Pod at NotReady until its readiness
+      # probe passes, so the worker's first task never races an MCP-gateway
+      # that isn't listening yet. Mirrors compose's
+      # mcp-gateway-claude-code `depends_on: service_healthy`.
+      initContainers:
+        - name: mcp-gateway
+          restartPolicy: Always
+          image: {{ include "scope.image" (dict "image" .Values.workers.coderAcpClaudeCode.mcpGateway.image "context" .) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          # Suppress MCPJungle's ASCII-art banner (written to stderr).
+          command: ["/bin/sh", "-c"]
+          args: ["/mcpjungle start 2>&1 | grep --line-buffered -v '[█═╗╚║╔╝]' >&2"]
+          env:
+            - name: SESSION_IDLE_TIMEOUT_SEC
+              value: "0"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 60
+          resources:
+            {{- toYaml .Values.workers.coderAcpClaudeCode.mcpGateway.resources | nindent 12 }}
+      {{- end }}
       containers:
         # Pure background Storage Queue consumer — no HTTP server/port, so
         # no Service or readiness/liveness HTTP probes (see
         # apps/workers/coder-acp-claude-code/src/index.ts).
         #
         # NOT templated here (see docs/architecture/worker-requirements.md
-        # and docs/architecture/kubedock.md): the MCPJungle MCP-gateway
-        # sidecar (MCP server support), the AI Gateway/DevProxy sidecar (HAR
-        # capture), and Kubedock (in-task `docker build`/`docker run`
-        # support). The worker runs without them — scenarios that need MCP
-        # servers or in-task Docker access are not yet supported by this
-        # chart. Follow up once those sidecars have a templated pattern.
+        # and docs/architecture/kubedock.md): the AI Gateway/DevProxy
+        # sidecar (HAR capture) and Kubedock (in-task `docker
+        # build`/`docker run` support). The worker runs without them —
+        # scenarios that need in-task Docker access are not yet supported
+        # by this chart. Follow up once those sidecars have a templated
+        # pattern.
         - name: coder-acp-claude-code
           image: {{ include "scope.image" (dict "image" .Values.workers.coderAcpClaudeCode.image "context" .) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
@@ -49,9 +78,9 @@ spec:
                 # dynamically from Token Manager at runtime (see "Read
                 # credentials via Token Manager" in
                 # docs/architecture/worker-requirements.md) — register one
-                # via the Portal's "Create Token" page or `POST
-                # /api/v1/keys` instead of populating this secret, unless
-                # you specifically want the static-env-var fallback.
+                # via the Portal's **Secrets** tab (**Register key**) or
+                # `POST /api/v1/keys` instead of populating this secret,
+                # unless you specifically want the static-env-var fallback.
                 name: {{ .Values.secrets.k8sSecretName }}
           env:
             - name: WORKER_NAME
@@ -63,10 +92,20 @@ spec:
               value: {{ .Values.workers.coderAcpClaudeCode.agentVersion | quote }}
             - name: QUEUE_NAME
               value: {{ .Values.workers.coderAcpClaudeCode.queueName | quote }}
+            {{- if .Values.workers.coderAcpClaudeCode.mcpGateway.enabled }}
+            # Same Pod, so the sidecar is reachable over loopback — no
+            # Service object needed.
+            - name: MCP_GATEWAY_URL
+              value: http://localhost:8080
+            {{- end }}
           volumeMounts:
             - name: kv-secrets
               mountPath: /mnt/secrets
               readOnly: true
+            {{- if .Values.workers.coderAcpClaudeCode.mcpGateway.enabled }}
+            - name: workspace
+              mountPath: /workspace
+            {{- end }}
           resources:
             {{- toYaml .Values.workers.coderAcpClaudeCode.resources | nindent 12 }}
       volumes:
@@ -76,4 +115,10 @@ spec:
             readOnly: true
             volumeAttributes:
               secretProviderClass: {{ include "scope.componentName" (dict "component" "azure-kv" "context" .) }}
+        {{- if .Values.workers.coderAcpClaudeCode.mcpGateway.enabled }}
+        # Shared with the mcp-gateway sidecar — mirrors compose's
+        # claude_workspace named volume.
+        - name: workspace
+          emptyDir: {}
+        {{- end }}
 {{- end -}}
