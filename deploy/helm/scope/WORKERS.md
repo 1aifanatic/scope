@@ -82,6 +82,30 @@ MCP servers for the worker, mirroring docker-compose's
 Set `workers.<name>.mcpGateway.enabled: false` only if your scenarios never
 configure MCP servers.
 
+## Worker identity isolation
+
+Both ACP workers run benchmark-controlled agent code, so their pods don't
+carry the `azure.workload.identity/use: "true"` label or the `kv-secrets`
+CSI mount the rest of the app uses — no federated Azure AD token or Key
+Vault file tree is exposed to that untrusted execution. They still read
+`MONGO_CONNECTION_STRING`/`REDIS_PASSWORD` via `envFrom.secretRef` (needed to
+claim/lock queue work) and share the common ServiceAccount otherwise.
+
+**Known limitation**: full isolation needs worker code changes this chart
+can't make alone. `coder-acp-copilot`/`coder-acp-claude-code` are a single
+process today — the same container that claims Storage Queue work via Mongo
+and Redis also spawns the benchmark agent subprocess, so the pod can't be
+handed queue credentials without also handing them to the agent's
+environment/filesystem. True separation (a trusted queue-processor process
+with no agent execution, and an executor with zero backend credentials —
+`automountServiceAccountToken: false`, no Mongo/Redis/API-key env) is
+tracked as follow-up work, not part of this chart.
+
+A dedicated worker-scoped managed identity (Storage Blob/Queue only, no Key
+Vault access) is planned on the Bicep side (`deploy/azure/`); once it lands,
+this chart will add a second ServiceAccount for the workers instead of
+reusing the shared one.
+
 ## Agent versions
 
 `workers.coderAcpCopilot.agentVersion`/`.coderAcpClaudeCode.agentVersion`

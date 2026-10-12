@@ -16,7 +16,12 @@ spec:
     metadata:
       labels:
         {{- include "scope.selectorLabels" (dict "component" "coder-acp-copilot" "context" .) | nindent 8 }}
-        azure.workload.identity/use: "true"
+        # No azure.workload.identity/use label: this pod runs
+        # benchmark-controlled agent code and must not receive a federated
+        # Azure AD token (see deploy/helm/scope/WORKERS.md "Worker identity
+        # isolation"). It still runs under the shared ServiceAccount below,
+        # but without the label the workload-identity webhook never injects
+        # a token into it.
     spec:
       serviceAccountName: {{ include "scope.serviceAccountName" . }}
       {{- with .Values.global.imagePullSecrets }}
@@ -97,27 +102,19 @@ spec:
             - name: MCP_GATEWAY_URL
               value: http://localhost:8080
             {{- end }}
+          {{- if .Values.workers.coderAcpCopilot.mcpGateway.enabled }}
           volumeMounts:
-            - name: kv-secrets
-              mountPath: /mnt/secrets
-              readOnly: true
-            {{- if .Values.workers.coderAcpCopilot.mcpGateway.enabled }}
             - name: workspace
               mountPath: /workspace
-            {{- end }}
+          {{- end }}
           resources:
             {{- toYaml .Values.workers.coderAcpCopilot.resources | nindent 12 }}
+      {{- if .Values.workers.coderAcpCopilot.mcpGateway.enabled }}
       volumes:
-        - name: kv-secrets
-          csi:
-            driver: secrets-store.csi.k8s.io
-            readOnly: true
-            volumeAttributes:
-              secretProviderClass: {{ include "scope.componentName" (dict "component" "azure-kv" "context" .) }}
-        {{- if .Values.workers.coderAcpCopilot.mcpGateway.enabled }}
         # Shared with the mcp-gateway sidecar — mirrors compose's
-        # copilot_workspace named volume.
+        # copilot_workspace named volume. No kv-secrets CSI volume here:
+        # see the identity note above.
         - name: workspace
           emptyDir: {}
-        {{- end }}
+      {{- end }}
 {{- end -}}
