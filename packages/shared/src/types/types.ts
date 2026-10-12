@@ -534,13 +534,14 @@ export interface RunState {
     podName?: string;
   };
   harUrl?: string;
+  taxonomyUrl?: string;
   videoUrls?: string[];
   setupVideoUrls?: string[];
   tokenUsage?: TokenUsage;
   aiCallCount?: number;
   rawChatUrl?: string;
   rawChatFormat?: string;
-  /** Per-handler post-processing status. Keys are handler IDs (e.g. "pp-atif"). */
+  /** Per-handler post-processing status. Keys are handler IDs (e.g. "pp-atif", "pp-taxonomy"). */
   handlerStatus?: Record<string, HandlerRunStatus>;
   /** Whole-run observation results — one entry per selected `subject:"run"`
    *  observation criterion, evaluated once against the final snapshot + the
@@ -709,6 +710,7 @@ export const RUN_STATE_FIELD_NAMES = [
   "lastHeartbeatAt",
   "worker",
   "harUrl",
+  "taxonomyUrl",
   "videoUrls",
   "setupVideoUrls",
   "tokenUsage",
