@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "8576521609879066734"
+      "templateHash": "13111110786885084183"
     }
   },
   "parameters": {
@@ -19837,7 +19837,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "6067630453949842112"
+              "templateHash": "6761583715004502794"
             }
           },
           "parameters": {
@@ -19897,7 +19897,7 @@
             }
           },
           "variables": {
-            "privateDnsZoneName": "privatelink.redisenterprise.cache.azure.net"
+            "privateDnsZoneName": "privatelink.redis.azure.net"
           },
           "resources": {
             "privateDnsZone": {

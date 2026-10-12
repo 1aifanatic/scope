@@ -37,9 +37,16 @@ param skuName string = 'Balanced_B1'
 @description('Principal (object) ID of the workload identity to grant Microsoft Entra ID (Azure AD) data-plane access to the default Redis database, via an access policy assignment. Leave empty to skip the assignment.')
 param workloadIdentityPrincipalId string = ''
 
-// Private DNS zone name used for Azure Managed Redis (Redis Enterprise) private endpoints. This is
-// a different zone than classic Azure Cache for Redis (privatelink.redis.cache.windows.net).
-var privateDnsZoneName = 'privatelink.redisenterprise.cache.azure.net'
+// Private DNS zone name used for Azure Managed Redis private endpoints. Despite both sharing the
+// same underlying resource type (Microsoft.Cache/RedisEnterprise) and private-endpoint subresource
+// (redisEnterprise), Azure Managed Redis (the "Balanced"/"ComputeOptimized"/etc. SKUs used here)
+// publishes its hostname under privatelink.redis.azure.net - NOT
+// privatelink.redisenterprise.cache.azure.net, which is the zone for the older "Redis Enterprise"
+// product branding (Enterprise/EnterpriseFlash SKUs). Using the wrong zone leaves it with no
+// matching record set, so DNS falls through to the public (and thus unreachable, since
+// publicNetworkAccess is Disabled) address. See
+// https://learn.microsoft.com/azure/private-link/private-endpoint-dns for the authoritative table.
+var privateDnsZoneName = 'privatelink.redis.azure.net'
 
 module privateDnsZone 'br/public:avm/res/network/private-dns-zone:0.7.0' = {
   name: 'redis-private-dns-zone-${uniqueString(redisName)}'
