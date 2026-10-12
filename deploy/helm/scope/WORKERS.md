@@ -48,8 +48,10 @@ You don't have to go through the script's prompts:
 Each worker's Deployment is templated by this chart
 (`templates/workers/coder-acp-copilot/`,
 `templates/workers/coder-acp-claude-code/`), reusing the common env
-ConfigMap/Secret and Key Vault CSI mount the rest of the app uses. The
-script just flips `workers.<name>.enabled: true` and sets
+ConfigMap/Secret the rest of the app uses, but under their own
+narrower-identity ServiceAccount (see "Worker identity isolation" below —
+no Key Vault CSI mount). The script just flips
+`workers.<name>.enabled: true` and sets
 `workers.<name>.image.registry`/`.tag` with `helm upgrade --set`.
 
 These are minimal background Storage Queue consumers, plus an MCPJungle
@@ -84,12 +86,21 @@ configure MCP servers.
 
 ## Worker identity isolation
 
-Both ACP workers run benchmark-controlled agent code, so their pods don't
-carry the `azure.workload.identity/use: "true"` label or the `kv-secrets`
-CSI mount the rest of the app uses — no federated Azure AD token or Key
-Vault file tree is exposed to that untrusted execution. They still read
-`MONGO_CONNECTION_STRING`/`REDIS_PASSWORD` via `envFrom.secretRef` (needed to
-claim/lock queue work) and share the common ServiceAccount otherwise.
+Both ACP workers run benchmark-controlled agent code, so they get a
+separate, narrower `ServiceAccount`/identity than the rest of the app:
+`azure.workerWorkloadIdentityClientId`/`azure.workerServiceAccountName`
+(Storage Blob/Queue only — no Key Vault access), instead of the shared
+identity's Key Vault Secrets Officer role. Their pods also don't mount the
+`kv-secrets` CSI volume. They still read `GITHUB_TOKEN`/`ANTHROPIC_API_KEY`
+fallback values and `MONGO_CONNECTION_STRING`/`REDIS_PASSWORD` (needed to
+claim/lock queue work) via `envFrom.secretRef` on the common K8s Secret —
+that secret is synced by the `api` pod's own CSI mount, so the workers don't
+need their own mount to receive it.
+
+`scripts/generate-values-from-bicep.sh` picks up the worker identity's
+outputs automatically if your Bicep deployment provisioned one; otherwise
+those two values stay blank and are only required once you set
+`workers.<name>.enabled: true`.
 
 **Known limitation**: full isolation needs worker code changes this chart
 can't make alone. `coder-acp-copilot`/`coder-acp-claude-code` are a single
@@ -100,11 +111,6 @@ environment/filesystem. True separation (a trusted queue-processor process
 with no agent execution, and an executor with zero backend credentials —
 `automountServiceAccountToken: false`, no Mongo/Redis/API-key env) is
 tracked as follow-up work, not part of this chart.
-
-A dedicated worker-scoped managed identity (Storage Blob/Queue only, no Key
-Vault access) is planned on the Bicep side (`deploy/azure/`); once it lands,
-this chart will add a second ServiceAccount for the workers instead of
-reusing the shared one.
 
 ## Agent versions
 

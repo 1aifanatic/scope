@@ -65,3 +65,12 @@ template's federated subject.
 {{- define "scope.serviceAccountName" -}}
 {{- .Values.azure.serviceAccountName -}}
 {{- end -}}
+
+{{/*
+Name of the worker-scoped workload-identity ServiceAccount (ACP workers
+only). Narrower identity than scope.serviceAccountName — see WORKERS.md
+"Worker identity isolation".
+*/}}
+{{- define "scope.workerServiceAccountName" -}}
+{{- .Values.azure.workerServiceAccountName -}}
+{{- end -}}

@@ -4,21 +4,28 @@
 # This chart is designed to be deployed against the AKS cluster provisioned by
 # deploy/azure/ (the "Deploy to Azure" Bicep template). Values under `azure:`
 # correspond directly to that template's outputs. Run
-# scripts/bootstrap-core.sh --resource-group <rg> to generate a values file
-# from those outputs automatically (see README.md "Deploy the core app")
-# instead of transcribing them by hand:
+# scripts/generate-values-from-bicep.sh --resource-group <rg> to generate a
+# values file from those outputs automatically (see README.md "Deploy the
+# core app") instead of transcribing them by hand:
 #
 #   az deployment group show -g <rg> -n <deployment> --query properties.outputs
 #
-#   azure.acrLoginServer            <- output acrLoginServer
-#   azure.keyVaultName              <- output keyVaultName
-#   azure.keyVaultUri               <- output keyVaultUri
-#   azure.workloadIdentityClientId  <- output workloadIdentityClientId
-#   azure.serviceAccountName        <- output workloadIdentityServiceAccountName
-#   azure.tenantId                  <- your Azure AD tenant ID
-#   azure.storageAccountName        <- output storageAccountName
-#   azure.redisHostName             <- output redisHostName
-#   azure.redisPort                 <- output redisPort
+#   azure.acrLoginServer                  <- output acrLoginServer
+#   azure.keyVaultName                    <- output keyVaultName
+#   azure.keyVaultUri                     <- output keyVaultUri
+#   azure.workloadIdentityClientId        <- output workloadIdentityClientId
+#   azure.serviceAccountName              <- output workloadIdentityServiceAccountName
+#   azure.tenantId                        <- your Azure AD tenant ID
+#   azure.storageAccountName              <- output storageAccountName
+#   azure.redisHostName                   <- output redisHostName
+#   azure.redisPort                       <- output redisPort
+#   azure.workerWorkloadIdentityClientId  <- output workerWorkloadIdentityClientId
+#   azure.workerServiceAccountName        <- output workerWorkloadIdentityServiceAccountName
+#
+# The last two are only needed if you plan to bring the ACP workers online
+# (see WORKERS.md) — they're a separate, narrower identity (Storage Blob/Queue
+# only) than the shared one above, so untrusted benchmark agent code running
+# in the worker pods never gets the backend's Key Vault access.
 #
 # This repo ships ONE values.yaml with sane open-source defaults. There are no
 # per-environment overlay files in-repo — layer your own `-f my-values.yaml`
@@ -78,6 +85,16 @@ azure:
   redisHostName: ""
   redisPort: 10000
   redisTls: true
+  # Client ID of the worker-scoped managed identity (Storage Blob/Queue only
+  # — no Key Vault access), federated to the ServiceAccount below. Only
+  # needed if you bring the ACP workers online (see WORKERS.md); leave blank
+  # otherwise. Kept separate from workloadIdentityClientId above so
+  # benchmark-controlled agent code running in the worker pods never gets
+  # the backend's Key Vault access.
+  workerWorkloadIdentityClientId: ""
+  # Must exactly match the Bicep's federated subject
+  # (system:serviceaccount:<namespace>:<workerServiceAccountName>).
+  workerServiceAccountName: scope-worker-workload-identity
 
 # Secret object names as they exist in Key Vault, synced into a single K8s
 # Secret (named by `secrets.k8sSecretName`) via the Secrets Store CSI

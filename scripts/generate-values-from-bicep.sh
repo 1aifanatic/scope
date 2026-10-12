@@ -35,6 +35,14 @@
 #   --force                  Overwrite --values-file if it already exists.
 #   -h, --help                Show this help.
 #
+# If the deployment also has worker-identity outputs
+# (workerWorkloadIdentityClientId/workerWorkloadIdentityServiceAccountName —
+# only present if you provisioned the ACP worker identity), those are
+# written too. Missing is not an error: older deployments, or ones that
+# never provisioned worker identity, just won't get the worker.* keys, and
+# the chart falls back to its defaults (empty client ID, required only once
+# you enable a worker — see WORKERS.md).
+#
 # Requires: az (logged in, correct subscription active), jq.
 set -euo pipefail
 
@@ -108,6 +116,10 @@ SERVICE_ACCOUNT_NAME="$(get_output workloadIdentityServiceAccountName)"
 STORAGE_ACCOUNT_NAME="$(get_output storageAccountName)"
 REDIS_HOST_NAME="$(get_output redisHostName)"
 REDIS_PORT="$(get_output redisPort)"
+# Optional: only present if the Bicep deployment provisioned the ACP worker
+# identity. Not required below — see WORKERS.md.
+WORKER_WORKLOAD_IDENTITY_CLIENT_ID="$(get_output workerWorkloadIdentityClientId)"
+WORKER_SERVICE_ACCOUNT_NAME="$(get_output workerWorkloadIdentityServiceAccountName)"
 
 for pair in \
   "tenantId:$TENANT_ID" \
@@ -126,6 +138,10 @@ do
     exit 1
   fi
 done
+
+if [[ -z "$WORKER_WORKLOAD_IDENTITY_CLIENT_ID" || -z "$WORKER_SERVICE_ACCOUNT_NAME" ]]; then
+  echo "    Note: worker-identity outputs not found on this deployment — skipping worker.* values. Bring the ACP workers online only after re-provisioning with that identity (see WORKERS.md)."
+fi
 
 echo "==> Writing $VALUES_FILE"
 {
@@ -147,6 +163,12 @@ azure:
   redisHostName: $REDIS_HOST_NAME
   redisPort: $REDIS_PORT
 EOF
+  if [[ -n "$WORKER_WORKLOAD_IDENTITY_CLIENT_ID" && -n "$WORKER_SERVICE_ACCOUNT_NAME" ]]; then
+    cat <<EOF
+  workerWorkloadIdentityClientId: $WORKER_WORKLOAD_IDENTITY_CLIENT_ID
+  workerServiceAccountName: $WORKER_SERVICE_ACCOUNT_NAME
+EOF
+  fi
 } > "$VALUES_FILE"
 
 echo "    Done. Review/edit $VALUES_FILE (e.g. to add ingress hosts), then install"

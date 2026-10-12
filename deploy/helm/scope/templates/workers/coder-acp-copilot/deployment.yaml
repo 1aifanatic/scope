@@ -16,14 +16,13 @@ spec:
     metadata:
       labels:
         {{- include "scope.selectorLabels" (dict "component" "coder-acp-copilot" "context" .) | nindent 8 }}
-        # No azure.workload.identity/use label: this pod runs
-        # benchmark-controlled agent code and must not receive a federated
-        # Azure AD token (see deploy/helm/scope/WORKERS.md "Worker identity
-        # isolation"). It still runs under the shared ServiceAccount below,
-        # but without the label the workload-identity webhook never injects
-        # a token into it.
+        azure.workload.identity/use: "true"
     spec:
-      serviceAccountName: {{ include "scope.serviceAccountName" . }}
+      # Worker-scoped identity (Storage Blob/Queue only — no Key Vault
+      # access), not the shared backend ServiceAccount: this pod runs
+      # benchmark-controlled agent code and must not be able to reach Key
+      # Vault. See WORKERS.md "Worker identity isolation".
+      serviceAccountName: {{ include "scope.workerServiceAccountName" . }}
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
