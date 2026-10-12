@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "1366099054351553030"
+      "templateHash": "2216822959330778497"
     }
   },
   "parameters": {
@@ -155,7 +155,7 @@
       "type": "string",
       "defaultValue": "scope",
       "metadata": {
-        "description": "Kubernetes namespace of the service account used by ACP worker pods, which get a separate, lower-privilege workload identity (Storage data-plane access, plus read-only Key Vault access) since they run benchmark-controlled agent code."
+        "description": "Kubernetes namespace of the service account used by ACP worker pods, which get a separate, lower-privilege workload identity (Storage data-plane only, no Key Vault access) since they run benchmark-controlled agent code."
       }
     },
     "workerWorkloadIdentityServiceAccountName": {
@@ -4191,11 +4191,6 @@
           },
           "workloadIdentityPrincipalId": {
             "value": "[reference('workloadIdentity').outputs.principalId.value]"
-          },
-          "readOnlyPrincipalIds": {
-            "value": [
-              "[reference('workerWorkloadIdentity').outputs.principalId.value]"
-            ]
           }
         },
         "template": {
@@ -4205,7 +4200,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "5447758401413439380"
+              "templateHash": "4122482736894456130"
             }
           },
           "parameters": {
@@ -4249,13 +4244,6 @@
                 "description": "Principal (object) ID of the workload identity to grant secrets read/write access to. Leave empty to skip the role assignment."
               }
             },
-            "readOnlyPrincipalIds": {
-              "type": "array",
-              "defaultValue": [],
-              "metadata": {
-                "description": "Principal (object) IDs of additional identities to grant READ-ONLY secrets access to (e.g. a worker identity that needs to mount its own BYO credentials via the CSI Secrets Store driver, but must not be able to write/delete vault contents). Leave empty to skip these role assignments."
-              }
-            },
             "skuName": {
               "type": "string",
               "defaultValue": "standard",
@@ -4276,20 +4264,7 @@
             }
           },
           "variables": {
-            "copy": [
-              {
-                "name": "readOnlyRoleAssignments",
-                "count": "[length(filter(parameters('readOnlyPrincipalIds'), lambda('id', not(empty(lambdaVariables('id'))))))]",
-                "input": {
-                  "principalId": "[filter(parameters('readOnlyPrincipalIds'), lambda('id', not(empty(lambdaVariables('id')))))[copyIndex('readOnlyRoleAssignments')]]",
-                  "roleDefinitionIdOrName": "[variables('keyVaultSecretsUserRoleDefinitionId')]",
-                  "principalType": "ServicePrincipal"
-                }
-              }
-            ],
-            "keyVaultSecretsOfficerRoleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')]",
-            "keyVaultSecretsUserRoleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
-            "officerRoleAssignments": "[if(not(empty(parameters('workloadIdentityPrincipalId'))), createArray(createObject('principalId', parameters('workloadIdentityPrincipalId'), 'roleDefinitionIdOrName', variables('keyVaultSecretsOfficerRoleDefinitionId'), 'principalType', 'ServicePrincipal')), createArray())]"
+            "keyVaultSecretsOfficerRoleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')]"
           },
           "resources": [
             {
@@ -7386,9 +7361,7 @@
                       }
                     ]
                   },
-                  "roleAssignments": {
-                    "value": "[concat(variables('officerRoleAssignments'), variables('readOnlyRoleAssignments'))]"
-                  }
+                  "roleAssignments": "[if(not(empty(parameters('workloadIdentityPrincipalId'))), createObject('value', createArray(createObject('principalId', parameters('workloadIdentityPrincipalId'), 'roleDefinitionIdOrName', variables('keyVaultSecretsOfficerRoleDefinitionId'), 'principalType', 'ServicePrincipal'))), createObject('value', createArray()))]"
                 },
                 "template": {
                   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
@@ -10591,7 +10564,6 @@
       },
       "dependsOn": [
         "networking",
-        "workerWorkloadIdentity",
         "workloadIdentity"
       ]
     },
@@ -41788,7 +41760,7 @@
     "workerWorkloadIdentityClientId": {
       "type": "string",
       "metadata": {
-        "description": "Client ID of the worker workload identity. Annotate the ACP worker Kubernetes service account (`azure.workload.identity/client-id`) with this value. This identity has Storage data-plane access plus read-only Key Vault access (no write/delete) - since workers run benchmark-controlled agent code."
+        "description": "Client ID of the worker workload identity. Annotate the ACP worker Kubernetes service account (`azure.workload.identity/client-id`) with this value. This identity has Storage data-plane access only - no Key Vault access - since workers run benchmark-controlled agent code."
       },
       "value": "[reference('workerWorkloadIdentity').outputs.clientId.value]"
     },

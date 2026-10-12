@@ -93,7 +93,7 @@ param workloadIdentityServiceAccountNamespace string = 'scope'
 @description('Name of the Kubernetes service account that will use workload identity to access Azure resources.')
 param workloadIdentityServiceAccountName string = 'scope-workload-identity'
 
-@description('Kubernetes namespace of the service account used by ACP worker pods, which get a separate, lower-privilege workload identity (Storage data-plane access, plus read-only Key Vault access) since they run benchmark-controlled agent code.')
+@description('Kubernetes namespace of the service account used by ACP worker pods, which get a separate, lower-privilege workload identity (Storage data-plane only, no Key Vault access) since they run benchmark-controlled agent code.')
 param workerWorkloadIdentityServiceAccountNamespace string = 'scope'
 
 @description('Name of the Kubernetes service account used by ACP worker pods.')
@@ -161,13 +161,12 @@ module workloadIdentity 'br/public:avm/res/managed-identity/user-assigned-identi
 // Managed Identity for ACP worker pods only. Workers execute
 // benchmark-controlled agent code in the same container as this identity, so
 // unlike the shared identity above, it is granted ONLY Storage Blob/Queue
-// data-plane roles (see the `storage` module below) and READ-ONLY Key Vault
-// access (`Key Vault Secrets User`, see the `keyVault` module below) - never
-// `Key Vault Secrets Officer`. Worker pods need Key Vault read access because
-// the Secrets Store CSI driver mounts their own BYO credentials
-// (GitHub/Anthropic keys) that way, but a compromised/malicious agent run
-// under this identity can never write, delete, or tamper with vault
-// contents.
+// data-plane roles (see the `storage` module below) and NEVER Key Vault
+// access - worker pods get their BYO credentials (GitHub/Anthropic keys) via
+// a plain Kubernetes Secret populated from the backend identity's CSI mount
+// (see the Helm chart), so they never call Key Vault directly. A
+// compromised/malicious agent run under this identity cannot read or write
+// secrets.
 // ---------------------------------------------------------------------------
 module workerWorkloadIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.0' = {
   name: 'worker-workload-identity'
@@ -189,11 +188,9 @@ module workerWorkloadIdentity 'br/public:avm/res/managed-identity/user-assigned-
 }
 
 // ---------------------------------------------------------------------------
-// Key Vault: RBAC-authorized, private endpoint, backend workload identity
-// granted read/write access to secrets; worker workload identity granted
-// read-only access (it needs to mount its own BYO credentials via the CSI
-// Secrets Store driver, but must not be able to write/delete vault contents
-// since it runs benchmark-controlled agent code).
+// Key Vault: RBAC-authorized, private endpoint, workload identity granted
+// read/write access to secrets. The worker identity is deliberately NOT
+// wired in here - see the `workerWorkloadIdentity` module above.
 // ---------------------------------------------------------------------------
 module keyVault 'modules/keyvault.bicep' = {
   name: 'keyvault'
@@ -204,9 +201,6 @@ module keyVault 'modules/keyvault.bicep' = {
     vnetResourceId: networking.outputs.vnetResourceId
     privateEndpointSubnetResourceId: networking.outputs.privateEndpointSubnetResourceId
     workloadIdentityPrincipalId: workloadIdentity.outputs.principalId
-    readOnlyPrincipalIds: [
-      workerWorkloadIdentity.outputs.principalId
-    ]
   }
 }
 
@@ -396,7 +390,7 @@ output workloadIdentityServiceAccountNamespace string = workloadIdentityServiceA
 @description('Kubernetes service account name expected for the workload identity federated credential subject.')
 output workloadIdentityServiceAccountName string = workloadIdentityServiceAccountName
 
-@description('Client ID of the worker workload identity. Annotate the ACP worker Kubernetes service account (`azure.workload.identity/client-id`) with this value. This identity has Storage data-plane access plus read-only Key Vault access (no write/delete) - since workers run benchmark-controlled agent code.')
+@description('Client ID of the worker workload identity. Annotate the ACP worker Kubernetes service account (`azure.workload.identity/client-id`) with this value. This identity has Storage data-plane access only - no Key Vault access - since workers run benchmark-controlled agent code.')
 output workerWorkloadIdentityClientId string = workerWorkloadIdentity.outputs.clientId
 
 @description('Kubernetes namespace expected for the worker workload identity federated credential subject.')
