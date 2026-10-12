@@ -59,6 +59,29 @@ is unset, and to a bare (unregistered) name when no registry applies at all.
 {{- end -}}
 
 {{/*
+The db-migrate Job's image tag. GHCR only publishes the api Dockerfile's
+"builder" stage as "builder" (latest) and "builder-<sha>" — never a bare
+<sha> or "latest" tag (see .github/workflows/publish-images.yml) — so this
+can't reuse "scope.image"'s plain default-to-global.imageTag fallback.
+`jobs.dbMigrate.image.tag` (empty by default) wins if explicitly set;
+otherwise this derives "builder-<global.imageTag>" from whatever revision
+the rest of the app is pinned to via `global.imageTag`, falling back to the
+mutable "builder" tag when `global.imageTag` is still the default "latest"
+(matching the one `latest`-equivalent tag GHCR actually publishes). This
+keeps migrations and the application on the same revision when
+`global.imageTag` is pinned to a commit SHA.
+*/}}
+{{- define "scope.dbMigrateTag" -}}
+{{- if .Values.jobs.dbMigrate.image.tag -}}
+{{- .Values.jobs.dbMigrate.image.tag -}}
+{{- else if or (not .Values.global.imageTag) (eq .Values.global.imageTag "latest") -}}
+{{- "builder" -}}
+{{- else -}}
+{{- printf "builder-%s" .Values.global.imageTag -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Name of the shared workload-identity ServiceAccount. Must match the Bicep
 template's federated subject.
 */}}

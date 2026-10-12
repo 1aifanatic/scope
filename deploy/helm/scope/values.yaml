@@ -298,9 +298,14 @@ jobs:
       # directly via tsx; the production `scope-api:latest` image only ships
       # compiled dist/ for db-migrations (no src/, no tsx), so this job must
       # run against the Dockerfile's `builder` stage instead. The GHCR
-      # publish workflow pushes that stage as a distinct `:builder` tag of
-      # the same scope-api image.
-      tag: "builder"
+      # publish workflow pushes that stage as "builder" (mutable) and
+      # "builder-<sha>" (immutable) variants of the same scope-api image.
+      # Left empty so `scope.dbMigrateTag` (templates/_helpers.tpl) derives
+      # "builder-<global.imageTag>" automatically when you pin
+      # `global.imageTag` to a commit SHA, keeping migrations on the same
+      # revision as the rest of the app — set this explicitly only to
+      # override that derivation.
+      tag: ""
   # NOT YET IMPLEMENTED as a chart template. Registering the ACP
   # coding-agent types (scripts/register-agent.sh + each worker's
   # agent.yaml) only matters once those workers are actually deployed —
