@@ -54,12 +54,6 @@
     },
     "workloadIdentityServiceAccountName": {
       "value": "scope-workload-identity"
-    },
-    "workerWorkloadIdentityServiceAccountNamespace": {
-      "value": "scope"
-    },
-    "workerWorkloadIdentityServiceAccountName": {
-      "value": "scope-worker-workload-identity"
     }
   }
 }

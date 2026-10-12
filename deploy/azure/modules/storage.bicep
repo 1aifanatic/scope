@@ -24,9 +24,6 @@ param skuName string = 'Standard_LRS'
 @description('Principal (object) ID of the workload identity to grant blob/queue data-plane access. Leave empty to skip the role assignments.')
 param workloadIdentityPrincipalId string = ''
 
-@description('Principal (object) ID of a second (e.g. worker) workload identity to grant the same blob/queue data-plane access. Leave empty to skip the role assignments.')
-param workerWorkloadIdentityPrincipalId string = ''
-
 // This storage account is used for blob and queue workloads only (no file shares, no tables).
 // NOTE on shared-key access: the AVM module exposes `allowSharedKeyAccess` and cleanly supports
 // disabling it alongside RBAC-based access (`defaultToOAuthAuthentication: true`), so we disable
@@ -37,19 +34,8 @@ var blobPrivateDnsZoneName = 'privatelink.blob.core.windows.net'
 #disable-next-line no-hardcoded-env-urls // Azure Public Cloud zone name; see AVM private-dns-zone module docs for multi-cloud variants.
 var queuePrivateDnsZoneName = 'privatelink.queue.core.windows.net'
 
-// Both the shared (backend) and worker workload identities need the same Storage data-plane
-// roles - only Key Vault access differs between them (see keyvault.bicep, which the worker
-// identity is never wired into). Build one role assignment entry per role per non-empty
-// principal ID.
-var storageWorkloadIdentityPrincipalIds = filter(
-  [workloadIdentityPrincipalId, workerWorkloadIdentityPrincipalId],
-  principalId => !empty(principalId)
-)
-
-var workloadIdentityRoleAssignments = flatten(
-  map(
-    storageWorkloadIdentityPrincipalIds,
-    principalId => [
+var workloadIdentityRoleAssignments = !empty(workloadIdentityPrincipalId)
+  ? [
       {
         // Blob Data Owner (not just Contributor) is required because the app sets Blob Index
         // Tags (requestId/runId/iteration) on per-iteration workspace snapshot uploads via the
@@ -57,17 +43,16 @@ var workloadIdentityRoleAssignments = flatten(
         // Microsoft.Storage/storageAccounts/blobServices/containers/blobs/tags/write, so tagged
         // uploads 403 with AuthorizationPermissionMismatch under Contributor alone.
         roleDefinitionIdOrName: 'Storage Blob Data Owner'
-        principalId: principalId
+        principalId: workloadIdentityPrincipalId
         principalType: 'ServicePrincipal'
       }
       {
         roleDefinitionIdOrName: 'Storage Queue Data Contributor'
-        principalId: principalId
+        principalId: workloadIdentityPrincipalId
         principalType: 'ServicePrincipal'
       }
     ]
-  )
-)
+  : []
 
 module blobPrivateDnsZone 'br/public:avm/res/network/private-dns-zone:0.7.0' = {
   name: 'blob-private-dns-zone'
