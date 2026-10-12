@@ -19,10 +19,13 @@ below and is also usable standalone via the Azure CLI.
   Overlay with the Cilium network dataplane/policy, an OIDC issuer, Workload Identity,
   and the native **Azure Key Vault Secrets Provider** add-on enabled (this is how
   secrets get into the cluster — via a Helm install, not GitOps/Flux).
-- **Key Vault**: RBAC-authorized, private endpoint only, with a generated workload
+- **Key Vault**: RBAC-authorized, private endpoint only, with the backend workload
   identity granted `Key Vault Secrets Officer` access (read/write/delete on secrets,
   not just read) — the app's Token Manager service writes BYO credentials into the
-  vault at runtime via this same identity, so read-only access isn't sufficient.
+  vault at runtime via this same identity, so read-only access isn't sufficient —
+  and the worker identity (see below) granted the read-only `Key Vault Secrets User`
+  role, since worker pods mount their own BYO credentials (GitHub/Anthropic keys) via
+  the CSI Secrets Store driver but must never be able to write/delete vault contents.
 - **Azure Container Registry**: admin user disabled; the AKS kubelet identity is
   granted `AcrPull` so nodes can pull the worker image (which cannot be hosted on
   GHCR for private use).
@@ -30,12 +33,26 @@ below and is also usable standalone via the Azure CLI.
 - **Azure Managed Redis**: private endpoint only, with Microsoft Entra ID
   (Azure AD) authentication enabled; an access key is also provisioned as a
   compatibility fallback for clients that don't yet support Entra ID auth.
-- **Storage account**: blob and queue services only, private endpoints only, with the
-  workload identity granted `Storage Blob Data Owner` (not just Contributor — the app
-  sets Blob Index Tags on snapshot uploads, which Contributor's data actions don't
-  permit) and `Storage Queue Data Contributor`.
-- A **user-assigned managed identity** federated with the AKS OIDC issuer, for use as
-  the Kubernetes workload identity.
+- **Storage account**: blob and queue services only, private endpoints only, with
+  **both** workload identities (backend and worker — see below) granted
+  `Storage Blob Data Owner` (not just Contributor — the app sets Blob Index Tags on
+  snapshot uploads, which Contributor's data actions don't permit) and
+  `Storage Queue Data Contributor`.
+- **Two user-assigned managed identities**, each federated with the AKS OIDC issuer
+  for use as Kubernetes workload identities:
+  - A **backend identity** (`scope-workload-identity` by default) for trusted
+    components (api, Token Manager, scheduler, etc.) — granted Key Vault,
+    Redis, and Storage data-plane access.
+  - A **worker identity** (`scope-worker-workload-identity` by default) for ACP
+    worker pods only — granted **Storage data-plane access** plus **read-only**
+    Key Vault access (`Key Vault Secrets User`). ACP workers execute
+    benchmark-controlled/untrusted agent code, so this identity deliberately
+    cannot write, delete, or otherwise tamper with vault contents. Note this
+    role is vault-scoped (not per-secret): a compromised worker could still
+    *read* any secret in the vault via the Key Vault SDK, not just the ones its
+    Secrets Store CSI mount pulls in. If your deployment stores
+    highly-sensitive secrets the worker identity should never see, grant
+    narrower, per-secret RBAC assignments after deployment.
 
 ## What this does **NOT** automate
 
