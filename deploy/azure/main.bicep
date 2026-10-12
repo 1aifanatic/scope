@@ -93,6 +93,12 @@ param workloadIdentityServiceAccountNamespace string = 'scope'
 @description('Name of the Kubernetes service account that will use workload identity to access Azure resources.')
 param workloadIdentityServiceAccountName string = 'scope-workload-identity'
 
+@description('Kubernetes namespace of the service account used by ACP worker pods, which get a separate, lower-privilege workload identity (Storage data-plane only, no Key Vault access) since they run benchmark-controlled agent code.')
+param workerWorkloadIdentityServiceAccountNamespace string = 'scope'
+
+@description('Name of the Kubernetes service account used by ACP worker pods.')
+param workerWorkloadIdentityServiceAccountName string = 'scope-worker-workload-identity'
+
 // Deterministic, globally-unique-ish suffix for resources that require
 // globally unique names (Key Vault, ACR, storage account, Cosmos DB, Redis).
 var resourceToken = uniqueString(resourceGroup().id, environmentName)
@@ -105,6 +111,7 @@ var cosmosAccountName = take('cosmos-${environmentName}-${resourceToken}', 44)
 var redisName = take('redis-${environmentName}-${resourceToken}', 60)
 var storageAccountName = take(replace('st${environmentName}${resourceToken}', '-', ''), 24)
 var workloadIdentityName = 'id-${environmentName}-${resourceToken}'
+var workerWorkloadIdentityName = 'id-worker-${environmentName}-${resourceToken}'
 
 // Built-in role definition IDs used for cross-module role assignments.
 var acrPullRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
@@ -141,6 +148,34 @@ module workloadIdentity 'br/public:avm/res/managed-identity/user-assigned-identi
         name: 'scope-workload-identity-federation'
         issuer: aks.outputs.oidcIssuerUrl
         subject: 'system:serviceaccount:${workloadIdentityServiceAccountNamespace}:${workloadIdentityServiceAccountName}'
+        audiences: [
+          'api://AzureADTokenExchange'
+        ]
+      }
+    ]
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Worker workload identity: a separate, lower-privilege User Assigned
+// Managed Identity for ACP worker pods only. Workers execute
+// benchmark-controlled agent code in the same container as this identity, so
+// unlike the shared identity above, it is granted ONLY Storage Blob/Queue
+// data-plane roles (see the `storage` module below) and NEVER Key Vault
+// access - a compromised/malicious agent run under this identity cannot read
+// or write secrets.
+// ---------------------------------------------------------------------------
+module workerWorkloadIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.0' = {
+  name: 'worker-workload-identity'
+  params: {
+    name: workerWorkloadIdentityName
+    location: location
+    tags: tags
+    federatedIdentityCredentials: [
+      {
+        name: 'scope-worker-workload-identity-federation'
+        issuer: aks.outputs.oidcIssuerUrl
+        subject: 'system:serviceaccount:${workerWorkloadIdentityServiceAccountNamespace}:${workerWorkloadIdentityServiceAccountName}'
         audiences: [
           'api://AzureADTokenExchange'
         ]
@@ -227,6 +262,7 @@ module storage 'modules/storage.bicep' = {
     privateEndpointSubnetResourceId: networking.outputs.privateEndpointSubnetResourceId
     skuName: storageSkuName
     workloadIdentityPrincipalId: workloadIdentity.outputs.principalId
+    workerWorkloadIdentityPrincipalId: workerWorkloadIdentity.outputs.principalId
   }
 }
 
@@ -349,3 +385,12 @@ output workloadIdentityServiceAccountNamespace string = workloadIdentityServiceA
 
 @description('Kubernetes service account name expected for the workload identity federated credential subject.')
 output workloadIdentityServiceAccountName string = workloadIdentityServiceAccountName
+
+@description('Client ID of the worker workload identity. Annotate the ACP worker Kubernetes service account (`azure.workload.identity/client-id`) with this value. This identity has Storage data-plane access only - no Key Vault access - since workers run benchmark-controlled agent code.')
+output workerWorkloadIdentityClientId string = workerWorkloadIdentity.outputs.clientId
+
+@description('Kubernetes namespace expected for the worker workload identity federated credential subject.')
+output workerWorkloadIdentityServiceAccountNamespace string = workerWorkloadIdentityServiceAccountNamespace
+
+@description('Kubernetes service account name expected for the worker workload identity federated credential subject.')
+output workerWorkloadIdentityServiceAccountName string = workerWorkloadIdentityServiceAccountName

@@ -233,6 +233,30 @@
               "regex": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
               "validationMessage": "Enter a valid Kubernetes service account name."
             }
+          },
+          {
+            "name": "workerWorkloadIdentityNamespaceControl",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Worker Kubernetes service account namespace",
+            "defaultValue": "scope",
+            "toolTip": "Kubernetes namespace of the ACP worker service account. Workers get a separate, lower-privilege workload identity (Storage data-plane access only, no Key Vault access) since they run benchmark-controlled agent code.",
+            "constraints": {
+              "required": true,
+              "regex": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+              "validationMessage": "Enter a valid Kubernetes namespace name."
+            }
+          },
+          {
+            "name": "workerWorkloadIdentityServiceAccountControl",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Worker Kubernetes service account name",
+            "defaultValue": "scope-worker-workload-identity",
+            "toolTip": "Name of the Kubernetes service account that will be federated with the worker workload identity.",
+            "constraints": {
+              "required": true,
+              "regex": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+              "validationMessage": "Enter a valid Kubernetes service account name."
+            }
           }
         ]
       }
@@ -254,6 +278,8 @@
     "aksSubnetPrefix": "[steps('networking').aksSubnetPrefixControl]",
     "privateEndpointSubnetPrefix": "[steps('networking').privateEndpointSubnetPrefixControl]",
     "workloadIdentityServiceAccountNamespace": "[steps('workloadIdentity').workloadIdentityNamespaceControl]",
-    "workloadIdentityServiceAccountName": "[steps('workloadIdentity').workloadIdentityServiceAccountControl]"
+    "workloadIdentityServiceAccountName": "[steps('workloadIdentity').workloadIdentityServiceAccountControl]",
+    "workerWorkloadIdentityServiceAccountNamespace": "[steps('workloadIdentity').workerWorkloadIdentityNamespaceControl]",
+    "workerWorkloadIdentityServiceAccountName": "[steps('workloadIdentity').workerWorkloadIdentityServiceAccountControl]"
   }
 }
