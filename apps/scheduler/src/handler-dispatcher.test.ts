@@ -30,7 +30,7 @@ function createMockCollection() {
   return {
     findOne: vi.fn(),
     findOneAndUpdate: vi.fn(),
-    updateOne: vi.fn().mockResolvedValue(undefined),
+    updateOne: vi.fn().mockResolvedValue({ matchedCount: 1 }),
     find: vi.fn(),
   } as any;
 }
@@ -52,6 +52,21 @@ function makeDispatcher(
   const db = createMockDb(handlers);
   const createQueueClient = vi.fn();
   return new HandlerDispatcher(collection, db, createQueueClient, 60_000, 30, apiUrl);
+}
+
+function makeDispatcherWithQueue(
+  collection: any,
+  handlers: HandlerServiceDocument[] = HANDLERS,
+  apiUrl = "http://api.test",
+) {
+  const db = createMockDb(handlers);
+  const queueClient = {
+    createIfNotExists: vi.fn().mockResolvedValue(undefined),
+    sendMessage: vi.fn().mockResolvedValue(undefined),
+  };
+  const createQueueClient = vi.fn().mockReturnValue(queueClient);
+  const dispatcher = new HandlerDispatcher(collection, db, createQueueClient, 60_000, 30, apiUrl);
+  return { dispatcher, queueClient, createQueueClient };
 }
 
 describe("HandlerDispatcher — drain detection", () => {
@@ -247,5 +262,211 @@ describe("HandlerDispatcher — maybeTriggerReports", () => {
 
     expect(collection.findOneAndUpdate).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("HandlerDispatcher — onHandlerComplete", () => {
+  let collection: ReturnType<typeof createMockCollection>;
+
+  beforeEach(() => {
+    collection = createMockCollection();
+  });
+
+  it("only accepts completion when current handler status is processing", async () => {
+    const d = makeDispatcher(collection) as any;
+    const maybeTriggerReportsSpy = vi
+      .spyOn(d, "maybeTriggerReports")
+      .mockResolvedValue(undefined);
+
+    await d.onHandlerComplete("req-1", "run-1", "pp-atif", "failed");
+
+    expect(collection.updateOne).toHaveBeenCalledWith(
+      { _id: "req-1", "run.handlerStatus.pp-atif.status": "processing" },
+      {
+        $set: {
+          "run.handlerStatus.pp-atif.status": "failed",
+          "run.handlerStatus.pp-atif.updatedAt": expect.any(Date),
+        },
+      },
+    );
+    expect(maybeTriggerReportsSpy).toHaveBeenCalledWith("req-1", "run-1");
+  });
+
+  it("ignores stale or duplicate completion notifications", async () => {
+    collection.updateOne.mockResolvedValue({ matchedCount: 0 });
+    const d = makeDispatcher(collection) as any;
+    const maybeTriggerReportsSpy = vi
+      .spyOn(d, "maybeTriggerReports")
+      .mockResolvedValue(undefined);
+    const loadHandlersSpy = vi.spyOn(d, "loadHandlers");
+
+    await d.onHandlerComplete("req-1", "run-1", "pp-atif", "done");
+
+    expect(maybeTriggerReportsSpy).not.toHaveBeenCalled();
+    expect(loadHandlersSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("HandlerDispatcher — handler topology caching", () => {
+  function makeWithSpies(ttlMs = 60_000, handlers: HandlerServiceDocument[] = HANDLERS) {
+    const collection = createMockCollection();
+    const toArray = vi.fn().mockResolvedValue(handlers);
+    const find = vi.fn().mockReturnValue({ toArray });
+    const servicesUpdateOne = vi.fn().mockResolvedValue(undefined);
+    const db = {
+      collection: vi.fn().mockReturnValue({ find, updateOne: servicesUpdateOne }),
+    } as any;
+    const dispatcher = new HandlerDispatcher(
+      collection,
+      db,
+      vi.fn(),
+      60_000,
+      30,
+      "http://api.test",
+      ttlMs,
+    ) as any;
+    return { dispatcher, find, toArray, servicesUpdateOne };
+  }
+
+  it("reuses cached topology within the TTL window", async () => {
+    const { dispatcher, toArray } = makeWithSpies(60_000);
+
+    await dispatcher.loadHandlers();
+    await dispatcher.loadHandlers();
+
+    expect(toArray).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-reads topology once the TTL has elapsed", async () => {
+    const { dispatcher, toArray } = makeWithSpies(0); // TTL 0 → every read is stale
+
+    await dispatcher.loadHandlers();
+    await dispatcher.loadHandlers();
+
+    expect(toArray).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidates the cache when a handler is registered", async () => {
+    const { dispatcher, toArray } = makeWithSpies(60_000);
+
+    await dispatcher.loadHandlers(); // read #1 — populates cache
+    await dispatcher.registerHandler({
+      _id: "pp-new",
+      type: "post-process-handler",
+      version: 1,
+      queue: "pp-new-queue",
+      selector: "new",
+      autoBackfill: false,
+      dependsOn: [],
+    }); // read #2 (forceFresh validation) + invalidate
+    await dispatcher.loadHandlers(); // read #3 — cache was invalidated
+
+    expect(toArray).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("HandlerDispatcher — buildDispatchFilter", () => {
+  let collection: ReturnType<typeof createMockCollection>;
+
+  beforeEach(() => {
+    collection = createMockCollection();
+  });
+
+  it("allows done runs to be considered for autoBackfill version bumps", () => {
+    const d = makeDispatcher(collection) as any;
+    const autoBackfillHandler = HANDLERS[0];
+
+    const filter = d.buildDispatchFilter(autoBackfillHandler, HANDLERS, d.buildGraph(HANDLERS));
+
+    expect(filter[`run.handlerStatus.${autoBackfillHandler._id}.status`]).toEqual({
+      $nin: ["queued", "processing"],
+    });
+    expect(filter.$or).toEqual([
+      { [`run.handlerStatus.${autoBackfillHandler._id}.version`]: { $exists: false } },
+      { [`run.handlerStatus.${autoBackfillHandler._id}.version`]: { $lt: autoBackfillHandler.version } },
+    ]);
+  });
+
+  it("keeps done runs excluded for non-backfill handlers", () => {
+    const d = makeDispatcher(collection) as any;
+    const noBackfillHandler = HANDLERS[1];
+
+    const filter = d.buildDispatchFilter(noBackfillHandler, HANDLERS, d.buildGraph(HANDLERS));
+
+    expect(filter[`run.handlerStatus.${noBackfillHandler._id}.status`]).toEqual({
+      $nin: ["queued", "processing", "done"],
+    });
+  });
+
+  describe("HandlerDispatcher — dispatchIfEligible", () => {
+    let collection: ReturnType<typeof createMockCollection>;
+
+    beforeEach(() => {
+      collection = createMockCollection();
+    });
+
+    it("allows autoBackfill re-dispatch for outdated done versions", async () => {
+      collection.findOne.mockResolvedValue({
+        _id: "req-1",
+        run: {
+          _id: "run-1",
+          status: "done",
+          handlerStatus: {
+            "pp-atif": { status: "done", version: 0 },
+          },
+        },
+      });
+      collection.updateOne.mockResolvedValue({ matchedCount: 1 });
+
+      const { dispatcher, queueClient } = makeDispatcherWithQueue(collection);
+      await (dispatcher as any).dispatchIfEligible(
+        "req-1",
+        "run-1",
+        HANDLERS[0],
+        (dispatcher as any).buildGraph(HANDLERS),
+        HANDLERS,
+      );
+
+      expect(queueClient.sendMessage).toHaveBeenCalledTimes(1);
+      expect(collection.updateOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          _id: "req-1",
+          "run._id": "run-1",
+          "run.status": "done",
+          "run.handlerStatus.pp-atif.status": { $nin: ["queued", "processing"] },
+          $or: [
+            { "run.handlerStatus.pp-atif.version": { $exists: false } },
+            { "run.handlerStatus.pp-atif.version": { $lt: 1 } },
+          ],
+        }),
+        {
+          $set: {
+            "run.handlerStatus.pp-atif.status": "queued",
+            "run.handlerStatus.pp-atif.updatedAt": expect.any(Date),
+          },
+        },
+      );
+    });
+
+    it("enqueues before marking the handler queued", async () => {
+      collection.findOne.mockResolvedValue({
+        _id: "req-1",
+        run: { _id: "run-1", status: "done", handlerStatus: {} },
+      });
+      collection.updateOne.mockResolvedValue({ matchedCount: 1 });
+
+      const { dispatcher, queueClient } = makeDispatcherWithQueue(collection);
+      await (dispatcher as any).dispatchIfEligible(
+        "req-1",
+        "run-1",
+        HANDLERS[0],
+        (dispatcher as any).buildGraph(HANDLERS),
+        HANDLERS,
+      );
+
+      expect(queueClient.sendMessage.mock.invocationCallOrder[0]).toBeLessThan(
+        collection.updateOne.mock.invocationCallOrder[0],
+      );
+    });
   });
 });

@@ -13,9 +13,17 @@ import {
   ConversationTurn,
   DependencyGraph,
   GateId,
+  IterationToolCalls,
   TokenManagerClient,
   withRetry,
 } from "shared";
+import {
+  buildToolCallHistory,
+  callMatchesIteration,
+  stableStringify,
+  type FlatToolCall,
+  type ToolCallHistory,
+} from "./tool-call-history.js";
 import {
   type AgentTrajectory,
   createTrajectoryTools,
@@ -32,9 +40,20 @@ export interface JudgeStrategyContext {
   onProgress?: (result: CriterionResult) => void;
   /** Which gate is being evaluated. Defaults to select. */
   gate?: GateId;
-  /** The coding agent's captured trajectory (normalized from the HAR tool calls
-   * for gates, or the ATIF for observations). */
+  /** The coding agent's captured tool calls/outputs (build/test/run/bootstrap
+   *  output) grouped per iteration across the whole run (1..N). Exposed to the
+   *  judge via list_tool_calls / search_tool_outputs / get_tool_output. */
+  iterationToolCalls?: IterationToolCalls[];
+  /** ATIF trajectory for observation evaluation. */
   trajectory?: AgentTrajectory;
+  /** The coding agent's response (prose) for the iteration being judged, exposed via read_agent_response. */
+  currentAgentResponse?: string;
+}
+
+export function createJudgeCriteriaGraph(
+  criteria: CriteriaConfig[],
+): DependencyGraph<CriteriaConfig> {
+  return new DependencyGraph(criteria);
 }
 
 /**
@@ -47,28 +66,166 @@ const DEFAULT_JUDGE_TIMEOUT = 480_000;
 const DEFAULT_JUDGE_RETRIES = 3;
 
 /**
- * The `## Your Tools` + `## How to Judge` guidance injected into the judge
- * system prompt when the coding agent's tool calls/outputs were captured for
- * this iteration.
+ * Builds the `## Your Tools` + `## How to Judge` guidance injected into the
+ * judge system prompt, listing whichever evidence sources are available for the
+ * iteration under evaluation: the workspace files (always), the coding agent's
+ * captured tool outputs (when present, via `list_tool_calls` / `search_tool_outputs` / `get_tool_output`),
+ * and the coding agent's own response/answer (when present, via
+ * `read_agent_response`).
  *
  * The judge runs headless and cannot run any commands itself — it can only
  * inspect the workspace and read what the coding agent already did. This text
  * keeps the judge's own read-only tools unambiguous from the coding agent's
- * tools/commands, and frames the codebase and captured tool outputs as two
- * complementary, equally authoritative sources of evidence so the judge bases
- * its decision on actual evidence instead of demanding the agent re-prove work
- * it has already done. It is intentionally generic across all criteria.
+ * tools/commands, and frames every available source as authoritative evidence
+ * so the judge bases its decision on actual evidence instead of demanding the
+ * agent re-prove work it has already done. It is intentionally generic across
+ * all criteria. See scope #1125 (tool outputs) and #1136 (agent response).
  */
-export const TRAJECTORY_GUIDANCE = `## Your Tools
-You have read-only tools to gather evidence — you cannot run any commands or coding-agent tools yourself, you can only read what the agent already did:
-- Inspect the resulting codebase: read_file, list_directory, search_files, file_exists.
-- See what tools the agent HAD available (its catalog): list_agent_tools, then get_agent_tools(toolNames) for a tool's full description and parameter schema.
-- See what the agent DID: list_agent_tool_calls to triage its invocations (id, name, a short summary and a preview of each output), then get_agent_tool_calls(toolCallIds) for the full arguments and captured output of the calls you care about.
-- get_trajectory_overview gives a high-level orientation (agent, model, steps) without the raw system prompt.
-When get_agent_tool_calls or get_agent_tools returns a responseFile or descriptionFile (large outputs are spilled to a file instead of inlined), open that path with read_file.
+export function buildEvidenceGuidance(opts: {
+  hasToolOutputs: boolean;
+  hasTrajectory?: boolean;
+  hasAgentResponse: boolean;
+}): string {
+  const { hasToolOutputs, hasTrajectory = false, hasAgentResponse } = opts;
+
+  let toolsList =
+    "read_file, list_directory, search_files and file_exists to inspect the workspace";
+  if (hasToolOutputs) {
+    toolsList +=
+      ", and list_tool_calls / search_tool_outputs / get_tool_output to review the tool calls the coding agent ran across the whole run while doing the task";
+  }
+  if (hasTrajectory) {
+    toolsList +=
+      ", and list_agent_tool_calls / get_agent_tool_calls / list_agent_tools / get_agent_tools / get_trajectory_overview to inspect the agent's normalized ATIF trajectory";
+  }
+  if (hasAgentResponse) {
+    toolsList +=
+      ", and read_agent_response to read the coding agent's own response (its answer or explanation) for the iteration you are judging";
+  }
+
+  const evidenceNames = [
+    "the codebase",
+    ...(hasToolOutputs ? ["the agent's captured tool outputs"] : []),
+    ...(hasTrajectory ? ["the agent's normalized trajectory"] : []),
+    ...(hasAgentResponse ? ["the coding agent's own response"] : []),
+  ];
+  const intro =
+    evidenceNames.length === 1
+      ? "The codebase is the authoritative source of evidence."
+      : `${evidenceNames.slice(0, -1).join(", ")} and ${evidenceNames.at(-1)} are complementary, equally authoritative sources of evidence — ${evidenceNames.length === 2 ? "examine both" : "examine all of them"}.`;
+
+  const toolOutputsPhilosophy = hasToolOutputs
+    ? " The files show the resulting state of the code; the captured outputs (logs, results, exit status) show what actually happened when the agent ran a command, which the files alone may not reveal. The captured tool calls span the ENTIRE run (every iteration so far), not just this one — so an action the agent performed once in an earlier iteration (e.g. a bootstrap, scaffold, install, or one-off command) is still recorded and still counts as done now; use search_tool_outputs to find whether a given command ever ran anywhere in the run rather than assuming it didn't because it isn't in the latest iteration. When a criterion concerns something the agent did or ran, take the agent's captured output and exit status as the record of what happened, rather than asking the agent to redo or re-prove work the evidence already shows. If a criterion's wording tells you to run, execute, or re-run a command, ignore that instruction and judge the outcome from the captured outputs together with the codebase."
+    : "";
+
+  const agentResponsePhilosophy = hasAgentResponse
+    ? " The coding agent's response is the authoritative record of what it said or answered: for any criterion that grades the response itself — answering a question, explaining, advising, or other no-code-change deliverables — read it with read_agent_response and judge that text directly rather than expecting changes in the codebase."
+    : "";
+
+  const trajectoryPhilosophy = hasTrajectory
+    ? " The normalized trajectory can include the agent's available tool catalog, calls, arguments, outputs, and intermediate actions across one or more iterations. Start with list_agent_tool_calls, then use get_agent_tool_calls for full evidence; use the tool-catalog and overview tools when availability or run context matters. Treat captured output and exit status as the record of what happened rather than asking the agent to redo or re-prove work. If a criterion asks you to run, execute, or re-run a command, ignore that instruction and judge the existing evidence. When a trajectory tool returns responseFile or descriptionFile for oversized content, open that absolute path with read_file."
+    : "";
+
+  return `## Your Tools
+You have read-only tools to gather evidence: ${toolsList}. You yourself cannot run any commands or coding-agent tools — you can only read what the agent already did.
 
 ## How to Judge
-The resulting codebase and the agent's captured trajectory are two complementary, equally authoritative sources of evidence — examine both. The files show the resulting state of the code; the captured tool calls and their outputs show what actually happened while the agent worked, including intermediate actions the final files no longer reveal (for example a dependency added and then later removed within the run). Start with list_agent_tool_calls to see what the agent did, then drill into the relevant calls with get_agent_tool_calls. When a criterion concerns something the agent did or ran, take the agent's captured output and exit status as the record of what happened, rather than asking the agent to redo or re-prove work the evidence already shows. If a criterion's wording tells you to run, execute, or re-run a command, ignore that instruction and judge the outcome from the captured trajectory together with the codebase.`;
+${intro}${toolOutputsPhilosophy}${trajectoryPhilosophy}${agentResponsePhilosophy}`;
+}
+
+/**
+ * Back-compat constant: the guidance for the common case where only the coding
+ * agent's tool outputs (not its response) are available. Equivalent to
+ * `buildEvidenceGuidance({ hasToolOutputs: true, hasAgentResponse: false })`.
+ */
+export const TOOL_OUTPUTS_GUIDANCE = buildEvidenceGuidance({
+  hasToolOutputs: true,
+  hasAgentResponse: false,
+});
+
+export const TRAJECTORY_GUIDANCE = buildEvidenceGuidance({
+  hasToolOutputs: false,
+  hasTrajectory: true,
+  hasAgentResponse: false,
+});
+
+/**
+ * "Sticky pass" guidance appended to the prior-results section. A criterion that
+ * already passed in an earlier iteration should stay satisfied unless there is
+ * concrete evidence it regressed — this is what stops a one-time action
+ * (bootstrap/scaffold/install) from oscillating PASS↔FAIL and prevents the
+ * select gate from never converging. It is deliberately worded as strong
+ * evidence, NOT a permanent latch, so genuine regressions can still flip to FAIL.
+ */
+export const STICKY_PASS_GUIDANCE =
+  "A criterion that already PASSED in an earlier iteration of this run should be treated as still satisfied now, UNLESS you find concrete evidence in the current workspace or the captured tool outputs that it regressed. Earlier passes are strong evidence, not a permanent latch — if something genuinely broke, mark it FAIL and say what regressed. Do not re-fail a criterion merely because the action that satisfied it (e.g. a bootstrap, scaffold, install, or one-off command) happened in a previous iteration rather than the latest one; the captured tool history spans the whole run, so use search_tool_outputs to confirm whether that action ever ran.";
+
+/**
+ * Builds the "prior results" section of the user prompt from the per-iteration
+ * `criteriaResults` already carried in `conversationHistory`. Instead of dumping
+ * truncated prose, it renders a compact per-criterion PASS/FAIL timeline plus the
+ * most recent feedback, followed by {@link STICKY_PASS_GUIDANCE}. When no turn
+ * carries structured `criteriaResults` (older runs), it falls back to a short
+ * prose summary. `criterionIds`, when provided, restricts the timeline to those
+ * criteria (used by the independent strategy, which judges one criterion at a
+ * time); omit it to include every criterion seen (bundled strategy).
+ */
+export function buildPriorResultsSection(
+  conversationHistory: ConversationTurn[],
+  criterionIds?: string[]
+): string {
+  if (!conversationHistory || conversationHistory.length === 0) return "";
+
+  const turns = [...conversationHistory].sort(
+    (a, b) => (a.iteration ?? 0) - (b.iteration ?? 0)
+  );
+  const filter = criterionIds ? new Set(criterionIds) : null;
+
+  const timeline = new Map<
+    string,
+    { iteration: number; passed: boolean; feedback: string }[]
+  >();
+  for (const t of turns) {
+    const results = t.criteriaResults;
+    if (!Array.isArray(results)) continue;
+    for (const r of results) {
+      if (r.evaluated === false) continue;
+      if (filter && !filter.has(r.criterionId)) continue;
+      const arr = timeline.get(r.criterionId) ?? [];
+      arr.push({
+        iteration: t.iteration ?? 0,
+        passed: r.passed,
+        feedback: r.feedback ?? "",
+      });
+      timeline.set(r.criterionId, arr);
+    }
+  }
+
+  if (timeline.size > 0) {
+    const FEEDBACK_LIMIT = 300;
+    const lines = [...timeline.entries()].map(([cid, entries]) => {
+      const seq = entries
+        .map((e) => `it${e.iteration} ${e.passed ? "PASS" : "FAIL"}`)
+        .join(" → ");
+      const last = entries[entries.length - 1];
+      const fb = (last.feedback ?? "").replace(/\s+/g, " ").trim();
+      const fbLine = fb
+        ? `\n    last feedback (it${last.iteration}): "${fb.substring(0, FEEDBACK_LIMIT)}${fb.length > FEEDBACK_LIMIT ? "…" : ""}"`
+        : "";
+      return `- ${cid}: ${seq}${fbLine}`;
+    });
+    return `\n\n## Prior results from earlier iterations of this run\n${STICKY_PASS_GUIDANCE}\n\n${lines.join("\n")}`;
+  }
+
+  // Fallback for older runs without structured criteriaResults.
+  const prose = turns
+    .map((t) => {
+      const car = t.codingAgentResponse ?? "(no response captured)";
+      return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 400)}${car.length > 400 ? "…" : ""}\n- **Passed**: ${t.passed}`;
+    })
+    .join("\n\n");
+  return `\n\n## Previous Iterations (for context)\n${prose}`;
+}
 
 /**
  * Tool filter applied to every judge session.
@@ -76,11 +233,11 @@ The resulting codebase and the agent's captured trajectory are two complementary
  * The Copilot SDK's `CopilotClient` defaults to `mode: "copilot-cli"`, which
  * injects the full set of built-in CLI tools (bash, edit, view, ...) into the
  * session alongside the read-only `custom:*` tools we register in
- * `createFileTools`/`createTrajectoryTools`. Those built-ins are NOT
+ * `createFileTools`/`createToolOutputTools`. Those built-ins are NOT
  * `skipPermission`, and the judge runs headless (no TUI to answer prompts).
  *
  * The failure mode this guards against: instead of reading the coder's captured
- * output via `list_agent_tool_calls`/`get_agent_tool_calls`, the judge model decides to
+ * output via `list_tool_calls`/`search_tool_outputs`/`get_tool_output`, the judge model decides to
  * "verify" a build/test by running the command itself through the built-in
  * `bash` tool. Headless, that call is denied with "could not request permission
  * from user". The judge then mis-reports this as the coder's result ("execution
@@ -113,13 +270,6 @@ export function isWithinWorkspace(root: string, target: string): boolean {
   );
 }
 
-/**
- * Returns true if `target` resolves inside (or equal to) ANY of `roots`. Used so
- * read_file/file_exists may read both the workspace and a judge-created spill dir
- * (created OUTSIDE the workspace for oversized trajectory tool outputs) without
- * weakening the per-root traversal guard — each root is still checked with the
- * exact-or-separator-boundary rule of `isWithinWorkspace`.
- */
 export function isWithinAnyRoot(roots: string[], target: string): boolean {
   return roots.some((root) => isWithinWorkspace(root, target));
 }
@@ -152,16 +302,11 @@ export abstract class JudgeStrategy {
     opts?: { extraReadRoots?: string[] },
   ) {
     const workspaceRoot = resolve(workspacePath);
-    // Additional roots (OUTSIDE the workspace) that read_file/file_exists may
-    // read by ABSOLUTE path — used for the trajectory spill dir so the judge can
-    // open oversized tool outputs returned as responseFile/descriptionFile.
-    // list_directory/search_files stay workspace-only so the codebase view the
-    // judge inspects is never polluted by spill files.
-    const extraReadRoots = (opts?.extraReadRoots ?? []).map((r) => resolve(r));
+    const extraReadRoots = (opts?.extraReadRoots ?? []).map((root) => resolve(root));
     const readRoots = [workspaceRoot, ...extraReadRoots];
     const readFile = defineTool("read_file", {
       description:
-        "Read the contents of a file. Returns the full text content. Use a relative path from the workspace root, or an absolute path returned as responseFile/descriptionFile by the agent-trajectory tools.",
+        "Read the contents of a file in the workspace. Returns the full text content. Use relative paths from the workspace root.",
       // Read-only, workspace-scoped, traversal-guarded tools must run without a
       // permission prompt: the judge is headless (no TUI), so the v3 runtime
       // would otherwise deny every call with "could not request permission from
@@ -225,7 +370,9 @@ export abstract class JudgeStrategy {
         required: ["path"],
       },
       handler: async (args: { path: string }) => {
-        const fullPath = join(workspaceRoot, args.path);
+        const fullPath = isAbsolute(args.path)
+          ? resolve(args.path)
+          : join(workspaceRoot, args.path);
         if (!isWithinWorkspace(workspaceRoot, fullPath)) {
           return { error: "Path traversal not allowed" };
         }
@@ -371,21 +518,332 @@ export abstract class JudgeStrategy {
   }
 
   /**
-   * Run a Copilot session with given prompt and tools, retrying on timeout.
+   * Create the tools that expose the coding agent's captured tool calls/outputs
+   * across the whole run (iterations 1..N), not just the iteration being judged.
+   * Assembled by {@link buildToolCallHistory} into one deduped, chronological,
+   * globally-indexed list so a one-time action recorded in an earlier iteration
+   * (e.g. a bootstrap/scaffold command) still counts as done when later
+   * iterations are judged. See scope #1255.
    *
-   * When a trajectory with at least one captured call is supplied, the unified
-   * trajectory navigation tools are registered (mirroring the previous
-   * `toolCalls.length > 0` gate) and a per-evaluation spill dir is created
-   * OUTSIDE the workspace for oversized tool outputs; read_file is granted that
-   * dir as an extra read root so the judge can open spilled files. The spill dir
-   * is best-effort removed when the session finishes.
+   * Three tools, in a browse → find → read shape:
+   * - `list_tool_calls`   — browse calls across all iterations (deduped,
+   *                         filterable by iteration/query, paginated).
+   * - `search_tool_outputs` — find a pattern anywhere in the run (scans name +
+   *                         arguments + response); the token-cheap way to answer
+   *                         "was this command ever run?".
+   * - `get_tool_output`   — read one call's full output by its global index.
+   */
+  protected createToolOutputTools(iterationToolCalls: IterationToolCalls[]) {
+    const PREVIEW_LIMIT = 2_000;
+    const FULL_LIMIT = 100_000;
+    const SNIPPET_RADIUS = 150;
+    const DEFAULT_LIST_LIMIT = 50;
+    const parsedMaxList = parseInt(process.env.JUDGE_MAX_TOOL_CALLS || "300", 10);
+    // A non-numeric override would make MAX_LIST_LIMIT NaN, collapsing the clamp
+    // below and returning an empty page; fall back to the default instead.
+    const MAX_LIST_LIMIT = Number.isNaN(parsedMaxList) ? 300 : parsedMaxList;
+    const DEFAULT_SEARCH_MATCHES = 20;
+    const MAX_SEARCH_MATCHES = 100;
+
+    const history: ToolCallHistory = buildToolCallHistory(iterationToolCalls);
+    const calls = history.calls;
+    const iterationsCovered = history.iterationsCovered;
+
+    const clamp = (n: number, lo: number, hi: number) =>
+      Math.max(lo, Math.min(hi, n));
+
+    const previewOf = (call: FlatToolCall) => {
+      const response = call.response ?? "";
+      const truncated = response.length > PREVIEW_LIMIT || call.responseTruncated;
+      return {
+        index: call.index,
+        iteration: call.iteration,
+        ...(call.iterations ? { iterations: call.iterations } : {}),
+        ...(call.occurrences ? { occurrences: call.occurrences } : {}),
+        name: call.name,
+        arguments: call.arguments,
+        responsePreview:
+          response.length > PREVIEW_LIMIT
+            ? response.substring(0, PREVIEW_LIMIT) + "\n…(truncated, use get_tool_output)"
+            : response,
+        responseTruncated: truncated,
+        responseLength: call.responseLength,
+      };
+    };
+
+    const listToolCalls = defineTool("list_tool_calls", {
+      description:
+        "List the tool calls the coding agent made across ALL iterations of this run (1..N), e.g. shell/bash commands and their output. The list is deduplicated (identical repeats are collapsed and annotated with `occurrences`/`iterations`) and each entry carries the `iteration` it ran in. Returns each call's global `index`, `name`, `arguments` and a truncated response preview. Optionally filter by `iteration` or a `query` substring over the command name/arguments, and paginate with `limit`/`offset`. Use get_tool_output(index) for a call's full output, or search_tool_outputs to find a specific command anywhere in the run. Consult these to decide whether a command (build, test, run, bootstrap, scaffold) actually succeeded at any point in the run.",
+      // Read-only in-memory inspection of already-captured tool calls. Like the
+      // file tools, this MUST run without a permission prompt: the judge is
+      // headless (no TUI), so the v3 runtime would otherwise deny every call with
+      // "could not request permission from user" — which silently blocks the judge
+      // from ever seeing the coding agent's build/test output. See scope #1125, #1255.
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {
+          iteration: {
+            type: "number",
+            description: "Only include calls from this iteration number.",
+          },
+          query: {
+            type: "string",
+            description: "Only include calls whose name or arguments contain this substring (case-insensitive).",
+          },
+          limit: {
+            type: "number",
+            description: `Max calls to return (default ${DEFAULT_LIST_LIMIT}, max ${MAX_LIST_LIMIT}).`,
+          },
+          offset: {
+            type: "number",
+            description: "Number of matching calls to skip, for pagination (default 0).",
+          },
+        },
+        required: [],
+      },
+      handler: async (args: { iteration?: number; query?: string; limit?: number; offset?: number }) => {
+        if (calls.length === 0) {
+          return {
+            totalCalls: 0,
+            calls: [],
+            message: "No tool calls were captured for any iteration of this run.",
+          };
+        }
+        const q = args.query?.toLowerCase();
+        const filtered = calls.filter((c) => {
+          if (args.iteration !== undefined && !callMatchesIteration(c, args.iteration)) {
+            return false;
+          }
+          if (q) {
+            const hay = `${c.name}\u0000${stableStringify(c.arguments)}`.toLowerCase();
+            if (!hay.includes(q)) return false;
+          }
+          return true;
+        });
+        const offset = Math.max(0, Math.floor(args.offset ?? 0));
+        const limit = clamp(Math.floor(args.limit ?? DEFAULT_LIST_LIMIT), 1, MAX_LIST_LIMIT);
+        const page = filtered.slice(offset, offset + limit);
+        return {
+          totalCalls: calls.length,
+          iterationsCovered,
+          filteredCalls: filtered.length,
+          returnedCalls: page.length,
+          offset,
+          limit,
+          truncated: offset + page.length < filtered.length,
+          calls: page.map(previewOf),
+        };
+      },
+    });
+
+    const searchToolOutputs = defineTool("search_tool_outputs", {
+      description:
+        "Search the coding agent's captured tool calls across ALL iterations of this run for a substring pattern, matching against each call's name, arguments AND response/output. This is the fastest, token-cheapest way to check whether a specific action ever happened in the run — e.g. whether a bootstrap/scaffold command was run, a package installed, a skill or MCP tool invoked, or a specific string appeared in any command's output — without paging through every call. Returns matching calls with their global `index`, `iteration`, and a short snippet around the match; use get_tool_output(index) for the full output.",
+      // Read-only; same headless permission rationale as list_tool_calls. See scope #1125, #1255.
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: {
+            type: "string",
+            description: "Substring to search for (case-insensitive), matched against name, arguments and response.",
+          },
+          iteration: {
+            type: "number",
+            description: "Restrict the search to this iteration number.",
+          },
+          maxMatches: {
+            type: "number",
+            description: `Max matches to return (default ${DEFAULT_SEARCH_MATCHES}, max ${MAX_SEARCH_MATCHES}).`,
+          },
+        },
+        required: ["pattern"],
+      },
+      handler: async (args: { pattern?: string; iteration?: number; maxMatches?: number }) => {
+        const pattern = (args.pattern ?? "").trim();
+        if (!pattern) {
+          return { error: "pattern is required and must be a non-empty string", matchCount: 0, matches: [] };
+        }
+        if (calls.length === 0) {
+          return {
+            matchCount: 0,
+            matches: [],
+            message: "No tool calls were captured for any iteration of this run.",
+          };
+        }
+        const needle = pattern.toLowerCase();
+        const maxMatches = clamp(Math.floor(args.maxMatches ?? DEFAULT_SEARCH_MATCHES), 1, MAX_SEARCH_MATCHES);
+
+        const snippetAround = (text: string, at: number): string => {
+          const start = Math.max(0, at - SNIPPET_RADIUS);
+          const end = Math.min(text.length, at + needle.length + SNIPPET_RADIUS);
+          return (start > 0 ? "…" : "") + text.substring(start, end) + (end < text.length ? "…" : "");
+        };
+
+        const matches: Array<{
+          index: number;
+          iteration: number;
+          iterations?: number[];
+          occurrences?: number;
+          name: string;
+          arguments: Record<string, unknown>;
+          matchedIn: string;
+          snippet: string;
+        }> = [];
+
+        for (const c of calls) {
+          if (args.iteration !== undefined && !callMatchesIteration(c, args.iteration)) {
+            continue;
+          }
+          const response = c.response ?? "";
+          const argsStr = stableStringify(c.arguments);
+          const fields: Array<[string, string]> = [
+            ["response", response],
+            ["name", c.name],
+            ["arguments", argsStr],
+          ];
+          let matchedIn: string | undefined;
+          let snippet: string | undefined;
+          for (const [field, text] of fields) {
+            const at = text.toLowerCase().indexOf(needle);
+            if (at !== -1) {
+              matchedIn = field;
+              snippet = snippetAround(text, at);
+              break;
+            }
+          }
+          if (matchedIn && snippet !== undefined) {
+            matches.push({
+              index: c.index,
+              iteration: c.iteration,
+              ...(c.iterations ? { iterations: c.iterations } : {}),
+              ...(c.occurrences ? { occurrences: c.occurrences } : {}),
+              name: c.name,
+              arguments: c.arguments,
+              matchedIn,
+              snippet,
+            });
+            if (matches.length >= maxMatches) break;
+          }
+        }
+
+        return {
+          pattern,
+          matchCount: matches.length,
+          truncated: matches.length >= maxMatches,
+          matches,
+        };
+      },
+    });
+
+    const getToolOutput = defineTool("get_tool_output", {
+      description:
+        "Return the full captured output (response) of a single tool call by its global `index`, as listed by list_tool_calls or search_tool_outputs. The result includes the `iteration` the call ran in.",
+      // Read-only; same headless permission rationale as list_tool_calls. See scope #1125, #1255.
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {
+          index: {
+            type: "number",
+            description: "Global index of the tool call from list_tool_calls / search_tool_outputs",
+          },
+        },
+        required: ["index"],
+      },
+      handler: async (args: { index: number }) => {
+        const call = calls[args.index];
+        if (!call) {
+          return { error: `No tool call at index ${args.index} (have ${calls.length})` };
+        }
+        const response = call.response ?? "";
+        const base = {
+          index: call.index,
+          iteration: call.iteration,
+          ...(call.iterations ? { iterations: call.iterations } : {}),
+          ...(call.occurrences ? { occurrences: call.occurrences } : {}),
+          name: call.name,
+          arguments: call.arguments,
+        };
+        if (response.length > FULL_LIMIT || call.responseTruncated) {
+          return {
+            ...base,
+            response: response.substring(0, FULL_LIMIT),
+            truncated: true,
+            totalLength: call.responseLength,
+          };
+        }
+        return { ...base, response };
+      },
+    });
+
+    return [listToolCalls, searchToolOutputs, getToolOutput];
+  }
+
+  /**
+   * Create the read-only tool that exposes the coding agent's own response
+   * (its assistant message / answer) for the iteration being judged. This is
+   * the authoritative evidence for criteria that grade what the agent *said*
+   * (Q&A, "explain X", advisory / no-code-change tasks), which the workspace
+   * files and tool outputs may not contain at all. The response is carried
+   * inline in the evaluate request and read in-memory here — no API/blob call.
+   * See scope #1136.
+   */
+  protected createAgentResponseTool(response: string) {
+    const FULL_LIMIT = 100_000;
+
+    const readAgentResponse = defineTool("read_agent_response", {
+      description:
+        "Return the coding agent's own response (its assistant message — answer, explanation, or summary) for the iteration you are judging. This is the authoritative source for any criterion that grades what the agent said, e.g. answering a question, explaining, or advising with no code change — the workspace files and tool outputs may not contain this text at all.",
+      // Read-only in-memory read of the response carried in the evaluate
+      // request. Must skip the permission prompt for the same headless reason
+      // as the file and tool-output tools: the judge has no TUI, so a tool
+      // without skipPermission is denied at execution time and the judge could
+      // never see the agent's response. See scope #1125, #1136.
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+      handler: async () => {
+        if (!response || response.length === 0) {
+          return {
+            hasResponse: false,
+            response: "",
+            message: "No agent response was captured for this iteration.",
+          };
+        }
+        if (response.length > FULL_LIMIT) {
+          return {
+            hasResponse: true,
+            response: response.substring(0, FULL_LIMIT),
+            truncated: true,
+            totalLength: response.length,
+          };
+        }
+        return { hasResponse: true, response, truncated: false, length: response.length };
+      },
+    });
+
+    return [readAgentResponse];
+  }
+
+  /**
+   * Run a Copilot session with given prompt and tools, retrying on timeout.
    */
   protected async runCopilotSession(
     workspacePath: string,
     systemPrompt: string,
     userPrompt: string,
-    trajectory?: AgentTrajectory
+    iterationToolCalls?: IterationToolCalls[],
+    currentAgentResponse?: string,
+    trajectory?: AgentTrajectory,
   ): Promise<string> {
+    const hasToolCalls = (iterationToolCalls ?? []).some(
+      (g) => g.toolCalls.length > 0
+    );
     const hasTrajectory = !!trajectory && trajectory.calls.length > 0;
     const spillDir = hasTrajectory
       ? mkdtempSync(join(tmpdir(), "judge-trajectory-"))
@@ -395,7 +853,11 @@ export abstract class JudgeStrategy {
         workspacePath,
         spillDir ? { extraReadRoots: [spillDir] } : undefined,
       ),
-      ...(hasTrajectory ? createTrajectoryTools(trajectory!, spillDir!) : []),
+      ...(hasToolCalls ? this.createToolOutputTools(iterationToolCalls!) : []),
+      ...(hasTrajectory ? createTrajectoryTools(trajectory, spillDir!) : []),
+      ...(currentAgentResponse && currentAgentResponse.length > 0
+        ? this.createAgentResponseTool(currentAgentResponse)
+        : []),
     ];
 
     try {
@@ -421,14 +883,14 @@ export abstract class JudgeStrategy {
               `[judge-strategy] sendAndWait attempt ${attempt} failed (retrying in ≤30s): ${msg.substring(0, 200)}`
             );
           },
-        }
+        },
       );
     } finally {
       if (spillDir) {
         try {
           rmSync(spillDir, { recursive: true, force: true });
         } catch {
-          // best-effort cleanup of the out-of-workspace spill dir
+          // Best-effort cleanup.
         }
       }
     }
@@ -500,12 +962,21 @@ export class BundledStrategy extends JudgeStrategy {
       criteria,
       conversationHistory,
       personaInstructions,
+      iterationToolCalls,
+      currentAgentResponse,
       trajectory,
     } = context;
 
+    const hasToolOutputs = (iterationToolCalls ?? []).some(
+      (g) => g.toolCalls.length > 0
+    );
+    const hasTrajectory = !!trajectory && trajectory.calls.length > 0;
+
     const systemPrompt = this.buildSystemPrompt(
       personaInstructions,
-      !!trajectory && trajectory.calls.length > 0
+      hasToolOutputs,
+      hasTrajectory,
+      !!(currentAgentResponse && currentAgentResponse.length > 0)
     );
 
     const userPrompt = this.buildUserPrompt(criteria, conversationHistory);
@@ -514,7 +985,9 @@ export class BundledStrategy extends JudgeStrategy {
       workspacePath,
       systemPrompt,
       userPrompt,
-      trajectory
+      iterationToolCalls,
+      currentAgentResponse,
+      trajectory,
     );
 
     return this.parseJsonResponse(response, criteria, context.onProgress);
@@ -529,23 +1002,29 @@ export class BundledStrategy extends JudgeStrategy {
    */
   private buildSystemPrompt(
     personaInstructions?: string,
-    hasTrajectory?: boolean
+    hasToolOutputs?: boolean,
+    hasTrajectory?: boolean,
+    hasAgentResponse?: boolean
   ): string {
     const personaSection = personaInstructions
       ? `\n## Persona\n${personaInstructions}\n`
       : "";
 
-    const toolOutputsSection = hasTrajectory
-      ? `\n${TRAJECTORY_GUIDANCE}\n`
+    const evidenceSection = (hasToolOutputs || hasTrajectory || hasAgentResponse)
+      ? `\n${buildEvidenceGuidance({
+          hasToolOutputs: !!hasToolOutputs,
+          hasTrajectory: !!hasTrajectory,
+          hasAgentResponse: !!hasAgentResponse,
+        })}\n`
       : "";
 
     return `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent.
 ${personaSection}
 ## What to Evaluate
 Evaluate whether the coding agent's work — its generated code together with the captured outputs of the tools it ran — meets each criterion provided in the user message.
-${toolOutputsSection}
+${evidenceSection}
 ## Instructions
-1. Gather evidence from both the workspace and the coding agent's captured tool outputs.
+1. Gather evidence from every available source.
 2. Evaluate EACH criterion individually.
 3. For each criterion, provide specific feedback about what you found.
 4. Be constructive and actionable in your feedback.
@@ -577,16 +1056,10 @@ IMPORTANT: Return ONLY the JSON, no additional text before or after.`;
       .map((c) => `  - ${c.id}: ${c.prompt}`)
       .join("\n");
 
-    const historySection =
-      conversationHistory.length > 0
-        ? `\n\n## Previous Iterations\n${conversationHistory
-            .map((t) => {
-              const car = t.codingAgentResponse ?? "(no response captured)";
-              const fb = t.judgeFeedback;
-              return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 500)}${car.length > 500 ? "..." : ""}\n- **Your previous feedback**: ${fb.substring(0, 500)}${fb.length > 500 ? "..." : ""}\n- **Passed**: ${t.passed}`;
-            })
-            .join("\n\n")}`
-        : "";
+    const historySection = buildPriorResultsSection(
+      conversationHistory,
+      criteria.map((c) => c.id)
+    );
 
     return `Evaluate the workspace against ALL criteria below. Use the file tools to inspect the code, then provide your verdict in JSON format.
 
@@ -594,23 +1067,39 @@ IMPORTANT: Return ONLY the JSON, no additional text before or after.`;
 ${criteriaList}${historySection}`;
   }
 
+  /** Extract the first complete JSON object, respecting strings and escapes. */
+  private extractJsonObject(response: string): string | undefined {
+    const start = response.indexOf("{");
+    if (start < 0) return undefined;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < response.length; i++) {
+      const ch = response[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "{") depth++;
+      else if (ch === "}" && --depth === 0) return response.slice(start, i + 1);
+    }
+    return undefined;
+  }
+
   private parseJsonResponse(
     response: string,
     criteria: CriteriaConfig[],
     onProgress?: (result: CriterionResult) => void,
   ): DetailedEvaluationResult {
-    // Try to extract JSON from markdown code blocks
-    let jsonStr = response.trim();
-    const jsonMatch = jsonStr.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1];
-    } else {
-      // Try to find raw JSON
-      const rawJsonMatch = jsonStr.match(/(\{[\s\S]*\})/);
-      if (rawJsonMatch) {
-        jsonStr = rawJsonMatch[1];
-      }
-    }
+    // Extract a complete JSON object without relying on markdown fences. A
+    // brace-balanced scan handles nested objects and braces inside feedback strings,
+    // while an incomplete/truncated response deliberately falls through to the
+    // existing parse-error path.
+    const jsonStr = this.extractJsonObject(response) ?? response.trim();
 
     try {
       const data = JSON.parse(jsonStr);
@@ -703,6 +1192,8 @@ export class IndependentStrategy extends JudgeStrategy {
       personaInstructions,
       onProgress,
       gate,
+      iterationToolCalls,
+      currentAgentResponse,
       trajectory,
     } = context;
 
@@ -769,7 +1260,9 @@ export class IndependentStrategy extends JudgeStrategy {
             personaInstructions,
             evalIndex++,
             gate,
-            trajectory
+            iterationToolCalls,
+            currentAgentResponse,
+            trajectory,
           )
         );
 
@@ -810,11 +1303,20 @@ export class IndependentStrategy extends JudgeStrategy {
     personaInstructions: string | undefined,
     index: number,
     gate?: GateId,
-    trajectory?: AgentTrajectory
+    iterationToolCalls?: IterationToolCalls[],
+    currentAgentResponse?: string,
+    trajectory?: AgentTrajectory,
   ): Promise<CriterionResult> {
+    const hasToolOutputs = (iterationToolCalls ?? []).some(
+      (g) => g.toolCalls.length > 0
+    );
+    const hasTrajectory = !!trajectory && trajectory.calls.length > 0;
+
     const systemPrompt = this.buildSystemPrompt(
       personaInstructions,
-      !!trajectory && trajectory.calls.length > 0
+      hasToolOutputs,
+      hasTrajectory,
+      !!(currentAgentResponse && currentAgentResponse.length > 0)
     );
 
     const userPrompt = this.buildUserPrompt(criterion, conversationHistory);
@@ -824,7 +1326,9 @@ export class IndependentStrategy extends JudgeStrategy {
         workspacePath,
         systemPrompt,
         userPrompt,
-        trajectory
+        iterationToolCalls,
+        currentAgentResponse,
+        trajectory,
       );
 
       const passed = this.detectPassFail(response);
@@ -858,23 +1362,29 @@ export class IndependentStrategy extends JudgeStrategy {
    */
   protected buildSystemPrompt(
     personaInstructions?: string,
-    hasTrajectory?: boolean
+    hasToolOutputs?: boolean,
+    hasTrajectory?: boolean,
+    hasAgentResponse?: boolean
   ): string {
     const personaSection = personaInstructions
       ? `\n## Persona\n${personaInstructions}\n`
       : "";
 
-    const toolOutputsSection = hasTrajectory
-      ? `\n${TRAJECTORY_GUIDANCE}\n`
+    const evidenceSection = (hasToolOutputs || hasTrajectory || hasAgentResponse)
+      ? `\n${buildEvidenceGuidance({
+          hasToolOutputs: !!hasToolOutputs,
+          hasTrajectory: !!hasTrajectory,
+          hasAgentResponse: !!hasAgentResponse,
+        })}\n`
       : "";
 
     return `You are an expert code reviewer evaluating the tool calls, logs and generated code produced by a coding agent against ONE specific criterion.
 ${personaSection}
 ## What to Evaluate
 Evaluate the coding agent's work — its generated code together with the captured outputs of the tools it ran — against the criterion provided in the user message.
-${toolOutputsSection}
+${evidenceSection}
 ## Instructions
-1. Gather evidence from both the workspace and the coding agent's captured tool outputs.
+1. Gather evidence from every available source.
 2. Determine if the criterion is met (PASS) or not met (FAIL).
 3. Provide specific feedback about what you found.
 
@@ -900,15 +1410,9 @@ No package.json file was found in the workspace root.`;
     criterion: CriteriaConfig,
     conversationHistory: ConversationTurn[]
   ): string {
-    const historySection =
-      conversationHistory.length > 0
-        ? `\n\n## Previous Iterations (for context)\n${conversationHistory
-            .map((t) => {
-              const car = t.codingAgentResponse ?? "(no response captured)";
-              return `### Iteration ${t.iteration}\n- **Coding agent response**: ${car.substring(0, 300)}${car.length > 300 ? "..." : ""}\n- **Passed**: ${t.passed}`;
-            })
-            .join("\n\n")}`
-        : "";
+    const historySection = buildPriorResultsSection(conversationHistory, [
+      criterion.id,
+    ]);
 
     return `Evaluate criterion "${criterion.id}": ${criterion.prompt}${historySection}`;
   }

@@ -26,6 +26,25 @@ export interface JudgeEvaluateRequest {
    *  them into one whole-run trajectory (cross-iteration behavior is visible in a
    *  single evaluation). Takes precedence over `atifUrl`. See issue #1156. */
   atifUrls?: string[];
+  /** The run's project — scopes the judge's criteria resolution to that project. */
+  projectId?: string;
+  /**
+   * 1-based number of the iteration currently being judged. Lets the judge
+   * label the current iteration's tool calls when assembling the cumulative
+   * run-wide tool-call history (prior iterations come from
+   * `conversationHistory[].toolCallsUrl`). Optional for backward compatibility;
+   * defaults to `conversationHistory.length + 1` when omitted. See scope #1255.
+   */
+  iteration?: number;
+  /**
+   * The coding agent's assistant message (prose) for the iteration being
+   * judged. Carried inline so the judge can expose it to criteria via the
+   * read-only `read_agent_response` tool. Required for grading no-code / Q&A
+   * scenarios where the deliverable *is* the agent's response. The current
+   * turn is not persisted until after the judge returns, so this is the only
+   * way the judge can see the in-flight response. See scope #1136.
+   */
+  currentAgentResponse?: string;
 }
 
 /**
@@ -96,6 +115,13 @@ const DEFAULT_JUDGE_CLIENT_RETRIES = 2;
  * idempotent, so retrying is safe. We deliberately do NOT retry version
  * mismatches: those are a deployment/version problem that won't self-heal
  * within the retry window.
+ *
+ * For transport-level failures, undici throws `TypeError: fetch failed` where
+ * `error.message` is literally just `"fetch failed"` and the real reason (e.g.
+ * `ECONNRESET`, `socket hang up`) lives in `error.cause` (its `.message` and/or
+ * `.code`). We therefore match `"fetch failed"` explicitly and fold the cause's
+ * message and code into the searched haystack so those transient transport
+ * failures become retryable. See scope #1317.
  */
 export function isRetryableJudgeError(error: unknown): boolean {
   if (!error) return false;
@@ -103,15 +129,23 @@ export function isRetryableJudgeError(error: unknown): boolean {
     return (error.httpStatus ?? 0) >= 500 && !error.isVersionMismatch;
   }
   const msg = error instanceof Error ? error.message : String(error);
+  const cause = error instanceof Error ? error.cause : undefined;
+  const causeMsg = cause instanceof Error ? cause.message : cause ? String(cause) : "";
+  const causeCode =
+    cause && typeof cause === "object" && "code" in cause
+      ? String((cause as { code?: unknown }).code)
+      : "";
+  const haystack = `${msg} ${causeMsg} ${causeCode}`;
   return (
-    msg.includes("The operation was aborted") ||
-    msg.includes("TimeoutError") ||
-    msg.includes("abort") ||
-    msg.includes("ECONNRESET") ||
-    msg.includes("ECONNREFUSED") ||
-    msg.includes("ETIMEDOUT") ||
-    msg.includes("socket hang up") ||
-    msg.includes("network")
+    haystack.includes("fetch failed") ||
+    haystack.includes("The operation was aborted") ||
+    haystack.includes("TimeoutError") ||
+    haystack.includes("abort") ||
+    haystack.includes("ECONNRESET") ||
+    haystack.includes("ECONNREFUSED") ||
+    haystack.includes("ETIMEDOUT") ||
+    haystack.includes("socket hang up") ||
+    haystack.includes("network")
   );
 }
 

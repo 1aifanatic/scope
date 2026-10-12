@@ -165,7 +165,7 @@ export function CriteriaList() {
       width: "200px",
       hidden: visibility.isHidden("id"),
       cell: (c) => (
-        <span className="font-mono text-sm font-medium">{c.id}</span>
+        <CriteriaBadge criterionId={c.id} prompt={c.prompt} />
       ),
     },
     {

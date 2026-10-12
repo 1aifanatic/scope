@@ -6,7 +6,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { PORTAL_AI_REGISTRATION_GUIDANCE } from "@/lib/portal-ai-copy";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
+import { HelpTooltip } from "@/components/HelpTooltip";
 import { gatesSatisfyInvariant, GATE_METADATA, orderGateIds } from "@/lib/gates";
 import { TAXONOMY_ELEMENT_METADATA } from "@/types";
 import { Loader2, Check, RefreshCw } from "lucide-react";
@@ -33,6 +35,8 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
     suggestedChildren,
     acceptedChildren,
     setAcceptedChildren,
+    hasCompatibleParentCandidates,
+    hasCompatibleChildCandidates,
     handleRegenerate,
     generateMutation,
     createMutation,
@@ -112,6 +116,16 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
             !acceptedChildren.includes(c.id)
           }
         />
+        {!hasCompatibleParentCandidates && (
+          <div className="flex items-center gap-1 text-xs font-medium text-amber-600" role="note">
+            <span>No gate-compatible criteria available as parents.</span>
+            <HelpTooltip
+              size="xs"
+              ariaLabel="Why no parents are available"
+              text="A parent must be compatible with all of this criterion's gates — none of the existing criteria qualify. Change the gates, or create the parent criterion first."
+            />
+          </div>
+        )}
         <p className="text-xs text-muted-foreground">
           Criteria that must pass before this one is evaluated. {kind === "gate" ? "Only criteria compatible with every selected gate are shown." : "Only observation criteria are shown."} List only direct parents —
           the judge automatically evaluates all transitive ancestors in topological order,
@@ -136,6 +150,16 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
             !dependsOn.includes(c.id)
           }
         />
+        {!hasCompatibleChildCandidates && (
+          <div className="flex items-center gap-1 text-xs font-medium text-amber-600" role="note">
+            <span>No gate-compatible criteria available as children.</span>
+            <HelpTooltip
+              size="xs"
+              ariaLabel="Why no children are available"
+              text="A child must be compatible with a subset of this criterion's gates — none of the existing criteria qualify. Change the gates, or create the child criterion first."
+            />
+          </div>
+        )}
         <p className="text-xs text-muted-foreground">
           These criteria will be updated to depend on <span className="font-mono">{id || "this criterion"}</span> after creation.
           {kind === "gate" ? " Only criteria compatible with a subset of the selected gates are shown." : " Only observation criteria are shown."}
@@ -174,7 +198,9 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
 
         {generateMutation.isError && (
           <p className="text-xs text-amber-600">
-            AI generation unavailable — register a GitHub Models token or write your prompt manually
+            AI generation failed — {generateMutation.error instanceof Error
+              ? generateMutation.error.message
+              : PORTAL_AI_REGISTRATION_GUIDANCE}
           </p>
         )}
 

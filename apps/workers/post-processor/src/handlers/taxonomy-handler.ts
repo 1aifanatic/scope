@@ -4,9 +4,11 @@
 import { JudgeClient, isRetryableJudgeError } from "shared";
 import type { ConversationTurn, CriterionResult, CriterionSubject } from "shared";
 import type { PostProcessHandler, PostProcessorMessage, HandlerContext } from "../types.js";
+import { POST_PROCESSOR_VERSION } from "../version.js";
 
 /** Minimal shape of the request document fields this handler reads/writes. */
 interface RequestDoc {
+  projectId: string;
   /** Observation-criteria ids selected at submit. Stored at the request
    *  top-level by the API (see RequestDocument.observations / issue #1156),
    *  NOT under `run` — the run subdocument only carries per-turn results. */
@@ -44,6 +46,8 @@ interface CriterionMeta {
  */
 export class TaxonomyHandler implements PostProcessHandler {
   readonly type = "taxonomy";
+  readonly version = POST_PROCESSOR_VERSION;
+  readonly autoBackfill = true;
   private readonly judge: JudgeClient;
 
   constructor(judge?: JudgeClient, judgeUrl = process.env.JUDGE_URL || process.env.JUDGE_SERVICE_URL || "http://localhost:3002") {
@@ -56,6 +60,7 @@ export class TaxonomyHandler implements PostProcessHandler {
     const doc = (await ctx.collection.findOne({ _id: requestId } as any)) as RequestDoc | null;
     const observations = doc?.observations ?? [];
     const turns = doc?.run?.turns ?? [];
+    const projectId = doc?.projectId;
 
     if (observations.length === 0) {
       await ctx.log("info", "No observations selected, skipping taxonomy evaluation");
@@ -65,19 +70,25 @@ export class TaxonomyHandler implements PostProcessHandler {
       await ctx.log("info", "No turns found, skipping taxonomy evaluation");
       return;
     }
+    if (!projectId) {
+      throw new Error(`Request '${requestId}' is missing projectId`);
+    }
 
     // Resolve each selected observation's evaluation granularity. A missing/unknown
     // subject defaults to "run" (the observation default), so legacy criteria authored
     // before the `subject` field get whole-run evaluation.
     const metas = (await ctx.criteriaCollection
-      .find({ id: { $in: observations } }, { projection: { id: 1, subject: 1 } } as any)
+      .find(
+        { projectId, id: { $in: observations } },
+        { projection: { id: 1, subject: 1 } } as any,
+      )
       .toArray()) as unknown as CriterionMeta[];
     const subjectById = new Map(metas.map((m) => [m.id, m.subject]));
     const iterationObs = observations.filter((id) => subjectById.get(id) === "iteration");
     const runObs = observations.filter((id) => subjectById.get(id) !== "iteration");
 
-    await this.evaluateIterationObservations(iterationObs, turns, iteration, requestId, ctx);
-    await this.evaluateRunObservations(runObs, turns, iteration, requestId, ctx);
+    await this.evaluateIterationObservations(iterationObs, turns, iteration, requestId, projectId, ctx);
+    await this.evaluateRunObservations(runObs, turns, iteration, requestId, projectId, ctx);
   }
 
   /** Per-iteration observations → `turn.observationResults` (one judge call per turn). */
@@ -86,6 +97,7 @@ export class TaxonomyHandler implements PostProcessHandler {
     turns: ConversationTurn[],
     iteration: number | undefined,
     requestId: string,
+    projectId: string,
     ctx: HandlerContext,
   ): Promise<void> {
     if (iterationObs.length === 0) return;
@@ -106,6 +118,7 @@ export class TaxonomyHandler implements PostProcessHandler {
           conversationHistory: turns,
           ...(turn.atifUrl ? { atifUrl: turn.atifUrl } : {}),
           requestId,
+          projectId,
         });
 
         const observationResults: CriterionResult[] = result.criteriaResults ?? [];
@@ -144,6 +157,7 @@ export class TaxonomyHandler implements PostProcessHandler {
     turns: ConversationTurn[],
     iteration: number | undefined,
     requestId: string,
+    projectId: string,
     ctx: HandlerContext,
   ): Promise<void> {
     if (runObs.length === 0) return;
@@ -174,6 +188,7 @@ export class TaxonomyHandler implements PostProcessHandler {
         conversationHistory: turns,
         ...(atifUrls.length > 0 ? { atifUrls } : {}),
         requestId,
+        projectId,
       });
 
       const runObservationResults: CriterionResult[] = result.criteriaResults ?? [];

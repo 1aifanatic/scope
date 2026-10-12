@@ -1,8 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { isUnexpected } from "@azure-rest/ai-inference";
-import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
+import {
+  completePortalLlm,
+  isLlmAvailable as inferenceAvailable,
+} from "./llm-token.js";
 
 // ---------------------------------------------------------------------------
 // Generate task prompt from a short description or create a variation
@@ -44,6 +46,16 @@ export interface GenerateTaskPromptResult {
   taskPrompt: string;
 }
 
+export interface TaskPromptRequest {
+  messages: [
+    { role: "system"; content: string },
+    { role: "user"; content: string },
+  ];
+  model: string;
+  temperature: number;
+  max_tokens: number;
+}
+
 export function isTaskPromptLlmAvailable(): boolean {
   return inferenceAvailable();
 }
@@ -76,52 +88,47 @@ function buildVariationUserMessage(existingPrompt: string, guidance?: string): s
   return parts.join("\n");
 }
 
-export async function generateTaskPrompt(
+export function buildTaskPromptRequest(
   opts: { description?: string; existingPrompt?: string },
-  existingPrompts: string[] = [],
-  model?: string,
-): Promise<GenerateTaskPromptResult> {
+  existingPrompts: string[],
+  model: string,
+): TaskPromptRequest {
   const { description, existingPrompt } = opts;
-
-  const { client: llm, model: foundryModel } = await acquireInferenceClient();
-
-  // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
-  const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
-
   const isVariation = !!existingPrompt;
-  const systemPrompt = isVariation ? VARIATION_SYSTEM_PROMPT : GENERATE_SYSTEM_PROMPT;
-  const userMessage = isVariation
-    ? buildVariationUserMessage(existingPrompt!, description)
-    : buildGenerateUserMessage(description, existingPrompts);
+  return {
+    messages: [
+      {
+        role: "system",
+        content: isVariation
+          ? VARIATION_SYSTEM_PROMPT
+          : GENERATE_SYSTEM_PROMPT,
+      },
+      {
+        role: "user",
+        content: isVariation
+          ? buildVariationUserMessage(existingPrompt, description)
+          : buildGenerateUserMessage(description, existingPrompts),
+      },
+    ],
+    model,
+    temperature: 0.7,
+    max_tokens: 1024,
+  };
+}
 
-  const response = await llm.path("/chat/completions").post({
-    body: {
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      model: modelName,
-      temperature: 0.7,
-      max_tokens: 1024,
-    },
-  });
-
-  if (isUnexpected(response)) {
-    const errBody = response.body as any;
-    throw new Error(
-      `LLM request failed: ${errBody?.error?.message || response.status}`,
-    );
-  }
-
-  const content = response.body.choices?.[0]?.message?.content;
-  if (!content) {
-    throw new Error("LLM returned empty response");
-  }
-
+export function parseTaskPromptResponse(
+  content: string,
+): GenerateTaskPromptResult {
   const cleaned = content.replace(/```json\s*|```\s*/g, "").trim();
   try {
-    const parsed = JSON.parse(cleaned);
-    if (!parsed.taskPrompt || typeof parsed.taskPrompt !== "string") {
+    const parsed: unknown = JSON.parse(cleaned);
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      !("taskPrompt" in parsed) ||
+      typeof parsed.taskPrompt !== "string" ||
+      parsed.taskPrompt.trim().length === 0
+    ) {
       throw new Error("Missing required 'taskPrompt' field");
     }
 
@@ -135,4 +142,23 @@ export async function generateTaskPrompt(
     }
     throw new Error(`Failed to parse LLM response: ${(err as Error).message}\nRaw: ${cleaned}`);
   }
+}
+
+export async function generateTaskPrompt(
+  opts: { description?: string; existingPrompt?: string },
+  existingPrompts: string[] = [],
+  model?: string,
+): Promise<GenerateTaskPromptResult> {
+  const { description, existingPrompt } = opts;
+  const modelName = model || process.env.LLM_MODEL || "gpt-4.1";
+
+  const request = buildTaskPromptRequest(
+    { description, existingPrompt },
+    existingPrompts,
+    modelName,
+  );
+
+  const content = await completePortalLlm(request, model);
+
+  return parseTaskPromptResponse(content);
 }

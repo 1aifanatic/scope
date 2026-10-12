@@ -11,14 +11,28 @@ vi.mock("@azure-rest/ai-inference", () => ({
 // Mock the inference client acquisition; the per-test `postSpy` drives responses.
 const postSpy = vi.fn();
 vi.mock("./llm-token.js", () => ({
-  acquireInferenceClient: vi.fn(async () => ({
-    client: { path: () => ({ post: postSpy }) },
-    model: "test-model",
-  })),
+  completePortalLlm: vi.fn(async (request: {
+    messages: Array<{ role: string; content: string }>;
+    model: string;
+    temperature: number;
+    max_tokens: number;
+  }, explicitModel?: string) => {
+    const { postAdaptiveChatCompletion } = await import("./adaptive-chat-completions.js");
+    const response = await postAdaptiveChatCompletion({
+      endpoint: "https://test.example.com/models",
+      model: explicitModel || request.model,
+      messages: request.messages,
+      temperature: request.temperature,
+      maxTokens: request.max_tokens,
+      send: (body) => postSpy({ body }),
+    });
+    return response.body.choices[0].message.content;
+  }),
   isLlmAvailable: () => true,
 }));
 
 import { generateCriteriaPrompt, type ExistingCriterion } from "./llm.js";
+import { clearChatCompletionCompatibilityCache } from "./adaptive-chat-completions.js";
 
 /** Wrap a JSON payload in the chat-completions response envelope. */
 function reply(payload: unknown) {
@@ -36,6 +50,7 @@ function kindOf(body: any): "author" | "parents" | "children" {
 
 beforeEach(() => {
   postSpy.mockReset();
+  clearChatCompletionCompatibilityCache();
 });
 
 describe("generateCriteriaPrompt — gate-aware suggestions", () => {
@@ -82,6 +97,26 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
     expect(res.suggestedChildren).toEqual(["select_b"]);
   });
 
+  it("reconciles a contradictory id by keeping the parent edge and dropping it from children", async () => {
+    // The independent parent/child calls can both return the same id for a
+    // tightly-coupled pair (a logical 2-cycle). Reconciliation must prefer the
+    // parent edge and remove the id from the child set, while keeping any other
+    // legitimate child.
+    postSpy.mockImplementation(async ({ body }: any) => {
+      const kind = kindOf(body);
+      if (kind === "author") return reply({ prompt: "p", suggestedId: "x" });
+      if (kind === "parents") return reply({ suggestions: ["build_a"] });
+      // build_a is contradictory (also a parent); select_b is a genuine child.
+      return reply({ suggestions: ["build_a", "select_b"] });
+    });
+
+    const res = await generateCriteriaPrompt("behave", existing, ["select", "build"]);
+
+    expect(res.suggestedParents).toEqual(["build_a"]);
+    // build_a removed (kept as parent), the legitimate child retained.
+    expect(res.suggestedChildren).toEqual(["select_b"]);
+  });
+
   it("issues all three calls in parallel", async () => {
     postSpy.mockImplementation(async ({ body }: any) => {
       const kind = kindOf(body);
@@ -91,6 +126,25 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
 
     await generateCriteriaPrompt("behave", existing, ["select"]);
     expect(postSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("uses the model-independent modern request shape initially", async () => {
+    postSpy.mockImplementation(async ({ body }: any) => {
+      const kind = kindOf(body);
+      if (kind === "author") return reply({ prompt: "p", suggestedId: "x" });
+      return reply({ suggestions: [] });
+    });
+
+    await generateCriteriaPrompt("behave", existing, undefined, "gpt-5.4-mini");
+
+    for (const [{ body }] of postSpy.mock.calls) {
+      expect(body).toMatchObject({
+        model: "gpt-5.4-mini",
+        max_completion_tokens: 512,
+        temperature: 0.3,
+      });
+      expect(body).not.toHaveProperty("max_tokens");
+    }
   });
 
   it("degrades a failed suggestion call to [] without failing generation", async () => {
@@ -131,5 +185,67 @@ describe("generateCriteriaPrompt — gate-aware suggestions", () => {
 
     expect(seen.parents).toBe(existing.length);
     expect(seen.children).toBe(existing.length);
+  });
+
+  it("steers the author prompt toward captured tool output for tool-output gates", async () => {
+    let authorUserMsg = "";
+    postSpy.mockImplementation(async ({ body }: any) => {
+      const kind = kindOf(body);
+      if (kind === "author") {
+        authorUserMsg = body.messages[1].content;
+        return reply({ prompt: "p", suggestedId: "x" });
+      }
+      return reply({ suggestions: [] });
+    });
+
+    await generateCriteriaPrompt("project builds", existing, ["build"]);
+
+    expect(authorUserMsg).toContain("build gate");
+    expect(authorUserMsg).toMatch(/tool output/i);
+  });
+
+  it("presents both sources for a select-gated criterion and elevates the captured tool-call history for agent-action behaviors", async () => {
+    let authorUserMsg = "";
+    postSpy.mockImplementation(async ({ body }: any) => {
+      const kind = kindOf(body);
+      if (kind === "author") {
+        authorUserMsg = body.messages[1].content;
+        return reply({ prompt: "p", suggestedId: "x" });
+      }
+      return reply({ suggestions: [] });
+    });
+
+    await generateCriteriaPrompt("uses typescript", existing, ["select"]);
+
+    expect(authorUserMsg).toContain("select gate");
+    // The codebase stays an option for structural / how-the-code-is-written behaviors...
+    expect(authorUserMsg).toMatch(/codebase/i);
+    // ...but the select hint must NOT force "primarily from the codebase": that lead
+    // made the model drop tool-history mentions for select-gated agent-action
+    // criteria (e.g. "ran npx bootstrap", "used a skill + MCP"). See #1225.
+    expect(authorUserMsg).not.toMatch(/primarily from the codebase/i);
+    // For behaviors about what the agent actually did or ran, the captured tool-call
+    // history is the PRIMARY evidence even under the select gate.
+    expect(authorUserMsg).toMatch(/tool-call history/i);
+    expect(authorUserMsg).toMatch(/primary evidence/i);
+  });
+
+  it("advertises the full captured tool-call history in the author system prompt, not just gate commands", async () => {
+    let authorSystemMsg = "";
+    postSpy.mockImplementation(async ({ body }: any) => {
+      const kind = kindOf(body);
+      if (kind === "author") {
+        authorSystemMsg = body.messages[0].content;
+        return reply({ prompt: "p", suggestedId: "x" });
+      }
+      return reply({ suggestions: [] });
+    });
+
+    await generateCriteriaPrompt("agent curled the running server", existing, ["select"]);
+
+    // The generator must convey that the judge sees the agent's ENTIRE captured
+    // tool-call history — not only build/test/run/deploy gate commands. See #1225.
+    expect(authorSystemMsg).toMatch(/tool-call history/i);
+    expect(authorSystemMsg).toMatch(/any other command or tool/i);
   });
 });

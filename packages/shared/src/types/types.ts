@@ -4,6 +4,7 @@
 import type { McpServerConfig } from './mcp.js';
 import type { SkillConfig } from './skill.js';
 import type { ExtensionConfig } from './extension.js';
+import type { ResourceBinding, ResourceConfig, ResourceRunOutcome } from './resource.js';
 import type { ToolCall } from '../har/types.js';
 
 // Re-export ToolCall so consumers can import from types
@@ -32,7 +33,7 @@ export interface GateMetadata {
 export const GATE_METADATA: Record<GateId, GateMetadata> = {
   select: {
     id: "select",
-    label: "Select",
+    label: "Requirements",
     description: "Agent implements the task (current behaviour).",
   },
   build: {
@@ -61,6 +62,12 @@ export const GATE_METADATA: Record<GateId, GateMetadata> = {
 export function isGateId(value: unknown): value is GateId {
   return typeof value === "string" && (GATES as readonly string[]).includes(value);
 }
+
+/** Non-gate prompt kinds — prompt types that are not pipeline gates. */
+export const NON_GATE_PROMPT_TYPES = ["agents.md"] as const;
+
+/** Every prompt-type discriminator: the gates plus non-gate kinds. */
+export const PROMPT_TYPES = [...GATES, ...NON_GATE_PROMPT_TYPES] as const;
 
 /**
  * Discriminator for what a criterion is used for. `"gate"` (default) gates the
@@ -120,10 +127,17 @@ export function isTaxonomyElementId(value: unknown): value is TaxonomyElementId 
 }
 
 /**
- * A prompt's type discriminator — one literal per gate. The prompt that drives
- * a gate must have a `type` equal to that gate's id.
+ * A prompt's type discriminator. Either a gate id — the prompt that drives that
+ * gate, where `select` is the request's task prompt — or a non-gate kind such
+ * as `agents.md` (an AGENTS.md instruction file delivered into the agent
+ * workspace). Absent on a document ⇒ legacy `'select'`.
  */
-export type PromptType = GateId;
+export type PromptType = (typeof PROMPT_TYPES)[number];
+
+/** True when `value` is a valid prompt type (a gate id or a non-gate kind). */
+export function isPromptType(value: unknown): value is PromptType {
+  return typeof value === "string" && (PROMPT_TYPES as readonly string[]).includes(value);
+}
 
 /**
  * Per-gate configuration on a request. Describes which prompt drives the gate,
@@ -266,7 +280,7 @@ export interface AgentVersion {
   gitCommit: string;                     // Short SHA of the build
   buildTime: string;                     // Build timestamp (e.g. "20260318T163740Z")
   imageTag: string;                      // Full image tag (same as workerVersion)
-  queueName: string;                     // Queue this version listens on
+  queueName?: string;                    // Queue this version listens on; legacy records may omit it
   status: "active" | "retired";
   createdAt: Date;
 }
@@ -274,6 +288,10 @@ export interface AgentVersion {
 // Capabilities declared by a coding agent (worker-level features)
 export interface AgentCapabilities {
   supportsReasoningEffort?: boolean;  // Whether the worker can pass reasoning effort to the underlying agent
+  supportsMcpServers?: boolean;       // Whether the worker can configure MCP servers
+  supportsSkills?: boolean;           // Whether the worker can consume installed agent skills
+  supportsExtensions?: boolean;       // Whether the worker can install VS Code extensions
+  supportsResources?: boolean;        // Whether the worker provisions resources (setup/teardown) before the agent runs
 }
 
 // Coding agent definition stored in MongoDB
@@ -284,7 +302,7 @@ export interface CodingAgentDocument {
   modelProvider?: string;     // Model provider (e.g. "github-copilot", "anthropic") — used by scanners to discover agents
   supportedModels: string[];  // Empty array = model selection disabled
   defaultModel?: string;
-  available?: boolean;        // Whether this agent is available for new submissions (default: true)
+  available?: boolean;        // Only explicit true makes this agent available for new submissions
   capabilities?: AgentCapabilities;  // Worker-level capabilities
   versions?: AgentVersion[];  // Registered agent versions (embedded array)
   createdAt: Date;
@@ -315,6 +333,7 @@ export interface OsInfo {
 // Request document stored in MongoDB
 export interface RequestDocument {
   _id: string;  // UUID as _id (for CosmosDB sharding compatibility)
+  projectId: string;             // FK → ProjectDocument._id (immutable scope; set at submit)
   scenario: Scenario;            // The task + criteria (source of truth)
   workerType: string;
   model?: string;              // Model selected for this run
@@ -327,10 +346,40 @@ export interface RequestDocument {
   persona?: Persona;             // Original persona object for traceability
   deletedAt?: Date;              // Soft-delete timestamp (null/absent = active)
   taskPromptId?: string;            // Materialized UUIDv5 of scenario.task (FK → TaskPromptDocument._id)
-  promptFeatureExtractionId?: string; // @deprecated — use TaskPromptDocument.features via taskPromptId instead
+  /**
+  * FK → TaskPromptDocument._id of an AGENTS.md-typed prompt to deliver into
+  * the agent's workspace for this run. When set, the worker writes the
+  * resolved content to `<workspace>/AGENTS.md` before the run starts.
+  */
+  agentsMdPromptId?: string;
+  /**
+  * Lineage edges for the AGENTS.md candidate: the parent AGENTS.md prompt ids
+  * this candidate was derived from. Empty/absent = root (seed); one entry =
+  * reflective mutation; two entries = merge. Recorded on the request so the
+  * full lineage DAG can be reconstructed by querying related requests.
+  */
+  agentsMdParentIds?: string[];
   mcpServers?: string[];          // MCP server slugs selected for this run
   skillRevisions?: string[];      // Skill revision refs (e.g. "vercel-labs/agent-skills/my-skill@a1b2c3d")
   codebaseRevisionId?: string;    // FK → CodebaseRevisionDocument._id — seeds the workspace before the agent starts
+  /**
+   * Resolved resource bindings, in setup order.
+   *
+   * The revision is pinned at submit time so the run stays reproducible after the
+   * resource is edited, and `params` is stored **fully resolved** (defaults, then
+   * profile presets, then run-supplied values) rather than as a diff — a run must
+   * be explainable from its own document without re-reading a revision whose
+   * defaults may since have been superseded.
+   *
+   * Deliberately one grouped array rather than parallel `resourceRevisionIds` and
+   * `resourceParams` arrays: parallel lists would have to stay the same length and
+   * order forever, an invariant nothing enforces and any future writer can break.
+   *
+   * Shares its name with `RunState.resources`, which records the *outcome* of the
+   * same list keyed by the same `revisionId`. One is what was asked for, the other
+   * is what happened.
+   */
+  resources?: ResourceBinding[];
   extensions?: string[];           // VS Code extension IDs selected for this run (e.g. "ms-python.python")
   agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
   profileId?: string;             // FK → ProfileDocument._id (the profile lineage)
@@ -418,6 +467,9 @@ export interface RunState {
   _id: string;                              // Unique per attempt
   attemptNumber: number;                    // 1, 2, 3…
   status: "pending" | "queued" | "processing" | "paused" | "done";
+  /** Physical queue used for the current dispatch claim. Cleared when the claim
+   * is rolled back or accepted for processing. */
+  queuedQueueName?: string;
   outcome?: "succeeded" | "failed" | "finished";
   result?: string;
   error?: string;
@@ -438,6 +490,18 @@ export interface RunState {
   /** When this run was last resumed from paused state */
   resumedAt?: Date;
   turns?: ConversationTurn[];
+  /** Outcome of each resource this run provisioned, in setup order.
+   *
+   *  Recorded so a run that ended up without the environment it asked for is
+   *  visibly different from one that had it. The dangerous failure mode this
+   *  guards against is a run that completes, looks valid, and silently had no
+   *  MCP tools — a comparison against such a run is meaningless, so it must be
+   *  distinguishable after the fact rather than only in the live log. */
+  resources?: ResourceRunOutcome[];
+  /** Whether MCP servers were actually registered with the gateway for this
+   *  run. `false` with a non-empty `mcpServers` on the request means the profile
+   *  ran without the tools it was configured with. */
+  mcpRegistered?: boolean;
   workerVersion?: string;
   os?: OsInfo;
   /** Wall-clock time of the last heartbeat written by the worker actively
@@ -489,6 +553,7 @@ export interface RunState {
  */
 export interface RunHistoryDocument extends RunState {
   requestId: string;                        // FK → RequestDocument._id
+  projectId: string;                        // FK → ProjectDocument._id (denormalized from request)
 }
 
 /** A post-process handler registered in the `services` collection. */
@@ -533,7 +598,14 @@ export interface WorkerProcessorOptions {
   model?: string;
   /** Reasoning effort level to apply (e.g. "low", "medium", "high"). */
   reasoningEffort?: string;
+  /** Project scope of the run. Threaded through so workers that resolve
+   *  per-project skill revisions (by ref) hit the right project's copy. */
+  projectId?: string;
   mcpServerConfigs?: McpServerConfig[];  // Resolved MCP server configurations
+  /** Resolved resources to provision before the agent starts and release after
+   *  it finishes. Their setup phases publish connection details that are
+   *  interpolated into MCP server config and merged into the agent's env. */
+  resourceConfigs?: ResourceConfig[];
   skillConfigs?: SkillConfig[];          // Resolved skill configurations for prompt injection
   extensionConfigs?: ExtensionConfig[];  // Resolved VS Code extension configurations for runtime installation
   /** Current iteration number (1-based) for multi-turn runs. Used by the
@@ -581,6 +653,9 @@ export interface SetupResult {
 // Worker processor interface - each worker implements this
 export interface WorkerProcessor {
   readonly workerName: string;
+  /** Optional explicit skill layout. Omit to install only to the universal
+   * `.agents/skills` location instead of inferring behavior from the worker ID. */
+  readonly skillAgentType?: "copilot" | "claude-code";
   /** The workspace directory used by this worker for the current run. When set,
    *  the queue processor uses this instead of the WORKSPACE_PATH env var. */
   readonly workspacePath?: string;
@@ -593,6 +668,10 @@ export interface WorkerProcessor {
   setup?(log: WorkerLogFn, options?: WorkerProcessorOptions): Promise<SetupResult | void>;
   /** Called once after the last processMessage in a run. Always called if setup() was called, even on error. */
   teardown?(log: WorkerLogFn): Promise<void>;
+  /** Lifecycle observations to persist on the run record. Read after teardown so
+   *  a run that ended up without the environment or tools it asked for is
+   *  distinguishable after the fact, not only in the live log. */
+  getRunObservations?(): { resources?: ResourceRunOutcome[]; mcpRegistered?: boolean };
 }
 
 // Base configuration for queue processors
@@ -716,6 +795,7 @@ export interface FeedbackConfig {
 
 // Criteria document stored in MongoDB (extends CriteriaConfig with DB metadata)
 export interface CriteriaDocument extends CriteriaConfig {
+  projectId: string;  // FK → ProjectDocument._id (immutable scope)
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;  // Soft-delete timestamp
@@ -739,6 +819,7 @@ export interface Reporter {
 export interface ReportDocument {
   _id: string;           // UUID
   requestId: string;     // FK → RequestDocument._id
+  projectId: string;     // FK → ProjectDocument._id (denormalized from request)
   templateId?: string;   // FK → ReportTemplateDocument.id (slug of template that generated this report)
   reporter?: Reporter;   // Set by the worker when it picks up the job
   content?: string;      // Generated markdown report
@@ -797,6 +878,7 @@ export interface ReportTemplateSystemPrompt {
 /** Report template document stored in MongoDB */
 export interface ReportTemplateDocument {
   _id: string;                           // Auto-generated UUID
+  projectId: string;                     // FK → ProjectDocument._id (immutable scope)
   id: string;                            // Human-readable slug (e.g. "default", "failure-analysis")
   name: string;                          // Display name
   description?: string;
@@ -822,6 +904,7 @@ export interface InsightReference {
 /** Insight document stored in MongoDB */
 export interface InsightDocument {
   _id: string;           // UUID
+  projectId: string;     // FK → ProjectDocument._id (from source report, or ?projectId= if user-created)
   title: string;         // Short summary (one line)
   /** Markdown-formatted detailed observation */
   description: string;
@@ -844,9 +927,32 @@ export interface InsightDocument {
 
 /** Task prompt document stored in MongoDB. Immutable — text cannot be changed after creation. */
 export interface TaskPromptDocument {
-  _id: string;                          // UUIDv5 (content-addressed; see computePromptId)
-  type?: PromptType;                    // Which gate this prompt drives. Absent = legacy "select".
-  text: string;                         // Full task prompt text
+  _id: string;                          // Fresh UUID (per-project copy)
+  projectId: string;                    // FK → ProjectDocument._id (immutable scope; per-project copy)
+  /**
+   * Content-address key: `computePromptId(type, text)`. Stable across projects
+   * for identical `(type, text)`, so the same prompt text yields the same
+   * `keyId` in every project. Uniqueness is enforced per-project via a
+   * `{ projectId, keyId }` unique index — distinct projects get distinct `_id`s
+   * for the same `keyId`.
+   */
+  keyId: string;
+  /**
+   * Inline prompt body. Present when the body is small enough to store in
+   * Mongo (≤ PROMPT_INLINE_MAX_BYTES). Mutually exclusive with
+   * `contentBlobUrl` — exactly one is set. Optional so large bodies can live
+   * in blob storage instead.
+   */
+  text?: string;
+  /**
+   * Blob reference to the prompt body when it exceeds the inline size
+   * threshold. Mutually exclusive with `text`. The body is fetched via
+   * `resolvePromptText` server-side.
+   */
+  contentBlobUrl?: string;
+  /** Which gate this prompt drives, or a non-gate kind (e.g. `agents.md`).
+   *  Absent ⇒ legacy `'select'` (the request's task prompt). */
+  type?: PromptType;
   features?: PromptFeatureResult[];     // Detected prompt features
   featuresExtractedAt?: Date;           // When features were last extracted
   createdAt: Date;
@@ -861,10 +967,17 @@ export interface TaskPromptDocument {
 export interface PromptFeatureConfig {
   id: string;
   prompt: string;
+  /**
+   * Which prompt type this feature applies to. Absent ⇒ `'select'` (backward
+   * compatible). Feature extraction only considers features whose `type`
+   * matches the prompt being extracted.
+   */
+  type?: PromptType;
 }
 
 /** Prompt feature document stored in MongoDB (extends PromptFeatureConfig with DB metadata) */
 export interface PromptFeatureDocument extends PromptFeatureConfig {
+  projectId: string;  // FK → ProjectDocument._id (immutable scope)
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;  // Soft-delete timestamp
@@ -882,18 +995,6 @@ export interface SuggestedPromptFeature {
   suggestedId: string;
   behavior: string;
   prompt: string;
-}
-
-/** Stored extraction result — maps a task prompt to its detected features */
-export interface PromptFeatureExtraction {
-  _id?: string;
-  taskText: string;
-  taskTextHash?: string;
-  promptFeatureResults: PromptFeatureResult[];
-  suggestedFeatures?: SuggestedPromptFeature[];
-  extractedAt: Date;
-  model?: string;
-  cached?: boolean;
 }
 
 // =============================================================================

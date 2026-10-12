@@ -119,6 +119,7 @@ export function createMockTaskPromptStore(): Record<string, any> {
       createdAt: new Date(),
     }),
     getAll: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    resolvePromptText: vi.fn().mockResolvedValue("mock task"),
     delete: vi.fn().mockResolvedValue(undefined),
     attachFeatures: vi.fn().mockResolvedValue({
       _id: "tp-mock-id",
@@ -157,6 +158,28 @@ export function createMockSkillResolver(): Record<string, any> {
   };
 }
 
+export function createMockResourceStore(): Record<string, any> {
+  return {
+    get: vi.fn().mockResolvedValue(null),
+    getBySlug: vi.fn().mockResolvedValue(null),
+  };
+}
+
+export function createMockResourceRevisionStore(): Record<string, any> {
+  return {
+    get: vi.fn().mockResolvedValue(null),
+    getByNumber: vi.fn().mockResolvedValue(null),
+    getLatest: vi.fn().mockResolvedValue(null),
+    getByRef: vi.fn().mockResolvedValue(null),
+  };
+}
+
+export function createMockResourceResolver(): Record<string, any> {
+  return {
+    createRevision: vi.fn(),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Mock BlobStorage
 // ---------------------------------------------------------------------------
@@ -183,7 +206,6 @@ export function createAllMockDependencies() {
   const runsCollection = createMockCollection();
   const criteriaCollection = createMockCollection();
   const promptFeatureCollection = createMockCollection();
-  const promptFeatureExtractionCollection = createMockCollection();
   const reportCollection = createMockCollection();
   const agentCollection = createMockCollection();
   const modelCollection = createMockCollection();
@@ -196,15 +218,15 @@ export function createAllMockDependencies() {
   const skillRevisionCollection = createMockCollection();
   const profileCollection = createMockCollection();
   const profileVersionCollection = createMockCollection();
+  const usersCollection = createMockCollection();
   const taskPromptStore = createMockTaskPromptStore();
   const skillRevisionStore = createMockSkillRevisionStore();
   const skillResolver = createMockSkillResolver();
+  const resourceStore = createMockResourceStore();
+  const resourceRevisionStore = createMockResourceRevisionStore();
+  const resourceResolver = createMockResourceResolver();
   const reportQueueClient = createMockQueueClient();
   const blobStorage = createMockBlobStorage();
-
-  const queueClients = new Map<string, ReturnType<typeof createMockQueueClient>>();
-  queueClients.set("coder-acp-claude-code", createMockQueueClient());
-  queueClients.set("coder-acp-copilot", createMockQueueClient());
 
   return {
     db,
@@ -212,7 +234,6 @@ export function createAllMockDependencies() {
     runsCollection,
     criteriaCollection,
     promptFeatureCollection,
-    promptFeatureExtractionCollection,
     reportCollection,
     agentCollection,
     modelCollection,
@@ -225,10 +246,15 @@ export function createAllMockDependencies() {
     skillRevisionCollection,
     profileCollection,
     profileVersionCollection,
+    usersCollection,
+    authProvider: null,
+    userAccessResolver: null,
     taskPromptStore,
     skillRevisionStore,
     skillResolver,
-    queueClients,
+    resourceStore,
+    resourceRevisionStore,
+    resourceResolver,
     reportQueueClient,
     blobStorage,
   } as unknown as TestDependencies & {
@@ -238,7 +264,6 @@ export function createAllMockDependencies() {
     runsCollection: Collection;
     criteriaCollection: Collection;
     promptFeatureCollection: Collection;
-    promptFeatureExtractionCollection: Collection;
     reportCollection: Collection;
     agentCollection: Collection;
     modelCollection: Collection;
@@ -251,10 +276,13 @@ export function createAllMockDependencies() {
     skillRevisionCollection: Collection;
     profileCollection: Collection;
     profileVersionCollection: Collection;
+    usersCollection: Collection;
     taskPromptStore: ReturnType<typeof createMockTaskPromptStore>;
     skillRevisionStore: ReturnType<typeof createMockSkillRevisionStore>;
     skillResolver: ReturnType<typeof createMockSkillResolver>;
-    queueClients: Map<string, ReturnType<typeof createMockQueueClient>>;
+    resourceStore: ReturnType<typeof createMockResourceStore>;
+    resourceRevisionStore: ReturnType<typeof createMockResourceRevisionStore>;
+    resourceResolver: ReturnType<typeof createMockResourceResolver>;
     reportQueueClient: ReturnType<typeof createMockQueueClient>;
     blobStorage: ReturnType<typeof createMockBlobStorage>;
   };

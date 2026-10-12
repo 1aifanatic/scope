@@ -7,8 +7,18 @@ import { registerRunCommands } from "./run.js";
 
 interface MockResponse {
   ok: boolean;
+  status: number;
   json: () => Promise<unknown>;
 }
+
+/** Captures the outgoing request that the `ky` engine handed to `fetch`. */
+interface CapturedRequest {
+  url: string;
+  method: string;
+  body: string;
+}
+
+let lastRequest: CapturedRequest | undefined;
 
 function makeProgram(): Command {
   const program = new Command();
@@ -17,11 +27,20 @@ function makeProgram(): Command {
 }
 
 function mockFetchWith(body: unknown): void {
-  const response: MockResponse = {
-    ok: true,
-    json: async () => body,
-  };
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+  lastRequest = undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (req: Request) => {
+      // `ky` calls `fetch(request, options)`; capture the request before it is consumed.
+      lastRequest = { url: req.url, method: req.method, body: await req.text() };
+      const response: MockResponse = {
+        ok: true,
+        status: 200,
+        json: async () => body,
+      };
+      return response;
+    }),
+  );
 }
 
 async function runListAndCaptureOutput(args: string[] = []): Promise<string> {
@@ -32,7 +51,7 @@ async function runListAndCaptureOutput(args: string[] = []): Promise<string> {
 
   try {
     const program = makeProgram();
-    await program.parseAsync(["run", "list", "-u", "http://localhost:3100", ...args], { from: "user" });
+    await program.parseAsync(["run", "list", "-u", "http://localhost:3100", "--project", "proj-test", ...args], { from: "user" });
   } finally {
     logSpy.mockRestore();
   }
@@ -71,6 +90,7 @@ describe("run list", () => {
     expect(output).toContain("coder-acp-copilot");
     expect(output).toContain("done");
     expect(output).not.toContain('"data"');
+    expect(lastRequest?.url).toContain("projectId=proj-test");
   });
 
   it("renders table output for legacy array API response", async () => {
@@ -157,6 +177,67 @@ describe("run list", () => {
   });
 });
 
+describe("run submit", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function captureSubmit(): { url: string; body: Record<string, unknown> } {
+    if (!lastRequest) throw new Error("No request was captured");
+    return { url: lastRequest.url, body: JSON.parse(lastRequest.body) as Record<string, unknown> };
+  }
+
+  it("includes agentsMd in the submit body", async () => {
+    mockFetchWith({ id: "req-submit-1", workerType: "coder-acp-copilot", status: "queued" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync(
+        [
+          "run", "submit",
+          "-m", "do the thing",
+          "--worker", "dynamic-worker",
+          "--agents-md", "# Be helpful",
+          "--no-stream",
+          "-u", "http://localhost:3100",
+          "--project", "proj-test",
+        ],
+        { from: "user" },
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    const { url, body } = captureSubmit();
+    expect(url).toContain("/api/v1/requests?worker=dynamic-worker");
+    expect(url).toContain("projectId=proj-test");
+    expect(body.agentsMd).toBe("# Be helpful");
+  });
+
+  it("omits agentsMd when not provided", async () => {
+    mockFetchWith({ id: "req-submit-2", workerType: "coder-acp-copilot", status: "queued" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync(
+        ["run", "submit", "-m", "plain task", "--worker", "dynamic-worker", "--no-stream", "-u", "http://localhost:3100", "--project", "proj-test"],
+        { from: "user" },
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    const { body } = captureSubmit();
+    expect(body).not.toHaveProperty("agentsMd");
+  });
+});
+
 describe("run retry", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -225,13 +306,9 @@ describe("run retry", () => {
     }
 
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:3100/api/v1/requests/req-retry-force/retry",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ force: true }),
-      }),
-    );
+    expect(lastRequest?.url).toBe("http://localhost:3100/api/v1/requests/req-retry-force/retry");
+    expect(lastRequest?.method).toBe("POST");
+    expect(lastRequest?.body).toBe(JSON.stringify({ force: true }));
   });
 });
 
@@ -265,6 +342,8 @@ describe("run submit gates", () => {
         "submit",
         "--message",
         "Implement the task",
+        "--worker",
+        "dynamic-worker",
         "--max-iterations",
         "3",
         "--gates",
@@ -275,6 +354,8 @@ describe("run submit gates", () => {
         "--no-stream",
         "-u",
         "http://localhost:3100",
+        "--project",
+        "proj-test",
       ], { from: "user" });
     } finally {
       logSpy.mockRestore();
@@ -283,18 +364,16 @@ describe("run submit gates", () => {
     }
 
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:3100/api/v1/requests?worker=coder-acp-copilot",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          scenario: { task: "Implement the task", criteria: [] },
-          maxIterations: 3,
-          gates: [
-            { gate: "select", criteria: ["implements_task"] },
-            { gate: "build", promptId: "build-prompt", criteria: [], maxIterations: 1 },
-          ],
-        }),
+    expect(lastRequest?.url).toBe("http://localhost:3100/api/v1/requests?worker=dynamic-worker&projectId=proj-test");
+    expect(lastRequest?.method).toBe("POST");
+    expect(lastRequest?.body).toBe(
+      JSON.stringify({
+        scenario: { task: "Implement the task", criteria: [] },
+        maxIterations: 3,
+        gates: [
+          { gate: "select", criteria: ["implements_task"] },
+          { gate: "build", promptId: "build-prompt", criteria: [], maxIterations: 1 },
+        ],
       }),
     );
   });
@@ -330,11 +409,15 @@ describe("run submit codebase", () => {
         "submit",
         "--message",
         "Implement the task",
+        "--worker",
+        "dynamic-worker",
         "--codebase",
         "scope-core@r3",
         "--no-stream",
         "-u",
         "http://localhost:3100",
+        "--project",
+        "proj-test",
       ], { from: "user" });
     } finally {
       logSpy.mockRestore();
@@ -343,14 +426,12 @@ describe("run submit codebase", () => {
     }
 
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:3100/api/v1/requests?worker=coder-acp-copilot",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          scenario: { task: "Implement the task", criteria: [] },
-          codebase: "scope-core@r3",
-        }),
+    expect(lastRequest?.url).toBe("http://localhost:3100/api/v1/requests?worker=dynamic-worker&projectId=proj-test");
+    expect(lastRequest?.method).toBe("POST");
+    expect(lastRequest?.body).toBe(
+      JSON.stringify({
+        scenario: { task: "Implement the task", criteria: [] },
+        codebase: "scope-core@r3",
       }),
     );
   });

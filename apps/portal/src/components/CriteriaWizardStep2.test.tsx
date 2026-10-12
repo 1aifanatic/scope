@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CriteriaWizardStep2 } from "./CriteriaWizardStep2";
 import type { CriteriaWizardState } from "@/hooks/useCriteriaWizard";
 import type { CriteriaDocument } from "@/types";
+import { PORTAL_AI_REGISTRATION_GUIDANCE } from "@/lib/portal-ai-copy";
 
 // The picker fetches the full criteria list via api.listCriteria.
 const CRITERIA: CriteriaDocument[] = [
@@ -35,9 +36,15 @@ const noopMutation = { isPending: false, isError: false, error: null } as never;
 function Harness({
   initialParents = [],
   initialChildren = [],
+  parentCandidates = true,
+  childCandidates = true,
+  generationError,
 }: {
   initialParents?: string[];
   initialChildren?: string[];
+  parentCandidates?: boolean;
+  childCandidates?: boolean;
+  generationError?: unknown;
 }) {
   const [dependsOn, setDependsOn] = useState<string[]>(initialParents);
   const [acceptedChildren, setAcceptedChildren] = useState<string[]>(initialChildren);
@@ -58,8 +65,12 @@ function Harness({
     suggestedChildren: [],
     acceptedChildren,
     setAcceptedChildren,
+    hasCompatibleParentCandidates: parentCandidates,
+    hasCompatibleChildCandidates: childCandidates,
     handleRegenerate: () => {},
-    generateMutation: noopMutation,
+    generateMutation: generationError
+      ? { isPending: false, isError: true, error: generationError }
+      : noopMutation,
     createMutation: noopMutation,
   } as unknown as CriteriaWizardState;
 
@@ -112,5 +123,66 @@ describe("CriteriaWizardStep2 — parent/child cross-exclusion", () => {
     expect(text).not.toContain("crit_b"); // selected as a child → excluded here
     expect(text).toContain("crit_a");
     expect(text).toContain("crit_c");
+  });
+});
+
+describe("CriteriaWizardStep2 — honest empty-pool notes", () => {
+  it("explains why no parents are available when no candidate is gate-compatible", async () => {
+    renderStep2({ parentCandidates: false, childCandidates: true });
+    await screen.findAllByPlaceholderText("Type to search criteria…");
+    expect(
+      screen.getByText(/no gate-compatible criteria available as parents/i),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(/no gate-compatible criteria available as children/i),
+    ).toBeNull();
+  });
+
+  it("explains why no children are available when no candidate is gate-compatible", async () => {
+    renderStep2({ parentCandidates: true, childCandidates: false });
+    await screen.findAllByPlaceholderText("Type to search criteria…");
+    expect(
+      screen.getByText(/no gate-compatible criteria available as children/i),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(/no gate-compatible criteria available as parents/i),
+    ).toBeNull();
+  });
+
+  it("shows no empty-pool note when candidates exist in both directions", async () => {
+    renderStep2({ parentCandidates: true, childCandidates: true });
+    await screen.findAllByPlaceholderText("Type to search criteria…");
+    expect(
+      screen.queryByText(/no gate-compatible criteria available as parents/i),
+    ).toBeNull();
+    expect(
+      screen.queryByText(/no gate-compatible criteria available as children/i),
+    ).toBeNull();
+  });
+});
+
+describe("CriteriaWizardStep2 — generation errors", () => {
+  it("shows the inference error returned by the API", async () => {
+    renderStep2({
+      generationError: new Error(
+        "LLM request failed: Unsupported parameter: 'max_tokens'",
+      ),
+    });
+
+    expect(
+      await screen.findByText(
+        /AI generation failed — LLM request failed: Unsupported parameter: 'max_tokens'/,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("shows Copilot SDK registration guidance when the API error has no message", async () => {
+    renderStep2({ generationError: { status: 503 } });
+
+    expect(
+      await screen.findByText(
+        `AI generation failed — ${PORTAL_AI_REGISTRATION_GUIDANCE}`,
+      ),
+    ).toBeTruthy();
   });
 });

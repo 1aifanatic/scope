@@ -29,7 +29,10 @@ import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
 import { CriteriaBadge } from "@/components/CriteriaBadge";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X } from "lucide-react";
+import { TaskPromptBadge } from "@/components/TaskPromptBadge";
+import { AgentBadge } from "@/components/AgentBadge";
+import { SkillRevisionLinks } from "@/components/SkillRevisionLinks";
+import { AlertTriangle, ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X, Boxes } from "lucide-react";
 import { formatDate, formatId, formatDuration, cn } from "@/lib/utils";
 import {
   GATE_METADATA,
@@ -48,10 +51,13 @@ import {
   type RunState,
   type LogEvent,
   type TaxonomyElementId,
+  type ResourceBinding,
+  type ResourceRunOutcome,
 } from "@/types";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
 import { getRetryButtonState } from "@/components/RetryButton";
 import { deriveEnrichmentStatus } from "@/lib/enrichment";
+import { getRunSkillReferences } from "@/lib/skill-spec";
 
 /** A compact labeled stat: a micro uppercase label above its value. */
 function MetaItem({ label, value, title }: { label: string; value: ReactNode; title?: string }) {
@@ -76,6 +82,49 @@ function ResourceLinks({ label, items, hrefBase }: { label: string; items: strin
             className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-mono hover:bg-accent transition-colors"
           >
             {slug}
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RunResourceLinks({ bindings, outcomes }: { bindings: ResourceBinding[]; outcomes: ResourceRunOutcome[] }) {
+  const outcomeByRevisionId = new Map(outcomes.map((resource) => [resource.revisionId, resource]));
+  const bindingsByRevisionId = new Set(bindings.map((binding) => binding.revisionId));
+  const outcomeOnly = outcomes.filter((resource) => !bindingsByRevisionId.has(resource.revisionId));
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">Resources</span>
+      <div className="flex flex-wrap items-center gap-1">
+        {bindings.map((binding) => {
+          const outcome = outcomeByRevisionId.get(binding.revisionId);
+          return (
+            <Link
+              key={binding.revisionId}
+              to={`/resources/${binding.ref.split("@r")[0]}`}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-mono transition-colors hover:bg-accent",
+                outcome ? outcome.setupSucceeded ? "border-emerald-500/40" : "border-destructive/50" : "",
+              )}
+            >
+              {binding.ref}
+              {outcome && (outcome.setupSucceeded ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <XCircle className="h-3 w-3 text-destructive" />)}
+            </Link>
+          );
+        })}
+        {outcomeOnly.map((resource) => (
+          <Link
+            key={resource.revisionId}
+            to={`/resources/${resource.slug}`}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-mono transition-colors hover:bg-accent",
+              resource.setupSucceeded ? "border-emerald-500/40" : "border-destructive/50",
+            )}
+          >
+            {resource.ref}
+            {resource.setupSucceeded ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <XCircle className="h-3 w-3 text-destructive" />}
           </Link>
         ))}
       </div>
@@ -493,6 +542,15 @@ export function RunDetail() {
     enabled: hasConfiguredObservations || hasObservationResults,
   });
 
+  // Fetch the AGENTS.md body (if this run supplied one) for Markdown rendering.
+  // Uses the /content endpoint so blob-backed bodies resolve to plain text.
+  const agentsMdPromptId = run?.agentsMdPromptId;
+  const { data: agentsMdContent } = useQuery({
+    queryKey: ["task-prompt-content", agentsMdPromptId],
+    queryFn: () => api.getTaskPromptContent(agentsMdPromptId!),
+    enabled: !!agentsMdPromptId,
+  });
+
   // Fetch reports for this run
   const { data: reports, refetch: refetchReports } = useQuery({
     queryKey: ["run-reports", id],
@@ -685,13 +743,24 @@ export function RunDetail() {
         )
       : undefined);
 
-   const skillIdsFromRevisions = Array.from(new Set((run.skillRevisions ?? []).map((ref) => {
-     const at = ref.lastIndexOf("@");
-     return at > 0 ? ref.substring(0, at) : ref;
-   })));
-   const skillIds = skillIdsFromRevisions.length > 0
-     ? skillIdsFromRevisions
-     : (run.skills ?? []);
+  const skillReferences = getRunSkillReferences(run);
+  const runResources = run.resources ?? [];
+  const runResourceOutcomes = activeRun?.resources ?? [];
+  const resourceOutcomeByRevisionId = new Map(runResourceOutcomes.map((resource) => [resource.revisionId, resource]));
+  const resourceRows = runResources.length > 0
+    ? runResources.map((binding) => ({
+        binding,
+        outcome: resourceOutcomeByRevisionId.get(binding.revisionId),
+      }))
+    : runResourceOutcomes.map((outcome) => ({
+        binding: {
+          ref: outcome.ref,
+          revisionId: outcome.revisionId,
+          params: outcome.params ?? {},
+        },
+        outcome,
+      }));
+  const hasRunResources = resourceRows.length > 0;
 
   const gateSummaries = (run.gateSummaries ?? []) as GateRunSummary[];
   const gateSummaryById = new Map(gateSummaries.map((summary) => [summary.gate, summary]));
@@ -800,7 +869,10 @@ export function RunDetail() {
 
             {/* Tier 2 — labeled configuration + metrics */}
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-              <MetaItem label="Worker" value={<span className="font-mono">{run.workerType}</span>} />
+              <MetaItem
+                label="Worker"
+                value={<AgentBadge agentId={run.workerType} version={run.agentVersion} />}
+              />
               {run.model && (
                 <MetaItem
                   label="Model"
@@ -817,6 +889,19 @@ export function RunDetail() {
                   label="Version"
                   title={activeRun?.workerVersion ? `Worker: ${activeRun?.workerVersion}` : undefined}
                   value={<span className="font-mono">{run.agentVersion}</span>}
+                />
+              )}
+              {run.profileId && (
+                <MetaItem
+                  label="Profile"
+                  value={(
+                    <Link to={`/profiles/${run.profileId}`} className="text-primary hover:underline">
+                      {profile?.name ?? <Skeleton className="inline-block h-4 w-24 align-middle" />}
+                      {run.profileVersionId?.split("@")[1] && (
+                        <span className="ml-1 font-mono text-muted-foreground">v{run.profileVersionId.split("@")[1]}</span>
+                      )}
+                    </Link>
+                  )}
                 />
               )}
               <MetaItem label="Created" value={formatDate(run.createdAt)} />
@@ -848,11 +933,24 @@ export function RunDetail() {
                   value={<span className="font-mono">{activeRun?.aiCallCount}</span>}
                 />
               )}
+              {activeRun?.mcpRegistered !== undefined && (
+                <MetaItem
+                  label="MCP registered"
+                  title="Whether MCP server registration completed for this attempt"
+                  value={(
+                    <Badge variant={activeRun.mcpRegistered ? "success" : "secondary"} className="gap-1">
+                      {activeRun.mcpRegistered ? <CheckCircle2 className="h-3 w-3" /> : <MinusCircle className="h-3 w-3" />}
+                      {activeRun.mcpRegistered ? "Yes" : "No"}
+                    </Badge>
+                  )}
+                />
+              )}
             </div>
 
             {/* Tier 3 — resource attachments */}
             {((run.mcpServers && run.mcpServers.length > 0) ||
               (run.skills && run.skills.length > 0) ||
+              hasRunResources ||
               (run.extensions && run.extensions.length > 0)) && (
               <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
                 {run.mcpServers && run.mcpServers.length > 0 && (
@@ -863,6 +961,9 @@ export function RunDetail() {
                 )}
                 {run.extensions && run.extensions.length > 0 && (
                   <ResourceLinks label="Extensions" items={run.extensions} hrefBase="/extensions" />
+                )}
+                {hasRunResources && (
+                  <RunResourceLinks bindings={runResources} outcomes={runResourceOutcomes} />
                 )}
               </div>
             )}
@@ -1324,16 +1425,28 @@ export function RunDetail() {
               <CardContent className="space-y-3">
                 <div>
                   <h4 className="text-sm font-medium mb-1">Task</h4>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-5 cursor-default">
+                  {run.taskPromptId ? (
+                    <TaskPromptBadge
+                      taskPromptId={run.taskPromptId}
+                      prompt={taskPrompt}
+                      className="block"
+                    >
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-5 cursor-pointer hover:underline">
                         {run.scenario?.task ?? "–"}
                       </p>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-sm whitespace-pre-wrap">
-                      {run.scenario?.task ?? "–"}
-                    </TooltipContent>
-                  </Tooltip>
+                    </TaskPromptBadge>
+                  ) : (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-5 cursor-default">
+                          {run.scenario?.task ?? "–"}
+                        </p>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-sm whitespace-pre-wrap">
+                        {run.scenario?.task ?? "–"}
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
                 </div>
                 {run.scenario?.version && (
                   <div>
@@ -1351,6 +1464,11 @@ export function RunDetail() {
                             <span className="text-xs font-medium">{GATE_METADATA[gateConfig.gate].label}</span>
                             <GateStatusBadge summary={gateSummaryById.get(gateConfig.gate)} />
                           </div>
+                          {gateConfig.promptId && (
+                            <div className="mb-1.5">
+                              <TaskPromptBadge taskPromptId={gateConfig.promptId} />
+                            </div>
+                          )}
                           <div className="flex flex-wrap gap-1.5">
                             {gateConfig.criteria.length > 0 ? gateConfig.criteria.map((c) => (
                               <CriteriaBadge
@@ -1359,7 +1477,6 @@ export function RunDetail() {
                                 result={latestCriteriaResultsMap?.get(c)}
                                 evaluated={activeRun?.status === "done"}
                                 showStateLabel={activeRun?.status === "done"}
-                                link={false}
                               />
                             )) : (
                               <span className="text-xs text-muted-foreground">Pass-through (no criteria)</span>
@@ -1381,7 +1498,6 @@ export function RunDetail() {
                             result={latestCriteriaResultsMap?.get(c)}
                             evaluated={activeRun?.status === "done"}
                             showStateLabel={activeRun?.status === "done"}
-                            link={false}
                           />
                         );
                       })}
@@ -1513,8 +1629,12 @@ export function RunDetail() {
                     </div>
                   )}
                   <div>
-                    <span className="text-muted-foreground">Worker Type:</span>{" "}
-                    <span className="font-mono font-medium">{run.workerType}</span>
+                    <span className="text-muted-foreground">Worker:</span>{" "}
+                    <AgentBadge
+                      agentId={run.workerType}
+                      version={run.agentVersion}
+                      className="font-medium"
+                    />
                   </div>
                   {run.model && (
                     <div>
@@ -1587,24 +1707,119 @@ export function RunDetail() {
               </Card>
             )}
 
-            {/* Skills card */}
-            {skillIds.length > 0 && (
+            {/* Resources card */}
+            {hasRunResources && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
-                    Skills ({skillIds.length})
+                    <Boxes className="h-4 w-4" /> Resources ({resourceRows.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {resourceRows.map(({ binding, outcome }) => (
+                      <div key={binding.revisionId} className="rounded-md border p-3 text-sm">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link to={`/resources/${binding.ref.split("@r")[0]}`} className="font-mono text-xs text-primary hover:underline">{binding.ref}</Link>
+                          <Badge variant="outline" className="font-mono text-xs">revision {formatId(binding.revisionId)}</Badge>
+                          {outcome && (
+                            outcome.setupSucceeded ? (
+                              <Badge variant="success" className="gap-1"><CheckCircle2 className="h-3 w-3" /> setup ok</Badge>
+                            ) : (
+                              <Badge variant="destructive" className="gap-1"><XCircle className="h-3 w-3" /> setup failed</Badge>
+                            )
+                          )}
+                          {outcome?.teardownRan !== undefined && (
+                            outcome.teardownRan ? (
+                              <Badge variant="outline" className="text-xs">teardown ran</Badge>
+                            ) : (
+                              // Rendered identically to "ran" before, which made the one state
+                              // worth noticing invisible: whatever setup created is still there.
+                              <Badge variant="outline" className="gap-1 border-amber-500/50 text-xs text-amber-700 dark:text-amber-300">
+                                <AlertTriangle className="h-3 w-3" /> teardown not run
+                              </Badge>
+                            )
+                          )}
+                          {outcome?.setupDurationMs !== undefined && (
+                            <Badge variant="secondary" className="font-mono text-xs">{formatDuration(outcome.setupDurationMs)}</Badge>
+                          )}
+                        </div>
+                        {outcome?.error && <p className="mt-2 text-xs text-destructive">{outcome.error}</p>}
+                        {outcome?.teardownRan === false && (
+                          <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                            Anything this resource created is still running. Nothing reclaims it
+                            automatically under local Docker, so remove it by name, and make the
+                            setup script do the same before it provisions.
+                          </p>
+                        )}
+                        <div className="mt-2 space-y-1">
+                          <span className="text-xs text-muted-foreground">Resolved parameters:</span>
+                          {Object.keys(binding.params).length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              {Object.entries(binding.params).map(([name, value]) => (
+                                <Badge key={name} variant="outline" className="font-mono text-xs">{name}={value}</Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="ml-1 text-xs text-muted-foreground">none</span>
+                          )}
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs text-muted-foreground">Published:</span>
+                          {outcome?.published && outcome.published.length > 0 ? (
+                            outcome.published.map((name) => <Badge key={name} variant="secondary" className="font-mono text-xs">{name}</Badge>)
+                          ) : (
+                            <span className="text-xs text-muted-foreground">none</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Skills card */}
+            {skillReferences.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    Skills ({skillReferences.length})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex flex-wrap gap-1.5">
-                    {skillIds.map((skillId) => (
-                      <Link key={skillId} to={`/skills/${skillId}`}>
-                        <Badge variant="secondary" className="font-mono text-xs hover:bg-accent transition-colors">
-                          {skillId}
-                        </Badge>
-                      </Link>
-                    ))}
+                  <SkillRevisionLinks references={skillReferences} />
+                </CardContent>
+              </Card>
+            )}
+
+            {/* AGENTS.md card (if this run supplied one) */}
+            {run.agentsMdPromptId && (
+              <Card className="md:col-span-2">
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <FileText className="h-4 w-4" /> AGENTS.md
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <TaskPromptBadge
+                      taskPromptId={run.agentsMdPromptId}
+                      className="font-mono hover:underline"
+                    >
+                      {formatId(run.agentsMdPromptId)}
+                    </TaskPromptBadge>
+                    {run.agentsMdParentIds && run.agentsMdParentIds.length > 0 && (
+                      <Badge variant="secondary" className="font-mono">
+                        {run.agentsMdParentIds.length === 1 ? "mutation" : "merge"} · {run.agentsMdParentIds.length} parent{run.agentsMdParentIds.length === 1 ? "" : "s"}
+                      </Badge>
+                    )}
                   </div>
+                  {agentsMdContent ? (
+                    <div className="rounded-md border bg-muted/30 p-3 max-h-96 overflow-auto">
+                      <MarkdownRenderer>{agentsMdContent.text}</MarkdownRenderer>
+                    </div>
+                  ) : (
+                    <Skeleton className="h-24 w-full" />
+                  )}
                 </CardContent>
               </Card>
             )}

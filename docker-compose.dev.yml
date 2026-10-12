@@ -24,8 +24,16 @@ services:
   # ===========================================================================
 
   api:
+    # dev target (tsx + in-container tsc --watch) needs headroom above prod 512m runtime limit
+    mem_limit: 1g
     build:
       target: dev
+    ports:
+      # Node inspector for VS Code. Keep host access loopback-only; .env.base
+      # offsets the host port so multiple worktrees can run concurrently.
+      - "127.0.0.1:${API_DEBUG_PORT:-9200}:9229"
+    environment:
+      NODE_INSPECT_PORT: "9229"
     develop:
       watch:
         - action: sync
@@ -62,6 +70,8 @@ services:
           path: ./pnpm-lock.yaml
 
   token-manager:
+    # dev target (tsx + in-container tsc --watch) needs headroom above prod 256m runtime limit
+    mem_limit: 1g
     build:
       target: dev
     develop:
@@ -78,6 +88,8 @@ services:
           path: ./pnpm-lock.yaml
 
   scheduler:
+    # dev target (tsx + in-container tsc --watch) needs headroom above prod 256m runtime limit
+    mem_limit: 1g
     build:
       target: dev
     develop:
@@ -98,6 +110,8 @@ services:
   # ===========================================================================
 
   portal:
+    # dev target (Vite dev server + esbuild dep-optimization) OOMs at 512m; needs headroom above prod 128m runtime limit
+    mem_limit: 1g
     build:
       target: dev
     environment:
@@ -105,6 +119,29 @@ services:
       GIT_BRANCH: ${GIT_BRANCH:-}
       GIT_COMMIT: ${GIT_COMMIT:-}
       BUILD_TIME: ${BUILD_TIME:-}
+      # Dev auth: point MSAL at the entra-local emulator over HTTPS (mkcert-
+      # trusted) using the per-worktree host port. redirectUri/postLogoutRedirectUri
+      # default to window.location.origin, so they auto-match this worktree's
+      # portal port.
+      VITE_AUTH_CLIENT_ID: "${VITE_AUTH_CLIENT_ID:-cccccccc-0000-0000-0000-000000000001}"
+      VITE_AUTH_AUTHORITY: "${VITE_AUTH_AUTHORITY:-https://localhost:${ENTRA_LOCAL_PORT:-8443}/${AUTH_TENANT_ID:-11111111-1111-1111-1111-111111111111}/v2.0}"
+      VITE_AUTH_KNOWN_AUTHORITIES: "${VITE_AUTH_KNOWN_AUTHORITIES-localhost:${ENTRA_LOCAL_PORT:-8443}}"
+      VITE_AUTH_SCOPES: "${VITE_AUTH_SCOPES:-api://cccccccc-0000-0000-0000-000000000005/access_as_user}"
+      VITE_AUTH_PROTOCOL_MODE: "${VITE_AUTH_PROTOCOL_MODE:-OIDC}"
+      VITE_AUTH_REDIRECT_URI: "${VITE_AUTH_REDIRECT_URI:-}"
+      VITE_AUTH_POST_LOGOUT_REDIRECT_URI: "${VITE_AUTH_POST_LOGOUT_REDIRECT_URI:-}"
+      VITE_AUTH_CACHE_LOCATION: "${VITE_AUTH_CACHE_LOCATION:-localStorage}"
+      # Auth feature toggle (see ENV_VARIABLES.md → "Feature toggle"). Auth is ON
+      # by default. To iterate on the Portal locally WITHOUT sign-in (e.g. before
+      # the API verifies tokens), export VITE_AUTH_ENABLED_LOCAL=false. This flag
+      # governs local dev only; integration/production are toggled at runtime via
+      # SCOPE_AUTH_ENABLED on their deploy overlays.
+      VITE_AUTH_ENABLED_LOCAL: "${VITE_AUTH_ENABLED_LOCAL:-true}"
+    depends_on:
+      entra-local:
+        condition: service_healthy
+      entra-local-init:
+        condition: service_completed_successfully
     develop:
       watch:
         - action: sync
@@ -211,9 +248,22 @@ services:
   gateway:
     build:
       target: dev
-    # Cold cargo build can take 4-5 minutes on first run; the base
-    # `start_period: 120s` is enough once the target/ cache is populated
-    # but not on a fresh container. Bump it for the dev profile only.
+    # The dev stage compiles the Rust gateway in-container via `cargo watch`.
+    # A cold `cargo build` peaks well above the prod 512m runtime cap and would
+    # thrash/OOM at that limit (rustc stalls near the cap at ~2% CPU), so give it
+    # headroom — mirrors the 1g dev bump the other in-container-compiled services
+    # (api, judge, portal, ...) already get.
+    mem_limit: 2g
+    # Persist the cargo `target/` cache in a named volume so the cold build only
+    # happens once and survives container recreation. Re-declare the base
+    # `gateway_cert` mount so this list fully specifies the dev mounts.
+    volumes:
+      - gateway_cert:/certs
+      - gateway_target:/build/target
+    # A cold cargo build takes several minutes on the very first run (empty cache,
+    # throttled to the base `cpus: 0.5`); the base `start_period: 120s` is enough
+    # once the target/ cache volume is populated but not on a fresh volume. Bump
+    # it for the dev profile only.
     healthcheck:
       start_period: 360s
     develop:
@@ -228,3 +278,8 @@ services:
           path: ./apps/gateway/Cargo.toml
         - action: rebuild
           path: ./apps/gateway/Cargo.lock
+
+# Dev-only named volumes.
+volumes:
+  # Persistent cargo target/ cache for the gateway dev build (see gateway service).
+  gateway_target:

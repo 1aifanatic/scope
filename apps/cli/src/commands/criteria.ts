@@ -9,7 +9,9 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner, styleText } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, withProjectOption, getDefaultApiUrl } from "../utils/shared.js";
+import { requireProjectId } from "../utils/config.js";
+import { apiFetch } from "../utils/api-client.js";
 import { mapYamlCriterion } from "../utils/yaml-mappers.js";
 import { formatGateList, parseGateListOption, type GateId } from "../utils/gates.js";
 
@@ -25,20 +27,21 @@ const criteria = program
 
 configureHelp(criteria);
 
-withOutputOption(
+withProjectOption(withOutputOption(
 criteria
   .command("list")
   .description("List all criteria")
   .option("-q, --query <search>", "Filter by ID or prompt text")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-)
+))
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
+    const projectId = requireProjectId(options.project);
     try {
       const params = new URLSearchParams();
       if (options.query) params.set("q", options.query);
       const qs = params.toString();
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria${qs ? `?${qs}` : ""}`);
+      const response = await apiFetch(options.url, `/criteria${qs ? `?${qs}` : ""}`, { projectId });
 
       if (!response.ok) {
         const error = await response.json();
@@ -78,17 +81,18 @@ criteria
     }
   });
 
-withOutputOption(
+withProjectOption(withOutputOption(
 criteria
   .command("get")
   .description("Get details of a single criterion")
   .requiredOption("-i, --id <id>", "Criterion ID")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-)
+))
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/${options.id}`);
+      const projectId = requireProjectId(options.project);
+      const response = await apiFetch(options.url, `/criteria/${options.id}`, { projectId });
 
       if (!response.ok) {
         const error = await response.json();
@@ -159,8 +163,10 @@ criteria
   .option("--taxonomy <id>", "Taxonomy element id (observation only), e.g. dimension:dependency-currency")
   .option("--subject <subject>", "Evaluation subject (observation only): run (default) or iteration")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .action(async (options) => {
     try {
+      const projectId = requireProjectId(options.project);
       const body: Record<string, unknown> = {
         id: options.id,
         prompt: options.prompt,
@@ -174,10 +180,11 @@ criteria
       if (options.taxonomy) body.taxonomyElementId = options.taxonomy;
       if (options.subject) body.subject = options.subject;
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria`, {
+      const response = await apiFetch(options.url, `/criteria`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        projectId,
       });
 
       if (!response.ok) {
@@ -194,6 +201,7 @@ criteria
     }
   });
 
+withProjectOption(
 criteria
   .command("update")
   .description("Update an existing criterion")
@@ -205,8 +213,10 @@ criteria
   .option("--taxonomy <id>", "Taxonomy element id (observation only)")
   .option("--subject <subject>", "Evaluation subject (observation only): run or iteration")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+)
   .action(async (options) => {
     try {
+      const projectId = requireProjectId(options.project);
       const body: Record<string, unknown> = {};
       if (options.prompt !== undefined) body.prompt = options.prompt;
       if (options.dependsOn !== undefined) body.dependsOn = options.dependsOn;
@@ -221,10 +231,11 @@ criteria
         process.exit(1);
       }
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/${options.id}`, {
+      const response = await apiFetch(options.url, `/criteria/${options.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        projectId,
       });
 
       if (!response.ok) {
@@ -240,15 +251,19 @@ criteria
     }
   });
 
+withProjectOption(
 criteria
   .command("delete")
   .description("Delete a criterion (soft-delete; fails if other criteria depend on it)")
   .requiredOption("-i, --id <id>", "Criterion ID")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+)
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/${options.id}`, {
+      const projectId = requireProjectId(options.project);
+      const response = await apiFetch(options.url, `/criteria/${options.id}`, {
         method: "DELETE",
+        projectId,
       });
 
       if (!response.ok) {
@@ -268,16 +283,17 @@ criteria
     }
   });
 
-withOutputOption(
+withProjectOption(withOutputOption(
 criteria
   .command("graph")
   .description("Display the criteria dependency graph as ASCII")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-)
+))
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
+    const projectId = requireProjectId(options.project);
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/graph`);
+      const response = await apiFetch(options.url, `/criteria/graph`, { projectId });
 
       if (!response.ok) {
         const error = await response.json();
@@ -354,9 +370,11 @@ criteria
   .description("Export criteria as import-compatible multi-document YAML")
   .option("--ids <ids...>", "Export only these criteria and their dependency ancestors")
   .option("-o, --output-file <path>", "Write to file instead of stdout")
-  .option("-u, --url <url>", "API base URL", process.env.SCOPE_API_URL || "http://localhost:3100")
+  .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .action(async (options) => {
     try {
+      const projectId = requireProjectId(options.project);
       // Build query params for server-side filtering
       const params = new URLSearchParams();
       if (options.ids && options.ids.length > 0) {
@@ -364,7 +382,7 @@ criteria
         params.set("ancestors", "true");
       }
       const qs = params.toString();
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria${qs ? `?${qs}` : ""}`);
+      const response = await apiFetch(options.url, `/criteria${qs ? `?${qs}` : ""}`, { projectId });
 
       if (!response.ok) {
         const error = await response.json();
@@ -528,7 +546,7 @@ criteria
 
       // Seed via API
       console.log();
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria/seed`, {
+      const response = await apiFetch(options.url, `/criteria/seed`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ criteria: allCriteria }),

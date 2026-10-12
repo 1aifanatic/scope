@@ -25,5 +25,7 @@ export interface HandlerContext {
 /** Interface for post-processing handlers (extensibility point). */
 export interface PostProcessHandler {
   readonly type: string;
+  readonly version: number;
+  readonly autoBackfill: boolean;
   process(message: PostProcessorMessage, ctx: HandlerContext): Promise<void>;
 }

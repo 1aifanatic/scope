@@ -18,25 +18,36 @@ import {
   BulkResubmitInputSchema,
   CreateRequestInputSchema,
   ExtensionClient,
+  EMPTY_FILTER_VALUE,
   ListRequestsQuerySchema,
   MULTI_TURN_DEFAULTS,
   PaginatedRunGroupsResponseSchema,
   PaginatedRunsResponseSchema,
   ReportResponseSchema,
   RequestResponseSchema,
+  RunFacetsResponseSchema,
   RunStateSchema,
   decodeCursor,
   encodeCursor,
+  runDurationMs,
   parseExtensionSpec,
   parseProfileSpec,
-  resolveAgentVersion,
+  resolveResourceParams,
   validateGateConfigs,
   isCriterionCompatibleWithGate,
   orderGates,
+  computeTaskPromptId,
 } from "shared";
-import type { ProfileDocument, ProfileVersionDocument, GateConfig, GateId } from "shared";
+import type {
+  ProfileDocument,
+  ProfileVersionDocument,
+  GateConfig,
+  GateId,
+  ResourceBinding,
+  ResourceBindingSpec,
+  ResourceRevisionDocument,
+} from "shared";
 import { apiRoute } from "../../openapi/api-route.js";
-import { VALID_WORKERS } from "../../route-context.js";
 import type {
   ExtensionDocument,
   McpServerDocument,
@@ -44,21 +55,183 @@ import type {
   RouteContext,
   WorkerType,
 } from "../../route-context.js";
-import { computeAnalysis } from "../../analysis.js";
+import { computeAnalysis, capRunsToLimit } from "../../analysis.js";
 import type { AnalysisResponse, AnalyzableRun } from "../../analysis.js";
 import { parseStateKey } from "../../criteria-mdp.js";
 import { buildGroupingPipeline } from "../../grouping.js";
+import {
+  buildMultiClause,
+  buildSearchClause,
+  buildSeek,
+  buildSortObject,
+  deserializeSortValue,
+  parseMulti,
+  resolveSortField,
+  serializeSortValue,
+  sortValueOf,
+} from "./run-query.js";
 import { resolveSkillSpecs } from "../../utils/skill-helpers.js";
+import { findMissingExtensionSlugs } from "../../utils/extension-helpers.js";
 import { resolveCodebaseSpec, createCodebaseArchiveUploader } from "../../utils/codebase-helpers.js";
 import {
   packRunIntoTar,
 } from "../../archive-har.js";
 import { insertHistoricalRun, listHistoricalRuns, getHistoricalRun } from "../../runs-repo.js";
+import { ProjectIdQuerySchema, getQueryProjectId } from "../../utils/project-scope.js";
 import type { RunState } from "shared";
+import {
+  requestedAgentCapabilities,
+  validateAgentTarget,
+} from "../../utils/agent-helpers.js";
+
+type RequestCollection = RouteContext["requestCollection"];
+type RunFacetsResponse = z.infer<typeof RunFacetsResponseSchema>;
+type RunFacetKey = (typeof RUN_FACET_DIMS)[number]["key"];
+
+/**
+ * Categorical dimensions exposed by the Runs filter rail. Each has a single-field
+ * index, but Cosmos serves no index-only GROUP BY, so the $group below loads every
+ * matched document regardless — which is why the result is cached (see below).
+ */
+const RUN_FACET_DIMS = [
+  { key: "workerType", field: "workerType" },
+  { key: "status", field: "run.status" },
+  { key: "outcome", field: "run.outcome" },
+  { key: "model", field: "model" },
+  { key: "os", field: "run.os.platform" },
+  { key: "priority", field: "priority" },
+  { key: "agentVersion", field: "agentVersion" },
+  { key: "profileId", field: "profileId" },
+] as const;
+
+/**
+ * Compute the Runs filter-rail facets: every distinct value and its count per
+ * categorical dimension.
+ *
+ * The counts are an **absolute** distribution over all non-deleted runs — they
+ * deliberately ignore the active search, date range, iteration, and categorical
+ * selections. Since the rail already keeps every value visible regardless of the
+ * current selection, scoping the counts to the query would only add cost (each
+ * $group is a full scan on Cosmos — there is no index-only grouping) for an
+ * inconsistent, half-reactive number. Being input-independent also makes the
+ * whole response trivially cacheable process-wide (see {@link getRunFacets}).
+ */
+async function computeRunFacets(col: RequestCollection, projectId: string): Promise<RunFacetsResponse> {
+  const match = { deletedAt: { $exists: false }, projectId };
+  const dimResults = await Promise.all(
+    RUN_FACET_DIMS.map((d) =>
+      col
+        .aggregate<{ _id: unknown; count: number }>([
+          { $match: match },
+          { $group: { _id: `$${d.field}`, count: { $sum: 1 } } },
+        ])
+        .toArray(),
+    ),
+  );
+
+  const facets = {
+    workerType: [], status: [], outcome: [], model: [], os: [], priority: [], agentVersion: [], profileId: [],
+  } as Record<RunFacetKey, { value: string; count: number }[]>;
+  RUN_FACET_DIMS.forEach((d, i) => {
+    facets[d.key] = dimResults[i]
+      .map((r) => ({
+        value: r._id === null || r._id === undefined ? EMPTY_FILTER_VALUE : String(r._id),
+        count: r.count,
+      }))
+      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+  });
+
+  // Every run lands in exactly one bucket per dimension (null included), so the
+  // counts of any single dimension sum to the run total — no countDocuments needed.
+  const total = dimResults[0].reduce((sum, r) => sum + r.count, 0);
+
+  return { total, facets };
+}
+
+/**
+ * Short TTL for the per-project facets cache. The facets are an absolute,
+ * input-independent distribution **within a project**, so one entry per project
+ * serves every caller (all tabs, the periodic client refetch, rapid filter
+ * toggling) and Cosmos recomputes the 8-way $group fan-out at most once per
+ * window per project per API replica.
+ */
+const RUN_FACETS_CACHE_TTL_MS = 60_000;
+const runFacetsCache = new Map<string, { expiresAt: number; promise: Promise<RunFacetsResponse> }>();
+
+function getRunFacets(col: RequestCollection, projectId: string): Promise<RunFacetsResponse> {
+  const now = Date.now();
+  const cached = runFacetsCache.get(projectId);
+  if (cached && cached.expiresAt > now) {
+    return cached.promise;
+  }
+  // Cache the in-flight promise so concurrent callers on a cold/expired entry
+  // share a single computation rather than stampeding Cosmos.
+  const promise = computeRunFacets(col, projectId);
+  runFacetsCache.set(projectId, { expiresAt: now + RUN_FACETS_CACHE_TTL_MS, promise });
+  promise.catch(() => {
+    // Drop a rejected entry so the next request retries instead of serving the error.
+    if (runFacetsCache.get(projectId)?.promise === promise) runFacetsCache.delete(projectId);
+  });
+  return promise;
+}
+
+/** Test-only: reset the per-project facets cache so each test computes fresh. */
+export function _resetRunFacetsCacheForTests(): void {
+  runFacetsCache.clear();
+}
+
+/**
+ * Decide where a resubmit's resources come from.
+ *
+ * A resubmit must reproduce the original environment, so pinned bindings are
+ * preserved by default — re-resolving would let a run pinned to `simulator@r1`
+ * with `REPO=run/repo` come back as `simulator@r2` with the revision's default,
+ * fail 422 if that parameter is required, or lose its resources entirely if the
+ * profile declares none.
+ *
+ * Only an explicitly supplied replacement profile re-resolves. This is keyed off
+ * `overrideProfileId` rather than off the resolved profile version, because the
+ * latter is also populated when the caller simply keeps the original profile.
+ *
+ * @param overrideProfileId - `undefined` keeps the original profile, `null`
+ *   detaches it, and a string selects a replacement.
+ */
+export function planResubmitResources(
+  overrideProfileId: string | null | undefined,
+  originalResources: ResourceBinding[] | undefined,
+  profileResourceSpecs: ResourceBindingSpec[] | undefined,
+):
+  | { kind: "preserve"; bindings: ResourceBinding[] | null }
+  | { kind: "resolve"; specs: ResourceBindingSpec[] } {
+  if (typeof overrideProfileId === "string") {
+    return profileResourceSpecs && profileResourceSpecs.length > 0
+      ? { kind: "resolve", specs: profileResourceSpecs }
+      : { kind: "preserve", bindings: null };
+  }
+  return {
+    kind: "preserve",
+    bindings: originalResources && originalResources.length > 0 ? originalResources : null,
+  };
+}
 
 export function registerRequestsRoutes(ctx: RouteContext): void {
 
 const upload = multer({ dest: tmpdir() });
+
+const validatePersistedRequestTarget = (request: RequestDocument) =>
+  validateAgentTarget(ctx.agentCollection, {
+    workerType: request.workerType,
+    requestedVersion: request.agentVersion,
+    model: request.model,
+    requirements: requestedAgentCapabilities({
+      reasoningEffort: request.reasoningEffort,
+      mcpServers: request.mcpServers,
+      skillRevisions: request.skillRevisions,
+      extensions: request.extensions,
+      resources: request.resources,
+    }),
+    strictCapabilities: ctx.strictAgentCapabilities,
+  });
 
 /** Maximum number of profile variations (including the base profile) allowed in one submit. */
 const MAX_PROFILE_VARIATIONS = 25;
@@ -78,14 +251,16 @@ async function validateGatesForSubmit(
   ctx: RouteContext,
   gates: GateConfig[],
   defaultMaxIterations: number | undefined,
+  projectId: string,
 ): Promise<string | null> {
   const shapeErrors = validateGateConfigs(gates, defaultMaxIterations);
   if (shapeErrors.length > 0) return shapeErrors.join(" ");
 
-  // Collect all referenced criterion ids and resolve them in one query.
+  // Collect all referenced criterion ids and resolve them in one query, scoped
+  // to the run's project so a gate can only reference criteria in its project.
   const allCriterionIds = [...new Set(gates.flatMap((g) => g.criteria ?? []))];
   const criteriaDocs = allCriterionIds.length
-    ? await ctx.criteriaCollection.find({ id: { $in: allCriterionIds } }).toArray()
+    ? await ctx.criteriaCollection.find({ id: { $in: allCriterionIds }, projectId }).toArray()
     : [];
   const criteriaById = new Map(criteriaDocs.map((c) => [c.id, c]));
 
@@ -110,7 +285,7 @@ async function validateGatesForSubmit(
     if (!gc.promptId) {
       return `Gate '${gc.gate}' is missing a prompt.`;
     }
-    const prompt = await ctx.taskPromptCollection.findOne({ _id: gc.promptId });
+    const prompt = await ctx.taskPromptCollection.findOne({ _id: gc.promptId, projectId });
     if (!prompt) {
       return `Gate '${gc.gate}' references unknown prompt '${gc.promptId}'.`;
     }
@@ -132,11 +307,12 @@ async function validateGatesForSubmit(
 async function validateObservationsForSubmit(
   ctx: RouteContext,
   observations: string[],
+  projectId: string,
 ): Promise<string | null> {
   if (observations.length === 0) return null;
   const ids = [...new Set(observations)];
   const docs = await ctx.criteriaCollection
-    .find({ id: { $in: ids }, deletedAt: { $exists: false } })
+    .find({ projectId, id: { $in: ids }, deletedAt: { $exists: false } })
     .toArray();
   const byId = new Map(docs.map((c) => [c.id, c]));
   for (const id of ids) {
@@ -164,6 +340,7 @@ async function validateObservationsForSubmit(
 async function resolveGatePromptText(
   ctx: RouteContext,
   gates: GateConfig[],
+  projectId: string,
 ): Promise<GateConfig[]> {
   return Promise.all(
     gates.map(async (gc) => {
@@ -173,11 +350,125 @@ async function resolveGatePromptText(
         const { promptText: _ignored, ...rest } = gc;
         return rest;
       }
-      const prompt = await ctx.taskPromptStore.findOrCreate(text, gc.gate);
+      const prompt = await ctx.taskPromptStore.findOrCreate(projectId, text, gc.gate);
       const { promptText: _ignored, ...rest } = gc;
       return { ...rest, promptId: prompt._id };
     }),
   );
+}
+
+type ResourceBindingSpecInput = string | ResourceBindingSpec;
+
+function normalizeResourceBindingSpec(input: ResourceBindingSpecInput): ResourceBindingSpec {
+  return typeof input === "string" ? { ref: input } : input;
+}
+
+function normalizeResourceBindingSpecs(input: unknown): ResourceBindingSpec[] | undefined {
+  if (!Array.isArray(input)) return undefined;
+  const specs = input
+    .map((item) => {
+      if (typeof item === "string") {
+        const ref = item.trim();
+        return ref ? { ref } : undefined;
+      }
+      if (item && typeof item === "object" && typeof (item as { ref?: unknown }).ref === "string") {
+        const ref = (item as { ref: string }).ref.trim();
+        if (!ref) return undefined;
+        const params = (item as { params?: unknown }).params;
+        return {
+          ref,
+          ...(params && typeof params === "object" ? { params: params as Record<string, string> } : {}),
+        };
+      }
+      return undefined;
+    })
+    .filter((spec): spec is ResourceBindingSpec => spec !== undefined);
+  return specs.length > 0 ? specs : undefined;
+}
+
+async function resolveResourceRevision(
+  ctx: RouteContext,
+  projectId: string,
+  spec: string,
+): Promise<ResourceRevisionDocument | null> {
+  const at = spec.lastIndexOf("@r");
+  const slug = at > 0 ? spec.slice(0, at) : spec;
+  const revisionNumber = at > 0 ? Number(spec.slice(at + 2)) : undefined;
+
+  let revision: ResourceRevisionDocument | null = null;
+  if (revisionNumber !== undefined && Number.isInteger(revisionNumber) && revisionNumber > 0) {
+    const resource = await ctx.resourceStore.getBySlug(projectId, slug);
+    revision = resource
+      ? await ctx.resourceRevisionStore.getByNumber(resource._id, revisionNumber)
+      : null;
+  } else {
+    // A bare spec is a slug or a revision id; try both before failing.
+    const resource = await ctx.resourceStore.getBySlug(projectId, spec);
+    revision = resource
+      ? await ctx.resourceRevisionStore.getLatest(resource._id)
+      : await ctx.resourceRevisionStore.get(spec);
+  }
+
+  if (revision && revision.projectId !== projectId) return null;
+  return revision;
+}
+
+async function resolveResourceBindings(
+  ctx: RouteContext,
+  projectId: string,
+  requestedSpecs: ResourceBindingSpec[] | undefined,
+  profileSpecs: ResourceBindingSpec[] | undefined,
+): Promise<{ bindings?: ResourceBinding[]; conflicts: string[]; errors: string[] }> {
+  const conflicts: string[] = [];
+  const errors: string[] = [];
+  const effectiveSpecs = profileSpecs ?? requestedSpecs;
+  if (!effectiveSpecs || effectiveSpecs.length === 0) return { conflicts, errors };
+
+  if (profileSpecs && requestedSpecs && requestedSpecs.length > profileSpecs.length) {
+    conflicts.push(`resources: sent ${requestedSpecs.length} binding(s), profile requires ${profileSpecs.length}`);
+  }
+
+  const bindings: ResourceBinding[] = [];
+  for (let index = 0; index < effectiveSpecs.length; index += 1) {
+    const profileSpec = profileSpecs?.[index];
+    const runSpec = requestedSpecs?.[index];
+    const effectiveSpec = normalizeResourceBindingSpec(profileSpec ?? runSpec!);
+
+    const revision = await resolveResourceRevision(ctx, projectId, effectiveSpec.ref);
+    if (!revision) {
+      errors.push(`Resource '${effectiveSpec.ref}' not found in this project`);
+      continue;
+    }
+
+    let runParams = runSpec?.params;
+    if (profileSpec && runSpec) {
+      const normalizedRunSpec = normalizeResourceBindingSpec(runSpec);
+      const runRevision = await resolveResourceRevision(ctx, projectId, normalizedRunSpec.ref);
+      if (!runRevision) {
+        errors.push(`Resource '${normalizedRunSpec.ref}' not found in this project`);
+        runParams = undefined;
+      } else if (runRevision._id !== revision._id) {
+        conflicts.push(`resources[${index}].ref: sent "${normalizedRunSpec.ref}", profile requires "${effectiveSpec.ref}"`);
+        runParams = undefined;
+      }
+    }
+
+    const result = resolveResourceParams({
+      parameters: revision.parameters,
+      profileParams: profileSpec?.params,
+      runParams,
+      ref: revision.ref,
+    });
+    conflicts.push(...result.conflicts);
+    errors.push(...result.errors);
+    bindings.push({
+      ref: revision.ref,
+      revisionId: revision._id,
+      params: result.params,
+    });
+  }
+
+  return { bindings, conflicts, errors };
 }
 
 // Submit a request
@@ -188,16 +479,41 @@ apiRoute(ctx.app, ctx.registry, {
   summary: "Submit request(s)",
   body: CreateRequestInputSchema.extend({
     count: z.number().min(1).max(10).default(1),
-    promptFeatureExtractionId: z.string().optional(),
     skills: z.array(z.string()).optional(),
     agentVersion: z.string().optional(),
     codebase: z.string().optional(),
   }),
+  query: ProjectIdQuerySchema,
   response: z.union([RequestResponseSchema, z.array(RequestResponseSchema)]),
   successStatus: 201,
   handler: async (req, res) => {
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, promptFeatureExtractionId, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, gates: requestedGates, observations: requestedObservations, codebase: codebaseSpec, codebaseRevisionId: requestedCodebaseRevisionId } = req.body;
+    const projectId = getQueryProjectId(req);
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, agentsMd: requestedAgentsMd, agentsMdParentIds: requestedAgentsMdParentIds, gates: requestedGates, observations: requestedObservations, codebase: codebaseSpec, codebaseRevisionId: requestedCodebaseRevisionId, resources: resourceSpecs } = req.body;
     let worker = req.query.worker as string | undefined;
+
+    // AGENTS.md body + lineage (for any caller that wants to attach an
+    // AGENTS.md instruction file to a run).
+    const agentsMdText =
+      typeof requestedAgentsMd === "string" && requestedAgentsMd.trim()
+        ? requestedAgentsMd
+        : undefined;
+    const agentsMdParentIds = Array.isArray(requestedAgentsMdParentIds)
+      ? requestedAgentsMdParentIds.filter((x: unknown): x is string => typeof x === "string")
+      : undefined;
+
+    // Resolve the AGENTS.md body to an `agents.md`-typed prompt id (idempotent,
+    // content-addressed; large bodies are offloaded to blob by the store).
+    const resolveAgentsMdPromptId = async (): Promise<string | undefined> => {
+      if (!agentsMdText) return undefined;
+      const p = await ctx.taskPromptStore.findOrCreate(projectId, agentsMdText, "agents.md");
+      return p._id;
+    };
+
+    // Common request fields for AGENTS.md delivery + lineage.
+    const buildAgentsMdFields = (agentsMdPromptId?: string) => ({
+      ...(agentsMdPromptId ? { agentsMdPromptId } : {}),
+      ...(agentsMdParentIds && agentsMdParentIds.length ? { agentsMdParentIds } : {}),
+    });
 
     // Resolve the optional per-run codebase selection into a concrete revision id.
     // Accepts an already-resolved `codebaseRevisionId`, or a `codebase` spec
@@ -224,6 +540,8 @@ apiRoute(ctx.app, ctx.registry, {
         resolvedCodebaseRevisionId = result.revisionId;
       }
     }
+
+    const requestedResourceSpecs = normalizeResourceBindingSpecs(resourceSpecs);
 
     type VariationInput = {
       profileId: string;
@@ -316,8 +634,30 @@ apiRoute(ctx.app, ctx.registry, {
       };
 
       const mode = scenario.criteria.length > 0 ? "multi-turn" : "one-shot";
-      const taskPrompt = await ctx.taskPromptStore.findOrCreate(scenario.task);
+      const taskPrompt = await ctx.taskPromptStore.findOrCreate(projectId, scenario.task);
       const taskPromptId = taskPrompt._id;
+
+      // Gates are the shared evaluation harness for the whole comparative
+      // submission, not a per-variation controlled field: every variation
+      // (including the base) runs the same gate configuration. Resolve, validate
+      // and canonicalize them up front so an invalid config fails the whole
+      // submit before any inserts (docs/design/gates.md §4.3), mirroring the
+      // single-profile branch below.
+      const variationGatesProvided = Array.isArray(requestedGates) && requestedGates.length > 0;
+      let persistedVariationGates: GateConfig[] | undefined;
+      if (variationGatesProvided) {
+        const resolvedGates = await resolveGatePromptText(ctx, requestedGates as GateConfig[], projectId);
+        const gateError = await validateGatesForSubmit(ctx, resolvedGates, maxIterations, projectId);
+        if (gateError) {
+          res.status(400).json({ error: gateError });
+          return;
+        }
+        // Order canonically and point the Select gate's prompt at the resolved
+        // task prompt, identical to the single-profile path.
+        persistedVariationGates = orderGates(resolvedGates).map((g) =>
+          g.gate === "select" ? { ...g, promptId: taskPromptId } : g,
+        );
+      }
 
       // Per-variation resolved config — collected in pass 1 so we can fail
       // the whole submit atomically before any insert.
@@ -327,9 +667,10 @@ apiRoute(ctx.app, ctx.registry, {
         profileVersion: ProfileVersionDocument;
         workerType: WorkerType;
         model?: string;
-        agentVersion?: string;
+        agentVersion: string;
         mcpServers?: string[];
         skillRevisions?: string[];
+        resources?: ResourceBinding[];
         extensions?: string[];
       };
 
@@ -358,60 +699,50 @@ apiRoute(ctx.app, ctx.registry, {
         }
 
         const variationWorkerType = variationProfileVersion.workerType as WorkerType;
-        if (!VALID_WORKERS.includes(variationWorkerType)) {
-          res.status(400).json({ error: `Invalid worker in variation profile: ${variationWorkerType}` });
-          return;
-        }
-
-        let model = variationProfileVersion.model;
         const effectiveMcpServers = variationProfileVersion.mcpServers ?? undefined;
         const effectiveSkills = variationProfileVersion.skillRevisions ?? undefined;
         const effectiveExtensions = variationProfileVersion.extensions ?? undefined;
         const requestedVariationAgentVersion = variationProfileVersion.agentVersion ?? requestedAgentVersion;
-
-        const agentDoc = await ctx.agentCollection.findOne({ _id: variationWorkerType, deletedAt: { $exists: false } });
-        if (agentDoc && agentDoc.supportedModels.length > 0) {
-          if (model && !agentDoc.supportedModels.includes(model)) {
-            res.status(400).json({
-              error: `Invalid model "${model}" for agent "${variationWorkerType}"`,
-              supportedModels: agentDoc.supportedModels,
-              variationProfileId: variationEntry.profileId,
-            });
-            return;
-          }
-          if (!model && agentDoc.defaultModel) {
-            model = agentDoc.defaultModel;
-          }
-          if (!model) {
-            res.status(400).json({
-              error: `model is required for agent "${variationWorkerType}". Select one of supportedModels or set a defaultModel on the agent.`,
-              supportedModels: agentDoc.supportedModels,
-              variationProfileId: variationEntry.profileId,
-            });
-            return;
-          }
-        }
-
-        let resolvedAgentVersion: string | undefined;
-        if (agentDoc) {
-          const versionResult = resolveAgentVersion(agentDoc.versions, requestedVariationAgentVersion);
-          if ("error" in versionResult) {
-            res.status(400).json({
-              error: `${versionResult.error} for agent "${variationWorkerType}"`,
-              activeVersions: versionResult.activeVersions,
-              variationProfileId: variationEntry.profileId,
-            });
-            return;
-          }
-          resolvedAgentVersion = versionResult.agentVersion;
+        const targetCheck = await validateAgentTarget(ctx.agentCollection, {
+          workerType: variationWorkerType,
+          requestedVersion: requestedVariationAgentVersion,
+          model: variationProfileVersion.model,
+          requireModel: true,
+          requirements: requestedAgentCapabilities({
+            reasoningEffort:
+              variationProfileVersion.reasoningEffort ?? requestedReasoningEffort,
+            mcpServers: effectiveMcpServers,
+            skillRevisions: effectiveSkills,
+            extensions: effectiveExtensions,
+            // Mirrors resolveResourceBindings' precedence (profile wins). Uses the
+            // specs rather than resolved bindings because the capability check only
+            // needs to know whether any resource was requested, and resolution
+            // happens after this point.
+            resources:
+              normalizeResourceBindingSpecs(variationProfileVersion.resources)
+              ?? requestedResourceSpecs,
+          }),
+          strictCapabilities: ctx.strictAgentCapabilities,
+        });
+        if (!targetCheck.ok) {
+          const { ok: _ok, status, ...payload } = targetCheck;
+          res.status(status).json({
+            ...payload,
+            variationProfileId: variationEntry.profileId,
+          });
+          return;
         }
 
         let validatedMcpServers: string[] | undefined;
         if (effectiveMcpServers !== undefined && effectiveMcpServers.length > 0) {
           const existingServers = await ctx.mcpServerCollection
-            .find({ _id: { $in: effectiveMcpServers }, deletedAt: { $exists: false } })
+            .find({
+              projectId,
+              $or: [{ slug: { $in: effectiveMcpServers } }, { _id: { $in: effectiveMcpServers } }],
+              deletedAt: { $exists: false },
+            })
             .toArray();
-          const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s._id));
+          const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s.slug ?? s._id));
           const missingSlugs = effectiveMcpServers.filter((slug: string) => !existingSlugs.has(slug));
           if (missingSlugs.length > 0) {
             res.status(400).json({
@@ -425,7 +756,7 @@ apiRoute(ctx.app, ctx.registry, {
 
         let resolvedSkillRevisions: string[] | undefined;
         if (effectiveSkills !== undefined && effectiveSkills.length > 0) {
-          const result = await resolveSkillSpecs(effectiveSkills, ctx);
+          const result = await resolveSkillSpecs(effectiveSkills, ctx, projectId);
           if (result.error) {
             const status = result.error.startsWith("Failed to resolve") ? 422 : 400;
             res.status(status).json({ error: result.error, variationProfileId: variationEntry.profileId });
@@ -438,11 +769,7 @@ apiRoute(ctx.app, ctx.registry, {
         if (effectiveExtensions !== undefined && effectiveExtensions.length > 0) {
           const parsedSpecs = effectiveExtensions.map((spec: string) => parseExtensionSpec(spec));
           const bareIds = parsedSpecs.map((s) => s.id);
-          const existingExtensions = await ctx.extensionCollection
-            .find({ _id: { $in: bareIds }, deletedAt: { $exists: false } })
-            .toArray();
-          const existingIds = new Set(existingExtensions.map((e: ExtensionDocument) => e._id));
-          const missingIds = bareIds.filter((id: string) => !existingIds.has(id));
+          const missingIds = await findMissingExtensionSlugs(bareIds, ctx.extensionCollection, projectId);
           if (missingIds.length > 0) {
             res.status(400).json({
               error: `Extension(s) not found: ${missingIds.join(", ")}`,
@@ -471,15 +798,39 @@ apiRoute(ctx.app, ctx.registry, {
           validatedExtensions = resolvedSpecs;
         }
 
+        const resourceResult = await resolveResourceBindings(
+          ctx,
+          projectId,
+          requestedResourceSpecs,
+          normalizeResourceBindingSpecs(variationProfileVersion.resources),
+        );
+        if (resourceResult.errors.length > 0) {
+          res.status(400).json({
+            error: resourceResult.errors.join("; "),
+            errors: resourceResult.errors,
+            variationProfileId: variationEntry.profileId,
+          });
+          return;
+        }
+        if (resourceResult.conflicts.length > 0) {
+          res.status(400).json({
+            error: `Profile "${variationEntry.profileId}" controls these fields. Either omit them or match the profile values.`,
+            conflicts: resourceResult.conflicts,
+            variationProfileId: variationEntry.profileId,
+          });
+          return;
+        }
+
         resolved.push({
           entry: variationEntry,
           profile: variationProfile,
           profileVersion: variationProfileVersion,
           workerType: variationWorkerType,
-          model,
-          agentVersion: resolvedAgentVersion,
+          model: targetCheck.model,
+          agentVersion: targetCheck.agentVersion,
           mcpServers: validatedMcpServers,
           skillRevisions: resolvedSkillRevisions,
+          resources: resourceResult.bindings,
           extensions: validatedExtensions,
         });
       }
@@ -491,6 +842,8 @@ apiRoute(ctx.app, ctx.registry, {
       const allNewIds: string[] = [];
       const newDocs: RequestDocument[] = [];
       const variationResults: Array<{ profileId: string; label?: string; ids: string[] }> = [];
+      const agentsMdPromptId = await resolveAgentsMdPromptId();
+      const agentsMdFields = buildAgentsMdFields(agentsMdPromptId);
 
       for (const r of resolved) {
         const newIds: string[] = [];
@@ -502,6 +855,7 @@ apiRoute(ctx.app, ctx.registry, {
 
           const requestDoc: RequestDocument = {
             _id: requestId,
+            projectId,
             scenario,
             workerType: r.workerType,
             taskPromptId,
@@ -514,15 +868,17 @@ apiRoute(ctx.app, ctx.registry, {
             ...(maxIterations ? { maxIterations } : {}),
             ...(personaInstructions ? { personaInstructions } : {}),
             ...(personaObj ? { persona: personaObj } : {}),
-            ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
             ...(r.mcpServers ? { mcpServers: r.mcpServers } : {}),
             ...(r.skillRevisions ? { skillRevisions: r.skillRevisions } : {}),
             ...(resolvedCodebaseRevisionId ? { codebaseRevisionId: resolvedCodebaseRevisionId } : {}),
+            ...(r.resources ? { resources: r.resources } : {}),
             ...(r.extensions ? { extensions: r.extensions } : {}),
-            ...(r.agentVersion ? { agentVersion: r.agentVersion } : {}),
+            agentVersion: r.agentVersion,
             profileId: r.profile._id,
-            profileVersionId: r.profileVersion._id,
+            profileVersionId: r.profileVersion.ref ?? r.profileVersion._id,
+            ...(persistedVariationGates ? { gates: persistedVariationGates } : {}),
             submissionId,
+            ...agentsMdFields,
             run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
           };
           newDocs.push(requestDoc);
@@ -547,6 +903,7 @@ apiRoute(ctx.app, ctx.registry, {
         message: `${allNewIds.length} request(s) submitted across ${variationResults.length} profile(s)`,
         scenario,
         ...(maxIterations ? { maxIterations } : {}),
+        ...(persistedVariationGates ? { gates: persistedVariationGates.length } : {}),
       });
       return;
     }
@@ -555,6 +912,7 @@ apiRoute(ctx.app, ctx.registry, {
     let profileId: string | undefined;
     let profileVersionId: string | undefined;
     let profileVersion: ProfileVersionDocument | null = null;
+    let resolvedResources: ResourceBinding[] | undefined;
     if (requestedProfileSpec) {
       let requestedProfileId: string;
       let requestedProfileVersion: number | undefined;
@@ -586,7 +944,7 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
       profileId = profile._id;
-      profileVersionId = profileVersion._id;
+      profileVersionId = profileVersion.ref ?? profileVersion._id;
 
       // Reject requests where client-supplied fields conflict with profile values.
       // Clients should either omit these fields or send values that match the profile.
@@ -615,6 +973,18 @@ apiRoute(ctx.app, ctx.registry, {
           conflicts.push(`extensions: sent ${JSON.stringify(extensionIds)}, profile requires ${JSON.stringify(profileExts)}`);
         }
       }
+      const resourceResult = await resolveResourceBindings(
+        ctx,
+        projectId,
+        requestedResourceSpecs,
+        normalizeResourceBindingSpecs(profileVersion.resources),
+      );
+      if (resourceResult.errors.length > 0) {
+        res.status(400).json({ error: resourceResult.errors.join("; "), errors: resourceResult.errors });
+        return;
+      }
+      conflicts.push(...resourceResult.conflicts);
+      resolvedResources = resourceResult.bindings;
       if (conflicts.length > 0) {
         res.status(400).json({
           error: `Profile "${profileId}" controls these fields. Either omit them or match the profile values.`,
@@ -625,6 +995,13 @@ apiRoute(ctx.app, ctx.registry, {
 
       // Profile fields take precedence
       worker = profileVersion.workerType;
+    } else {
+      const resourceResult = await resolveResourceBindings(ctx, projectId, requestedResourceSpecs, undefined);
+      if (resourceResult.errors.length > 0) {
+        res.status(400).json({ error: resourceResult.errors.join("; "), errors: resourceResult.errors });
+        return;
+      }
+      resolvedResources = resourceResult.bindings;
     }
 
     // Effective values: profile overrides client inputs for controlled fields
@@ -642,25 +1019,7 @@ apiRoute(ctx.app, ctx.registry, {
     if (!worker) {
       res.status(400).json({ 
         error: "Worker query parameter is required",
-        validWorkers: VALID_WORKERS,
         example: "/api/v1/requests?worker=worker-1"
-      });
-      return;
-    }
-
-    if (!VALID_WORKERS.includes(worker as WorkerType)) {
-      res.status(400).json({ 
-        error: `Invalid worker: ${worker}`,
-        validWorkers: VALID_WORKERS
-      });
-      return;
-    }
-
-    // Check if the worker (agent) is available for new submissions
-    const workerAgent = await ctx.agentCollection.findOne({ _id: worker, deletedAt: { $exists: false } });
-    if (workerAgent && workerAgent.available === false) {
-      res.status(400).json({
-        error: `Worker "${worker}" is not available for new submissions`,
       });
       return;
     }
@@ -697,8 +1056,8 @@ apiRoute(ctx.app, ctx.registry, {
     const gatesProvided = Array.isArray(requestedGates) && requestedGates.length > 0;
     let resolvedGates: GateConfig[] = gatesProvided ? (requestedGates as GateConfig[]) : [];
     if (gatesProvided) {
-      resolvedGates = await resolveGatePromptText(ctx, resolvedGates);
-      const gateError = await validateGatesForSubmit(ctx, resolvedGates, maxIterations);
+      resolvedGates = await resolveGatePromptText(ctx, resolvedGates, projectId);
+      const gateError = await validateGatesForSubmit(ctx, resolvedGates, maxIterations, projectId);
       if (gateError) {
         res.status(400).json({ error: gateError });
         return;
@@ -709,7 +1068,7 @@ apiRoute(ctx.app, ctx.registry, {
     const observationsProvided = Array.isArray(requestedObservations) && requestedObservations.length > 0;
     const resolvedObservations: string[] = observationsProvided ? (requestedObservations as string[]) : [];
     if (observationsProvided) {
-      const obsError = await validateObservationsForSubmit(ctx, resolvedObservations);
+      const obsError = await validateObservationsForSubmit(ctx, resolvedObservations, projectId);
       if (obsError) {
         res.status(400).json({ error: obsError });
         return;
@@ -723,43 +1082,27 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     const workerType = worker as WorkerType;
-
-    // Resolve model: validate against agent's supportedModels if available
-    let model: string | undefined = effectiveModel;
-    const agentDoc = await ctx.agentCollection.findOne({ _id: workerType, deletedAt: { $exists: false } });
-    if (agentDoc && agentDoc.supportedModels.length > 0) {
-      if (model && !agentDoc.supportedModels.includes(model)) {
-        res.status(400).json({
-          error: `Invalid model "${model}" for agent "${workerType}"`,
-          supportedModels: agentDoc.supportedModels,
-        });
-        return;
-      }
-      if (!model && agentDoc.defaultModel) {
-        model = agentDoc.defaultModel;
-      }
-      if (!model) {
-        res.status(400).json({
-          error: `model is required for agent "${workerType}". Select one of supportedModels or set a defaultModel on the agent.`,
-          supportedModels: agentDoc.supportedModels,
-        });
-        return;
-      }
+    const targetCheck = await validateAgentTarget(ctx.agentCollection, {
+      workerType,
+      requestedVersion: profileVersion?.agentVersion ?? requestedAgentVersion,
+      model: effectiveModel,
+      requirements: requestedAgentCapabilities({
+        reasoningEffort: effectiveReasoningEffort,
+        mcpServers: effectiveMcpServers,
+        skillRevisions: effectiveSkills,
+        extensions: effectiveExtensions,
+        resources: resolvedResources,
+      }),
+      strictCapabilities: ctx.strictAgentCapabilities,
+    });
+    if (!targetCheck.ok) {
+      const { ok: _ok, status, ...payload } = targetCheck;
+      res.status(status).json(payload);
+      return;
     }
-
-    // Resolve agent version: explicit selection or latest active
-    let resolvedAgentVersion: string | undefined;
-    if (agentDoc) {
-      const versionResult = resolveAgentVersion(agentDoc.versions, requestedAgentVersion);
-      if ("error" in versionResult) {
-        res.status(400).json({
-          error: `${versionResult.error} for agent "${workerType}"`,
-          activeVersions: versionResult.activeVersions,
-        });
-        return;
-      }
-      resolvedAgentVersion = versionResult.agentVersion;
-    }
+    const agentDoc = targetCheck.agent;
+    const model = targetCheck.model;
+    const resolvedAgentVersion = targetCheck.agentVersion;
 
     // Validate reasoning effort against model capabilities
     const warnings: string[] = [];
@@ -833,9 +1176,13 @@ apiRoute(ctx.app, ctx.registry, {
       }
       if (effectiveMcpServers.length > 0) {
         const existingServers = await ctx.mcpServerCollection
-          .find({ _id: { $in: effectiveMcpServers }, deletedAt: { $exists: false } })
+          .find({
+            projectId,
+            $or: [{ slug: { $in: effectiveMcpServers } }, { _id: { $in: effectiveMcpServers } }],
+            deletedAt: { $exists: false },
+          })
           .toArray();
-        const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s._id));
+        const existingSlugs = new Set(existingServers.map((s: McpServerDocument) => s.slug ?? s._id));
         const missingSlugs = effectiveMcpServers.filter((slug: string) => !existingSlugs.has(slug));
         if (missingSlugs.length > 0) {
           res.status(400).json({ error: `MCP server(s) not found: ${missingSlugs.join(", ")}` });
@@ -853,7 +1200,7 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
       if (effectiveSkills.length > 0) {
-        const result = await resolveSkillSpecs(effectiveSkills, ctx);
+        const result = await resolveSkillSpecs(effectiveSkills, ctx, projectId);
         if (result.error) {
           const status = result.error.startsWith("Failed to resolve") ? 422 : 400;
           res.status(status).json({ error: result.error });
@@ -874,11 +1221,7 @@ apiRoute(ctx.app, ctx.registry, {
         // Parse specs to extract bare IDs for DB validation
         const parsedSpecs = effectiveExtensions.map((spec: string) => parseExtensionSpec(spec));
         const bareIds = parsedSpecs.map((s) => s.id);
-        const existingExtensions = await ctx.extensionCollection
-          .find({ _id: { $in: bareIds }, deletedAt: { $exists: false } })
-          .toArray();
-        const existingIds = new Set(existingExtensions.map((e: ExtensionDocument) => e._id));
-        const missingIds = bareIds.filter((id: string) => !existingIds.has(id));
+        const missingIds = await findMissingExtensionSlugs(bareIds, ctx.extensionCollection, projectId);
         if (missingIds.length > 0) {
           res.status(400).json({ error: `Extension(s) not found: ${missingIds.join(", ")}` });
           return;
@@ -915,8 +1258,12 @@ apiRoute(ctx.app, ctx.registry, {
     const mode = scenario.criteria.length > 0 ? "multi-turn" : "one-shot";
 
     // Ensure a TaskPrompt entity exists for this task text (idempotent)
-    const taskPrompt = await ctx.taskPromptStore.findOrCreate(scenario.task);
+    const taskPrompt = await ctx.taskPromptStore.findOrCreate(projectId, scenario.task);
     const taskPromptId = taskPrompt._id;
+
+    // Resolve AGENTS.md lineage once for this submission (shared across count>1).
+    const agentsMdPromptId = await resolveAgentsMdPromptId();
+    const agentsMdFields = buildAgentsMdFields(agentsMdPromptId);
 
     // Build the persisted gate configs: order canonically and point the Select
     // gate's prompt at the resolved task prompt (docs/design/gates.md §4.3).
@@ -947,6 +1294,7 @@ apiRoute(ctx.app, ctx.registry, {
 
         const requestDoc: RequestDocument = {
           _id: requestId,
+          projectId,
           scenario,
           workerType,
           taskPromptId,
@@ -957,17 +1305,18 @@ apiRoute(ctx.app, ctx.registry, {
           ...(maxIterations ? { maxIterations } : {}),
           ...(personaInstructions ? { personaInstructions } : {}),
           ...(personaObj ? { persona: personaObj } : {}),
-          ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
           ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
           ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
           ...(resolvedCodebaseRevisionId ? { codebaseRevisionId: resolvedCodebaseRevisionId } : {}),
+          ...(resolvedResources ? { resources: resolvedResources } : {}),
           ...(validatedExtensions ? { extensions: validatedExtensions } : {}),
-          ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+          agentVersion: resolvedAgentVersion,
           ...(profileId ? { profileId } : {}),
           ...(profileVersionId ? { profileVersionId } : {}),
           ...(persistedGates ? { gates: persistedGates } : {}),
           ...(persistedObservations ? { observations: persistedObservations } : {}),
           submissionId,
+          ...agentsMdFields,
           // Mint a distinct run id for the first attempt. Blob artifacts
           // are scoped under `{requestId}/runs/{runId}/...` so retries
           // never overwrite a previous attempt's blobs.
@@ -989,7 +1338,7 @@ apiRoute(ctx.app, ctx.registry, {
         taskPromptId,
         ...(model ? { model } : {}),
         ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
-        ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+        agentVersion: resolvedAgentVersion,
         status: "pending",
         mode,
         message: `${count} requests submitted successfully`,
@@ -1008,6 +1357,7 @@ apiRoute(ctx.app, ctx.registry, {
     // Create request document
     const requestDoc: RequestDocument = {
       _id: requestId,
+      projectId,
       scenario,
       workerType,
       taskPromptId,
@@ -1018,10 +1368,10 @@ apiRoute(ctx.app, ctx.registry, {
       ...(maxIterations ? { maxIterations } : {}),
       ...(personaInstructions ? { personaInstructions } : {}),
       ...(personaObj ? { persona: personaObj } : {}),
-      ...(promptFeatureExtractionId ? { promptFeatureExtractionId } : {}),
       ...(validatedMcpServers ? { mcpServers: validatedMcpServers } : {}),
       ...(resolvedSkillRevisions ? { skillRevisions: resolvedSkillRevisions } : {}),
       ...(resolvedCodebaseRevisionId ? { codebaseRevisionId: resolvedCodebaseRevisionId } : {}),
+      ...(resolvedResources ? { resources: resolvedResources } : {}),
       ...(validatedExtensions ? { extensions: validatedExtensions } : {}),
       ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
       ...(profileId ? { profileId } : {}),
@@ -1029,6 +1379,7 @@ apiRoute(ctx.app, ctx.registry, {
       ...(persistedGates ? { gates: persistedGates } : {}),
       ...(persistedObservations ? { observations: persistedObservations } : {}),
       submissionId,
+      ...agentsMdFields,
       // Mint a distinct run id for the first attempt. Blob artifacts
       // are scoped under `{requestId}/runs/{runId}/...` so retries
       // never overwrite a previous attempt's blobs.
@@ -1055,6 +1406,27 @@ apiRoute(ctx.app, ctx.registry, {
       ...(warnings.length > 0 ? { warnings } : {}),
       ...(modelCapabilities ? { modelCapabilities } : {}),
     });
+  },
+});
+
+// List run filter facets for the Runs list rail.
+apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/requests/facets",
+  tags: ["Requests"],
+  summary: "List run filter facets",
+  description:
+    "Returns every distinct value and its full-dataset count per categorical " +
+    "filter dimension for the Runs list rail. Counts are absolute over all " +
+    "non-deleted runs **in the given project**: they intentionally ignore the " +
+    "active search, date range, iteration, and categorical selections so every " +
+    "selectable value stays visible with a stable count. Requires ?projectId=. " +
+    "Computed with parallel $group aggregations (Cosmos has no $facet) and cached " +
+    "per-project for a short TTL.",
+  query: ProjectIdQuerySchema,
+  response: RunFacetsResponseSchema,
+  handler: async (req, res) => {
+    res.json(await getRunFacets(ctx.requestCollection, getQueryProjectId(req)));
   },
 });
 
@@ -1098,16 +1470,14 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/requests",
   tags: ["Requests"],
   summary: "List requests",
-  query: ListRequestsQuerySchema,
+  query: ListRequestsQuerySchema.merge(ProjectIdQuerySchema),
   response: z.union([PaginatedRunsResponseSchema, PaginatedRunGroupsResponseSchema]),
   handler: async (req, res) => {
-    const workerFilter = req.query.worker as string;
+    const projectId = getQueryProjectId(req);
     const taskPromptIdFilter = req.query.taskPromptId as string;
     const criteriaFilter = req.query.criteria as string;
     const submissionIdFilter = req.query.submissionId as string;
-    const profileIdFilter = req.query.profileId as string;
-    const statusFilter = req.query.status as string;
-    const outcomeFilter = req.query.outcome as string;
+    const searchFilter = req.query.search as string | undefined;
     const turnsFilterRaw = req.query.turns as string | undefined;
     const turnsOpFilter = (req.query.turnsOp as string | undefined) ?? "eq";
     const maxIterationsFilterRaw = req.query.maxIterations as string | undefined;
@@ -1119,6 +1489,26 @@ apiRoute(ctx.app, ctx.registry, {
     const beforeParam = req.query.before as string | undefined;
     const lastParam = req.query.last === "true";
 
+    // Multi-value categorical filters: accept a single value, a repeated param,
+    // or a comma list, plus the `__empty__` "(Unknown)" sentinel (issue #1138).
+    const workerValues = parseMulti(req.query.worker);
+    const statusValues = parseMulti(req.query.status);
+    const outcomeValues = parseMulti(req.query.outcome);
+    const profileIdValues = parseMulti(req.query.profileId);
+    const modelValues = parseMulti(req.query.model);
+    const osValues = parseMulti(req.query.os);
+    const priorityValues = parseMulti(req.query.priority);
+    const agentVersionValues = parseMulti(req.query.agentVersion);
+
+    // Server-side sort: map sortBy → indexable stored field. The unset default
+    // stays `createdAt desc` so existing in-flight cursors keep working.
+    const sortField = resolveSortField(req.query.sortBy as string | undefined);
+    const sortDir: 1 | -1 = (req.query.sortDir as string | undefined) === "asc" ? 1 : -1;
+
+    // Created-at date/time range (ISO-8601). Adopted from PR #908.
+    const createdAfterRaw = req.query.createdAfter as string | Date | undefined;
+    const createdBeforeRaw = req.query.createdBefore as string | Date | undefined;
+
     if (afterParam && beforeParam) {
       res.status(400).json({ error: "Cannot specify both 'after' and 'before'" });
       return;
@@ -1128,29 +1518,69 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
     
-    const filter: Record<string, unknown> = {};
-    if (workerFilter && VALID_WORKERS.includes(workerFilter as WorkerType)) {
-      filter.workerType = workerFilter;
-    }
-    if (taskPromptIdFilter) {
-      filter.taskPromptId = taskPromptIdFilter;
-    }
-    if (statusFilter) {
-      // Post run-retry-attempts: per-attempt state lives at run.status.
-      filter["run.status"] = statusFilter;
-    }
-    if (outcomeFilter) {
-      filter["run.outcome"] = outcomeFilter;
-    }
-    if (profileIdFilter) {
-      filter.profileId = profileIdFilter;
-    }
+    // ── Build the filter ───────────────────────────────────────────────────
+    // Simple single-field clauses stay top-level (index-friendly, and Cosmos
+    // intersects single-field indexes). Clauses that are `$or` groups
+    // (multi-value-with-(Unknown), free-text search) or that repeat a field
+    // (criteria) go into `$and` so they compose without clobbering each other
+    // or the cursor seek (issue #1138).
+    const flat: Record<string, unknown> = {};
+    const and: Record<string, unknown>[] = [];
+    // Required project scope: the top-level runs list only ever returns rows
+    // from the selected project (no cross-project reads, no groupBy:project).
+    flat.projectId = projectId;
+    const pushClause = (clause: Record<string, unknown> | null) => {
+      if (!clause) return;
+      const keys = Object.keys(clause);
+      if (keys.length === 1 && !keys[0].startsWith("$")) {
+        flat[keys[0]] = clause[keys[0]];
+      } else {
+        and.push(clause);
+      }
+    };
+
+    pushClause(buildMultiClause("workerType", workerValues));
+    if (taskPromptIdFilter) flat.taskPromptId = taskPromptIdFilter;
+    // Post run-retry-attempts: per-attempt state lives at run.status / run.outcome.
+    pushClause(buildMultiClause("run.status", statusValues));
+    pushClause(buildMultiClause("run.outcome", outcomeValues));
+    pushClause(buildMultiClause("profileId", profileIdValues));
+    pushClause(buildMultiClause("model", modelValues));
+    pushClause(buildMultiClause("run.os.platform", osValues));
+    pushClause(buildMultiClause("priority", priorityValues, { coerceNumber: true }));
+    pushClause(buildMultiClause("agentVersion", agentVersionValues));
+
     if (submissionIdFilter) {
-      // Prefix-based matching: allow filtering by partial submission ID
-      filter.submissionId = { $regex: `^${submissionIdFilter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` };
+      // Prefix-based matching: allow filtering by partial submission ID.
+      flat.submissionId = { $regex: `^${submissionIdFilter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` };
     }
     if (!includeDeleted) {
-      filter.deletedAt = { $exists: false };
+      flat.deletedAt = { $exists: false };
+    }
+
+    // Free-text search across run id / task / model / worker (Cosmos has no $text).
+    pushClause(buildSearchClause(searchFilter));
+
+    // Created-at date/time range (PR #908).
+    const createdAfter = createdAfterRaw
+      ? (createdAfterRaw instanceof Date ? createdAfterRaw : new Date(createdAfterRaw))
+      : undefined;
+    const createdBefore = createdBeforeRaw
+      ? (createdBeforeRaw instanceof Date ? createdBeforeRaw : new Date(createdBeforeRaw))
+      : undefined;
+    if ((createdAfter && Number.isNaN(createdAfter.getTime())) || (createdBefore && Number.isNaN(createdBefore.getTime()))) {
+      res.status(400).json({ error: "Invalid createdAfter or createdBefore datetime" });
+      return;
+    }
+    if (createdAfter && createdBefore && createdAfter > createdBefore) {
+      res.status(400).json({ error: "createdAfter must be less than or equal to createdBefore" });
+      return;
+    }
+    if (createdAfter || createdBefore) {
+      flat.createdAt = {
+        ...(createdAfter ? { $gte: createdAfter } : {}),
+        ...(createdBefore ? { $lte: createdBefore } : {}),
+      };
     }
 
     // Iteration-count filters. `maxIterations` is a top-level field; `turns`
@@ -1163,7 +1593,7 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(400).json({ error: "Invalid maxIterations or maxIterationsOp" });
         return;
       }
-      filter.maxIterations = { [op]: n };
+      flat.maxIterations = { [op]: n };
     }
     if (turnsFilterRaw !== undefined && turnsFilterRaw !== "") {
       const n = Number(turnsFilterRaw);
@@ -1172,32 +1602,50 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(400).json({ error: "Invalid turns or turnsOp" });
         return;
       }
-      filter.$expr = { [op]: [{ $size: { $ifNull: ["$run.turns", []] } }, n] };
+      flat.$expr = { [op]: [{ $size: { $ifNull: ["$run.turns", []] } }, n] };
     }
 
-    // Filter by MDP criteria state vector (e.g. "has_azure:0|has_cloud:1")
+    // Filter by MDP criteria state vector (e.g. "has_azure:0|has_cloud:1").
     // Matches runs whose LAST turn contains criteria results matching every
     // criterion in the state vector.
     if (criteriaFilter) {
       const criteriaStates = parseStateKey(criteriaFilter);
-      if (criteriaStates.length > 0) {
-        filter.$and = criteriaStates.map((cs) => ({
-          "turns": {
+      for (const cs of criteriaStates) {
+        and.push({
+          turns: {
             $elemMatch: {
-              "criteriaResults": {
-                $elemMatch: {
-                  criterionId: cs.id,
-                  passed: cs.passed,
-                },
-              },
+              criteriaResults: { $elemMatch: { criterionId: cs.id, passed: cs.passed } },
             },
           },
-        }));
+        });
       }
     }
 
-    // O(1) estimated total from collection metadata (unfiltered)
-    const estimatedTotal = await ctx.requestCollection.estimatedDocumentCount();
+    /** Assemble the final filter; `seek` (cursor predicate) is AND-ed in. */
+    const composeFilter = (seek?: Record<string, unknown>): Record<string, unknown> => {
+      const out: Record<string, unknown> = { ...flat };
+      const clauses = seek ? [...and, seek] : and;
+      if (clauses.length > 0) out.$and = clauses;
+      return out;
+    };
+
+    const filter: Record<string, unknown> = composeFilter();
+
+    // Total shown by the portal pager / "~N runs total" banner — flat mode only.
+    // Grouped mode is measured in *groups*, not runs, and the pager is driven
+    // purely by the group cursors below, so we return no run-count total for it
+    // (this also skips a countDocuments/estimatedDocumentCount call per grouped
+    // request). For flat mode: when a filter is active, return an accurate
+    // `countDocuments(filter)` so the page count and total reflect the filtered
+    // dataset, not the whole collection; otherwise use the O(1)
+    // collection-metadata estimate (issue #1138).
+    const hasActiveFilter =
+      and.length > 0 || Object.keys(flat).some((k) => k !== "deletedAt");
+    const estimatedTotal = groupByParam
+      ? undefined
+      : hasActiveFilter
+        ? await ctx.requestCollection.countDocuments(filter)
+        : await ctx.requestCollection.estimatedDocumentCount();
 
     // Grouped mode: paginated RunGroup[] via two-phase aggregation
     if (groupByParam) {
@@ -1305,7 +1753,8 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    // Flat mode: paginated runs with cursor on { createdAt, _id }
+    // Flat mode: paginated runs with a cursor seek on { <sortField>, _id }.
+    // `sortField`/`sortDir` are resolved above; the default is createdAt desc.
     let afterCursor: Record<string, string> | undefined;
     let beforeCursor: Record<string, string> | undefined;
     if (afterParam) {
@@ -1319,32 +1768,35 @@ apiRoute(ctx.app, ctx.registry, {
       } catch { res.status(400).json({ error: "Invalid cursor" }); return; }
     }
 
-    // Build cursor filter for seek-based pagination
-    const cursorFilter = { ...filter };
-    let sort: Record<string, 1 | -1> = { createdAt: -1, _id: -1 };
+    const forwardSort = buildSortObject(sortField, sortDir);              // display order
+    const reverseSort = buildSortObject(sortField, (-sortDir) as 1 | -1); // flipped
+
+    let queryFilter: Record<string, unknown>;
+    let sort: Record<string, 1 | -1>;
     let needsReverse = false;
 
     if (lastParam) {
-      // Jump to the last page by querying from oldest first, then reverse for normal UI ordering.
-      sort = { createdAt: 1, _id: 1 };
+      // Jump to the last page: query in reverse, then flip back to display order.
+      sort = reverseSort;
       needsReverse = true;
+      queryFilter = composeFilter();
     } else if (afterCursor) {
-      // Forward: items after this cursor (older, since sort is descending)
-      cursorFilter.$or = [
-        { createdAt: { $lt: new Date(afterCursor.createdAt) } },
-        { createdAt: new Date(afterCursor.createdAt), _id: { $lt: afterCursor.id } },
-      ];
+      // Forward: items after this cursor in display order.
+      sort = forwardSort;
+      const cval = deserializeSortValue(sortField, afterCursor[sortField]);
+      queryFilter = composeFilter(buildSeek(sortField, sortDir, cval, afterCursor.id ?? ""));
     } else if (beforeCursor) {
-      // Backward: flip sort, get items before cursor, then reverse
-      sort = { createdAt: 1, _id: 1 };
+      // Backward: seek in reverse, then flip back to display order.
+      sort = reverseSort;
       needsReverse = true;
-      cursorFilter.$or = [
-        { createdAt: { $gt: new Date(beforeCursor.createdAt) } },
-        { createdAt: new Date(beforeCursor.createdAt), _id: { $gt: beforeCursor.id } },
-      ];
+      const cval = deserializeSortValue(sortField, beforeCursor[sortField]);
+      queryFilter = composeFilter(buildSeek(sortField, (-sortDir) as 1 | -1, cval, beforeCursor.id ?? ""));
+    } else {
+      sort = forwardSort;
+      queryFilter = composeFilter();
     }
 
-    const resources = await ctx.requestCollection.find(cursorFilter).sort(sort).limit(limit).toArray();
+    const resources = await ctx.requestCollection.find(queryFilter).sort(sort).limit(limit).toArray();
 
     if (needsReverse) {
       resources.reverse();
@@ -1374,41 +1826,27 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
-    // Build cursors from first and last items
+    // Build cursors from first and last items, keyed by the active sort field.
     const first = data[0];
     const last = data[data.length - 1];
-    const firstCreatedAt = new Date(first.createdAt).toISOString();
+    const firstSortRaw = sortValueOf(first, sortField);
+    const lastSortRaw = sortValueOf(last, sortField);
+    const firstSortVal = serializeSortValue(sortField, firstSortRaw);
+    const lastSortVal = serializeSortValue(sortField, lastSortRaw);
     const firstId = String(first._id);
-    const lastCreatedAt = new Date(last.createdAt).toISOString();
     const lastId = String(last._id);
 
-    // Check if there are more results in each direction
+    // Existence probes: anything after `last` (forward) / before `first` (backward).
+    const afterProbe = composeFilter(buildSeek(sortField, sortDir, lastSortRaw, lastId));
+    const beforeProbe = composeFilter(buildSeek(sortField, (-sortDir) as 1 | -1, firstSortRaw, firstId));
     const [hasMoreAfter, hasMoreBefore] = lastParam
       ? await Promise.all([
           Promise.resolve([] as Record<string, unknown>[]),
-          ctx.requestCollection.find({
-            ...filter,
-            $or: [
-              { createdAt: { $gt: new Date(firstCreatedAt) } },
-              { createdAt: new Date(firstCreatedAt), _id: { $gt: firstId } },
-            ],
-          }).sort({ createdAt: 1, _id: 1 }).limit(1).toArray(),
+          ctx.requestCollection.find(beforeProbe).sort(reverseSort).limit(1).toArray(),
         ])
       : await Promise.all([
-          ctx.requestCollection.find({
-            ...filter,
-            $or: [
-              { createdAt: { $lt: new Date(lastCreatedAt) } },
-              { createdAt: new Date(lastCreatedAt), _id: { $lt: lastId } },
-            ],
-          }).sort({ createdAt: -1, _id: -1 }).limit(1).toArray(),
-          ctx.requestCollection.find({
-            ...filter,
-            $or: [
-              { createdAt: { $gt: new Date(firstCreatedAt) } },
-              { createdAt: new Date(firstCreatedAt), _id: { $gt: firstId } },
-            ],
-          }).sort({ createdAt: 1, _id: 1 }).limit(1).toArray(),
+          ctx.requestCollection.find(afterProbe).sort(forwardSort).limit(1).toArray(),
+          ctx.requestCollection.find(beforeProbe).sort(reverseSort).limit(1).toArray(),
         ]);
 
     res.json({
@@ -1416,12 +1854,20 @@ apiRoute(ctx.app, ctx.registry, {
       limit,
       estimatedTotal,
       cursors: {
-        next: lastParam ? null : hasMoreAfter.length > 0 ? encodeCursor({ createdAt: lastCreatedAt, id: lastId }) : null,
-        prev: hasMoreBefore.length > 0 ? encodeCursor({ createdAt: firstCreatedAt, id: firstId }) : null,
+        next: lastParam ? null : hasMoreAfter.length > 0 ? encodeCursor({ [sortField]: lastSortVal, id: lastId }) : null,
+        prev: hasMoreBefore.length > 0 ? encodeCursor({ [sortField]: firstSortVal, id: firstId }) : null,
       },
     });
   },
 });
+
+// Cap how many runs a single analysis pass loads into memory. We fetch the
+// most-recent-N done runs (sorted by createdAt, served by the existing createdAt
+// index from migration 010) rather than the entire collection, so memory stays
+// bounded as the run history grows. Override via ANALYSIS_MAX_RUNS. When the cap
+// is hit the response sets truncated=true and the portal shows a "most recent N"
+// banner instead of silently dropping data or breaking the page.
+const ANALYSIS_MAX_RUNS = Math.max(1, Number(process.env.ANALYSIS_MAX_RUNS) || 5000);
 
 // Analysis endpoint - compute pass@k, success@T, and iteration stats
 apiRoute(ctx.app, ctx.registry, {
@@ -1429,15 +1875,22 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/analysis",
   tags: ["Requests"],
   summary: "Compute pass@k / success@T metrics",
+  description:
+    "Aggregates pass@k / success@T metrics over a single project's done runs. Requires ?projectId=.",
   query: z.object({
     worker: z.string().optional(),
     taskPromptId: z.string().optional(),
     criteria: z.string().optional(),
+    features: z.string().optional(),
     submissionId: z.string().optional(),
     k: z.string().optional(),
-  }),
+  }).merge(ProjectIdQuerySchema),
   response: z.object({}).passthrough().describe("Analysis metrics"),
   handler: async (req, res) => {
+    // Scope every metric to the selected project — no cross-project aggregation
+    // (400 when ?projectId= is absent, mirroring the runs list / facets routes).
+    const projectId = getQueryProjectId(req);
+
     // Parse k values from query string (default: 1,2,5)
     const kParam = (req.query.k as string) || "1,2,5";
     const kValues = kParam.split(",").map(v => parseInt(v.trim(), 10)).filter(v => !isNaN(v) && v > 0);
@@ -1448,10 +1901,23 @@ apiRoute(ctx.app, ctx.registry, {
       ? criteriaParam.split(",").map(c => c.trim()).filter(Boolean)
       : undefined;
 
-    // Fetch all done runs (exclude pending/processing, exclude deleted).
-    // Per-attempt state lives at run.* (run-retry-attempts).
-    const runs = await ctx.requestCollection
+    // Parse task-prompt feature filter from query string (comma-separated feature IDs)
+    const featuresParam = req.query.features as string | undefined;
+    const selectedFeatures = featuresParam
+      ? featuresParam.split(",").map(f => f.trim()).filter(Boolean)
+      : undefined;
+
+    // Fetch the most-recent done runs (exclude pending/processing and deleted),
+    // capped to ANALYSIS_MAX_RUNS to bound memory. Sorted by createdAt desc using
+    // the existing createdAt index. The projection is slimmed to only the fields
+    // the analysis actually reads: the heavy per-turn payloads (agent transcripts
+    // `codingAgentResponse`, `judgeFeedback`, legacy inline `toolCalls`, HAR/video
+    // URLs, etc.) are excluded — a single run can otherwise approach Cosmos's 2 MB
+    // document limit. Per-attempt state lives at run.* (run-retry-attempts).
+    // Fetch one extra (limit + 1) so we can detect "more exist" without a count.
+    const runDocs = await ctx.requestCollection
       .find({
+        projectId,
         "run.status": "done",
         deletedAt: { $exists: false },
       })
@@ -1459,21 +1925,63 @@ apiRoute(ctx.app, ctx.registry, {
         _id: 1,
         scenario: 1,
         workerType: 1,
-        run: 1,
+        taskPromptId: 1,
+        "run.status": 1,
+        "run.outcome": 1,
+        "run.turns.iteration": 1,
+        "run.turns.passed": 1,
+        "run.turns.durationMs": 1,
+        "run.turns.criteriaResults": 1,
       })
+      .sort({ createdAt: -1 })
+      .limit(ANALYSIS_MAX_RUNS + 1)
       .toArray();
 
-    // Transform to AnalyzableRun format
-    const analyzableRuns: AnalyzableRun[] = runs.map(r => ({
-      scenario: r.scenario,
-      workerType: r.workerType,
-      status: r.run?.status ?? "done",
-      outcome: r.run?.outcome,
-      turns: r.run?.turns,
-    }));
+    // Trim back to the cap; `truncated` tells the portal to show a "most recent N"
+    // banner so capped metrics are never presented as if they covered everything.
+    const { runs, truncated } = capRunsToLimit(runDocs, ANALYSIS_MAX_RUNS);
 
-    const analysis: AnalysisResponse = computeAnalysis(analyzableRuns, kValues, selectedCriteria);
-    res.json(analysis);
+    // Effective task-prompt id per run: stored taskPromptId, else derived from the
+    // task text (legacy runs). Used to join task-prompt features for filtering.
+    const effectiveTaskPromptId = (r: { taskPromptId?: string; scenario?: { task?: string } }): string | undefined =>
+      r.taskPromptId || (r.scenario?.task ? computeTaskPromptId(r.scenario.task) : undefined);
+
+    // Batch-lookup task prompts for their detected/evaluated features.
+    const taskPromptIds = [
+      ...new Set(runs.map(r => effectiveTaskPromptId(r)).filter(Boolean)),
+    ] as string[];
+    const taskPromptFeatures = new Map<
+      string,
+      Array<{ featureId: string; detected: boolean; evaluated: boolean }>
+    >();
+    if (taskPromptIds.length > 0) {
+      const taskPrompts = await ctx.taskPromptCollection
+        .find({ _id: { $in: taskPromptIds } })
+        .project({ _id: 1, features: 1 })
+        .toArray();
+      for (const tp of taskPrompts) {
+        if (tp.features && tp.features.length > 0) {
+          taskPromptFeatures.set(tp._id, tp.features);
+        }
+      }
+    }
+
+    // Transform to AnalyzableRun format
+    const analyzableRuns: AnalyzableRun[] = runs.map(r => {
+      const tpId = effectiveTaskPromptId(r);
+      return {
+        scenario: r.scenario,
+        taskPromptId: tpId,
+        promptFeatures: tpId ? taskPromptFeatures.get(tpId) : undefined,
+        workerType: r.workerType,
+        status: r.run?.status ?? "done",
+        outcome: r.run?.outcome,
+        turns: r.run?.turns,
+      };
+    });
+
+    const analysis: AnalysisResponse = computeAnalysis(analyzableRuns, kValues, selectedCriteria, selectedFeatures);
+    res.json({ ...analysis, truncated, runLimit: ANALYSIS_MAX_RUNS });
   },
 });
 
@@ -1488,21 +1996,6 @@ apiRoute(ctx.app, ctx.registry, {
   successStatus: 201,
   handler: async (req, res) => {
     const { ids, count, overrides } = req.body;
-
-    // Validate workerType override against known workers
-    if (overrides?.workerType && !VALID_WORKERS.includes(overrides.workerType as WorkerType)) {
-      res.status(400).json({ error: `Invalid workerType override: ${overrides.workerType}` });
-      return;
-    }
-
-    // Check if the overridden worker is available for new submissions
-    if (overrides?.workerType) {
-      const overrideAgent = await ctx.agentCollection.findOne({ _id: overrides.workerType, deletedAt: { $exists: false } });
-      if (overrideAgent && overrideAgent.available === false) {
-        res.status(400).json({ error: `Worker "${overrides.workerType}" is not available for new submissions` });
-        return;
-      }
-    }
 
     // Resolve profile override (once for the entire batch)
     let overrideProfileId: string | null | undefined = overrides?.profileId;
@@ -1525,7 +2018,7 @@ apiRoute(ctx.app, ctx.registry, {
         res.status(404).json({ error: `Profile version not found for profile: ${overrideProfileId}` });
         return;
       }
-      overrideProfileVersionId = overrideProfileVersion._id;
+      overrideProfileVersionId = overrideProfileVersion.ref ?? overrideProfileVersion._id;
 
       // Reject individual overrides that conflict with the profile's controlled fields
       const conflicts: string[] = [];
@@ -1600,7 +2093,10 @@ apiRoute(ctx.app, ctx.registry, {
           effectiveProfileVersionId = original.profileVersionId;
           // If the original had a profile, resolve its version for field overrides
           if (original.profileId && original.profileVersionId) {
-            activeProfileVersion = await ctx.profileVersionCollection.findOne({ _id: original.profileVersionId });
+            activeProfileVersion = await ctx.profileVersionCollection.findOne({
+              projectId: original.projectId,
+              $or: [{ ref: original.profileVersionId }, { _id: original.profileVersionId }],
+            });
           }
         }
 
@@ -1609,7 +2105,7 @@ apiRoute(ctx.app, ctx.registry, {
         const effectiveWorkerType = (activeProfileVersion
           ? activeProfileVersion.workerType
           : (overrides?.workerType ?? original.workerType)) as WorkerType;
-        const effectiveModel = activeProfileVersion
+        let effectiveModel = activeProfileVersion
           ? activeProfileVersion.model
           : (overrides?.model !== undefined ? overrides.model : original.model);
         const effectiveReasoningEffort = activeProfileVersion?.reasoningEffort
@@ -1625,7 +2121,7 @@ apiRoute(ctx.app, ctx.registry, {
         // Resolve skill specs to pinned refs (handles both bare slugs and already-pinned refs)
         let resolvedSkillRevisions: string[] | null = null;
         if (effectiveSkillRevisions && effectiveSkillRevisions.length > 0) {
-          const result = await resolveSkillSpecs(effectiveSkillRevisions, ctx);
+          const result = await resolveSkillSpecs(effectiveSkillRevisions, ctx, original.projectId);
           if (result.error) {
             res.status(422).json({ error: `Skill resolution failed during resubmit: ${result.error}` });
             return;
@@ -1635,21 +2131,60 @@ apiRoute(ctx.app, ctx.registry, {
         const effectiveExtensions = activeProfileVersion
           ? (activeProfileVersion.extensions ?? null)
           : (overrides?.extensions !== undefined ? overrides.extensions : original.extensions);
-        // Strip extensions for non-vscode workers (they don't support VS Code extensions)
-        const isVscodeWorker = effectiveWorkerType.includes("vscode");
 
-        // Resolve agent version for re-submitted run (latest active for the effective worker)
-        let resolvedAgentVersion: string | undefined;
-        const agentDoc = await ctx.agentCollection.findOne({ _id: effectiveWorkerType, deletedAt: { $exists: false } });
-        if (agentDoc) {
-          const versionResult = resolveAgentVersion(agentDoc.versions, undefined);
-          if (!("error" in versionResult)) {
-            resolvedAgentVersion = versionResult.agentVersion;
+        const resubmitPlan = planResubmitResources(
+          overrideProfileId,
+          original.resources,
+          normalizeResourceBindingSpecs(activeProfileVersion?.resources),
+        );
+        let effectiveResources: ResourceBinding[] | null = null;
+        if (resubmitPlan.kind === "resolve") {
+          const resolvedResources = await resolveResourceBindings(
+            ctx,
+            original.projectId,
+            undefined,
+            resubmitPlan.specs,
+          );
+          if (resolvedResources.errors.length > 0) {
+            res.status(422).json({
+              error: `Resource resolution failed during resubmit: ${resolvedResources.errors.join("; ")}`,
+            });
+            return;
           }
+          effectiveResources = resolvedResources.bindings ?? null;
+        } else {
+          effectiveResources = resubmitPlan.bindings;
         }
+
+        const targetCheck = await validateAgentTarget(ctx.agentCollection, {
+          workerType: effectiveWorkerType,
+          requestedVersion:
+            activeProfileVersion?.agentVersion ??
+            overrides?.agentVersion,
+          model: effectiveModel ?? undefined,
+          requirements: requestedAgentCapabilities({
+            reasoningEffort: effectiveReasoningEffort,
+            mcpServers: effectiveMcpServers,
+            skillRevisions: effectiveSkillRevisions,
+            extensions: effectiveExtensions,
+            resources: effectiveResources,
+          }),
+          strictCapabilities: ctx.strictAgentCapabilities,
+        });
+        if (!targetCheck.ok) {
+          const { ok: _ok, status, ...payload } = targetCheck;
+          res.status(status).json({
+            ...payload,
+            originalRequestId: original._id,
+          });
+          return;
+        }
+        effectiveModel = targetCheck.model;
+        const resolvedAgentVersion = targetCheck.agentVersion;
 
         const newDoc: RequestDocument = {
           _id: requestId,
+          projectId: original.projectId,
           scenario: original.scenario,
           workerType: effectiveWorkerType,
           createdAt: new Date(),
@@ -1661,11 +2196,15 @@ apiRoute(ctx.app, ctx.registry, {
           ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
           ...(effectiveMcpServers && effectiveMcpServers.length > 0 ? { mcpServers: effectiveMcpServers } : {}),
           ...(resolvedSkillRevisions && resolvedSkillRevisions.length > 0 ? { skillRevisions: resolvedSkillRevisions } : {}),
-          ...(isVscodeWorker && effectiveExtensions && effectiveExtensions.length > 0 ? { extensions: effectiveExtensions } : {}),
-          ...(resolvedAgentVersion ? { agentVersion: resolvedAgentVersion } : {}),
+          ...(effectiveExtensions && effectiveExtensions.length > 0 ? { extensions: effectiveExtensions } : {}),
+          ...(effectiveResources && effectiveResources.length > 0 ? { resources: effectiveResources } : {}),
+          agentVersion: resolvedAgentVersion,
           ...(original.taskPromptId ? { taskPromptId: original.taskPromptId } : {}),
           ...(effectiveProfileId ? { profileId: effectiveProfileId } : {}),
           ...(effectiveProfileVersionId ? { profileVersionId: effectiveProfileVersionId } : {}),
+          // Preserve AGENTS.md lineage across re-submits.
+          ...(original.agentsMdPromptId ? { agentsMdPromptId: original.agentsMdPromptId } : {}),
+          ...(original.agentsMdParentIds && original.agentsMdParentIds.length > 0 ? { agentsMdParentIds: original.agentsMdParentIds } : {}),
           submissionId,
           // Bulk re-submit creates a brand-new request — mint a distinct
           // run id for the first attempt so blob artifacts live under
@@ -1971,6 +2510,7 @@ async function finalizePendingRun(
   prefix: string,
   run: PendingRun,
   blobServiceClient: BlobServiceClient,
+  projectId: string,
 ): Promise<ImportSuccess> {
   if (run.uploadErrors.length > 0) {
     throw new ImportError(500, `Blob upload failures: ${run.uploadErrors.join("; ")}`);
@@ -2090,7 +2630,7 @@ async function finalizePendingRun(
   // trimmed task text) — when the imported `taskPromptId` is correct it
   // simply matches the returned `_id`; when it is missing or stale we
   // overwrite it with the canonical id.
-  const taskPrompt = await ctx.taskPromptStore.findOrCreate(runDoc.scenario.task);
+  const taskPrompt = await ctx.taskPromptStore.findOrCreate(projectId, runDoc.scenario.task);
   const resolvedTaskPromptId = taskPrompt._id;
 
   // Build the document by spreading the validated yaml — zod has already
@@ -2102,6 +2642,10 @@ async function finalizePendingRun(
   // dropped all of these on round-trip.
   const docToInsert: RequestDocument = {
     ...(runDoc as unknown as RequestDocument),
+    // Import always files the run into the caller-selected project, remapping
+    // any projectId carried in the archive so imports stay portable across
+    // environments (a serialized projectId won't exist in the target).
+    projectId,
     workerType: runDoc.workerType as WorkerType,
     createdAt: runDoc.createdAt ?? new Date(),
     priority: runDoc.priority ?? 0,
@@ -2115,6 +2659,11 @@ async function finalizePendingRun(
       ...(runState.harUrl ? { harUrl: runState.harUrl } : {}),
       ...(runState.rawChatUrl ? { rawChatUrl: runState.rawChatUrl } : {}),
       turns,
+      // Denormalize duration so imported finished runs are immediately
+      // sortable by duration (before the backfill migration runs).
+      ...(runDurationMs(runState.startedAt, runState.finishedAt) !== undefined
+        ? { durationMs: runDurationMs(runState.startedAt, runState.finishedAt) }
+        : {}),
     },
   };
 
@@ -2136,6 +2685,7 @@ async function finalizePendingRun(
 async function streamArchiveImport(
   archiveStream: NodeJS.ReadableStream,
   blobServiceClient: BlobServiceClient,
+  projectId: string,
 ): Promise<{ imported: ImportSuccess[]; failed: ImportFailure[] }> {
   const snapshotsContainer = blobServiceClient.getContainerClient("snapshots");
   await snapshotsContainer.createIfNotExists();
@@ -2269,7 +2819,7 @@ async function streamArchiveImport(
   try {
     for (const [prefix, run] of pending) {
       try {
-        imported.push(await finalizePendingRun(prefix, run, blobServiceClient));
+        imported.push(await finalizePendingRun(prefix, run, blobServiceClient, projectId));
       } catch (err) {
         // Per-run failure — delete this run's blobs so a bad run.yaml or a
         // duplicate _id never leaves orphans behind. Other runs in the batch
@@ -2326,10 +2876,12 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Requests"],
   summary: "Import run archive",
   middleware: [upload.single("archive")],
+  query: ProjectIdQuerySchema,
   response: RequestResponseSchema,
   rawResponse: true,
   successStatus: 201,
   handler: async (req, res) => {
+    const projectId = getQueryProjectId(req);
     // Reject obviously empty requests up front so the streaming pipeline
     // doesn't blow up trying to gunzip nothing. multer leaves req.file
     // undefined when the multipart body has no "archive" field; raw POSTs
@@ -2348,7 +2900,7 @@ apiRoute(ctx.app, ctx.registry, {
     try {
       let result: { imported: ImportSuccess[]; failed: ImportFailure[] };
       try {
-        result = await streamArchiveImport(stream, buildBlobServiceClient());
+        result = await streamArchiveImport(stream, buildBlobServiceClient(), projectId);
       } catch (err) {
         if (err instanceof ImportError) {
           res.status(err.statusCode).json({ error: err.message, ...(err.details ?? {}) });
@@ -2418,7 +2970,9 @@ apiRoute(ctx.app, ctx.registry, {
   errorResponses: {
     400: { description: "No archive uploaded, empty archive, or all runs failed" },
   },
+  query: ProjectIdQuerySchema,
   handler: async (req, res) => {
+    const projectId = getQueryProjectId(req);
     const typed = req as Parameters<typeof getArchiveStream>[0];
     const isMultipart = req.is("multipart/form-data");
     const isRawGzip = req.is("application/gzip") || req.is("application/octet-stream");
@@ -2433,7 +2987,7 @@ apiRoute(ctx.app, ctx.registry, {
     try {
       let result: { imported: ImportSuccess[]; failed: ImportFailure[] };
       try {
-        result = await streamArchiveImport(stream, buildBlobServiceClient());
+        result = await streamArchiveImport(stream, buildBlobServiceClient(), projectId);
       } catch (err) {
         if (err instanceof ImportError) {
           res.status(err.statusCode).json({ error: err.message, ...(err.details ?? {}) });
@@ -2601,6 +3155,16 @@ apiRoute(ctx.app, ctx.registry, {
         continue;
       }
 
+      const targetCheck = await validatePersistedRequestTarget(request);
+      if (!targetCheck.ok) {
+        results.push({
+          requestId: id,
+          error: `${targetCheck.error} (${targetCheck.errorCode})`,
+        });
+        skipped++;
+        continue;
+      }
+
       const runToDemote = currentRun;
       const newAttemptNumber = (runToDemote.attemptNumber ?? 1) + 1;
       const newRunId = uuidv4();
@@ -2613,7 +3177,7 @@ apiRoute(ctx.app, ctx.registry, {
 
       // 1. Demote current run to history
       try {
-        await insertHistoricalRun({ runsCollection: ctx.runsCollection }, id, runToDemote);
+        await insertHistoricalRun({ runsCollection: ctx.runsCollection }, id, runToDemote, request.projectId);
       } catch (err: any) {
         if (err?.code !== 11000) {
           results.push({ requestId: id, error: "Failed to demote run to history" });
@@ -2625,7 +3189,13 @@ apiRoute(ctx.app, ctx.registry, {
       // 2. Atomically swap
       const updateResult = await ctx.requestCollection.updateOne(
         { _id: id, "run._id": runToDemote._id },
-        { $set: { run: newRun, updatedAt: new Date() } },
+        {
+          $set: {
+            run: newRun,
+            agentVersion: targetCheck.agentVersion,
+            updatedAt: new Date(),
+          },
+        },
       );
       if (updateResult.matchedCount === 0) {
         results.push({ requestId: id, error: "Race condition — another retry started first" });
@@ -2693,6 +3263,13 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
+    const targetCheck = await validatePersistedRequestTarget(request);
+    if (!targetCheck.ok) {
+      const { ok: _ok, status, ...payload } = targetCheck;
+      res.status(status).json(payload);
+      return;
+    }
+
     const runToDemote = currentRun;
 
     const newAttemptNumber = (runToDemote.attemptNumber ?? 1) + 1;
@@ -2708,7 +3285,7 @@ apiRoute(ctx.app, ctx.registry, {
     //    request update fails afterwards we have a duplicate-history-entry
     //    risk on retry, but never history loss. Insert is idempotent on _id.
     try {
-      await insertHistoricalRun({ runsCollection: ctx.runsCollection }, id, runToDemote);
+      await insertHistoricalRun({ runsCollection: ctx.runsCollection }, id, runToDemote, request.projectId);
     } catch (err: any) {
       // Duplicate key (already in history) is fine — proceed.
       if (err?.code !== 11000) throw err;
@@ -2721,6 +3298,7 @@ apiRoute(ctx.app, ctx.registry, {
       {
         $set: {
           run: newRun,
+          agentVersion: targetCheck.agentVersion,
           updatedAt: new Date(),
         },
       },

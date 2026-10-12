@@ -5,13 +5,18 @@ import express, { Request, Response, NextFunction } from "express";
 import dotenv from "dotenv";
 import { evaluateWorkspace } from "./judge-agent.js";
 import { verifyCopilotProtocol } from "./protocol-check.js";
-import { type AgentTrajectory, fromAtif, fromAtifList, fromToolCalls } from "./agent-trajectory.js";
+import { resolveCurrentIteration, mapIterationToolCallUrls } from "./tool-call-history.js";
+import { type AgentTrajectory, fromAtif, fromAtifList } from "./agent-trajectory.js";
 import { BlobStorage, RedisLogPublisher } from "shared";
+import { initTelemetry, trackMetric, trackEvent } from "telemetry";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
 dotenv.config();
+
+// Initialize telemetry before any other setup
+initTelemetry("scope-judge");
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
@@ -53,7 +58,7 @@ app.post(
     const startTime = Date.now();
 
     try {
-      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl, atifUrl, atifUrls } = req.body;
+      const { snapshotUrl, criteria, conversationHistory, personaInstructions, requestId, gate, toolCallsUrl, atifUrl, atifUrls, iteration, projectId, currentAgentResponse } = req.body;
 
       // Validate required fields
       if (!snapshotUrl || typeof snapshotUrl !== "string") {
@@ -78,35 +83,49 @@ app.post(
         return;
       }
 
+      if (currentAgentResponse !== undefined && typeof currentAgentResponse !== "string") {
+        res.status(400).json({ error: "currentAgentResponse must be a string" });
+        return;
+      }
+
       console.log(
         `[judge] Evaluating snapshot: ${snapshotUrl} (${criteria.length} criteria, ${conversationHistory?.length || 0} prior turns)`
       );
+
+      trackEvent({
+        name: "judge.evaluation_started",
+        properties: {
+          requestId: requestId || "unknown",
+          criteriaCount: String(criteria.length),
+          gate: gate || "select",
+        },
+      });
 
       // Download and extract workspace snapshot to temp directory
       const workDir = mkdtempSync(join(tmpdir(), "judge-workspace-"));
 
       try {
+        const downloadStart = Date.now();
         await blobStorage.downloadAndExtractSnapshot(snapshotUrl, workDir);
+        const downloadMs = Date.now() - downloadStart;
+
+        trackMetric({
+          name: "judge.blob_download_ms",
+          value: downloadMs,
+          properties: { requestId: requestId || "unknown" },
+        });
 
         console.log(`[judge] Snapshot extracted to ${workDir}`);
 
-        // Build the agent's captured trajectory from whichever channel was
-        // provided, normalized into ONE source-agnostic model the judge navigates
-        // with the unified trajectory tools (list/get_agent_tool_calls,
-        // list/get_agent_tools, get_trajectory_overview). Gates send the HAR
-        // ToolCall[] via toolCallsUrl; observations (#1156) send the full ATIF via
-        // atifUrl — the normalized superset that also carries the agent's tool
-        // catalog and per-step reasoning. ATIF wins if both ever arrive (superset).
-        // Failures are non-fatal — the judge can still evaluate the workspace
-        // files. See apps/judge/src/agent-trajectory.ts.
+        // Observation evaluations carry normalized ATIF trajectories. A
+        // run-subject observation sends every iteration so cross-iteration
+        // behavior remains visible; an iteration-subject observation sends one.
+        // Failures are non-fatal because workspace evidence remains available.
         let trajectory: AgentTrajectory | undefined;
         if (Array.isArray(atifUrls) && atifUrls.length > 0) {
-          // Run-subject observations (#1156): merge every iteration's ATIF into
-          // one whole-run trajectory so cross-iteration behavior (e.g. a dep added
-          // in one turn and removed in another) is visible in a single evaluation.
-          const urls = atifUrls.filter((u: unknown): u is string => typeof u === "string");
+          const urls = atifUrls.filter((url: unknown): url is string => typeof url === "string");
           try {
-            const atifs = await Promise.all(urls.map((u) => blobStorage.downloadJson(u)));
+            const atifs = await Promise.all(urls.map((url) => blobStorage.downloadJson(url)));
             trajectory = fromAtifList(atifs);
             console.log(
               `[judge] Loaded merged ATIF trajectory from ${urls.length} iteration(s): ${trajectory.calls.length} call(s), ${trajectory.toolDefinitions.length} tool definition(s)`,
@@ -116,10 +135,9 @@ app.post(
               `[judge] Failed to load merged ATIF from ${urls.length} url(s): ${err instanceof Error ? err.message : String(err)}`,
             );
           }
-        } else if (atifUrl && typeof atifUrl === "string") {
+        } else if (typeof atifUrl === "string") {
           try {
-            const atif = await blobStorage.downloadJson(atifUrl);
-            trajectory = fromAtif(atif);
+            trajectory = fromAtif(await blobStorage.downloadJson(atifUrl));
             console.log(
               `[judge] Loaded ATIF trajectory from ${atifUrl}: ${trajectory.calls.length} call(s), ${trajectory.toolDefinitions.length} tool definition(s)`,
             );
@@ -128,19 +146,45 @@ app.post(
               `[judge] Failed to load ATIF from ${atifUrl}: ${err instanceof Error ? err.message : String(err)}`,
             );
           }
-        } else if (toolCallsUrl && typeof toolCallsUrl === "string") {
-          try {
-            const toolCalls = await blobStorage.getToolCalls(toolCallsUrl);
-            trajectory = fromToolCalls(toolCalls);
-            console.log(
-              `[judge] Loaded ${trajectory.calls.length} tool call(s) for gate '${gate ?? "select"}'`,
-            );
-          } catch (err) {
-            console.warn(
-              `[judge] Failed to load tool calls from ${toolCallsUrl}: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
         }
+
+        // Assemble the coding agent's captured tool calls across the WHOLE run,
+        // not just the current iteration. Each prior turn in conversationHistory
+        // carries its own toolCallsUrl; the current iteration's log arrives as the
+        // top-level toolCallsUrl. We fetch them all in parallel and label each by
+        // its iteration number so a one-time action performed in an earlier
+        // iteration (bootstrap, scaffold, install, one-off command) stays visible
+        // to the judge in every later iteration. Missing/legacy logs (404 → [])
+        // are skipped, never fatal — the judge can still evaluate the workspace.
+        const currentIteration = resolveCurrentIteration(iteration, conversationHistory);
+
+        // Fetch every iteration's tool-calls log in parallel, in ascending
+        // iteration order. Missing/legacy logs (404 → []) are skipped, never
+        // fatal — the judge can still evaluate the workspace.
+        const iterationToolCalls: import("shared").IterationToolCalls[] = (
+          await Promise.all(
+            mapIterationToolCallUrls(
+              conversationHistory,
+              toolCallsUrl,
+              currentIteration,
+            ).map(async ({ iteration: iterNum, url }) => {
+              try {
+                const toolCalls = await blobStorage.getToolCalls(url);
+                return { iteration: iterNum, toolCalls };
+              } catch (err) {
+                console.warn(
+                  `[judge] Failed to load tool calls for iteration ${iterNum} from ${url}: ${err instanceof Error ? err.message : String(err)}`,
+                );
+                return { iteration: iterNum, toolCalls: [] };
+              }
+            }),
+          )
+        ).filter((g) => g.toolCalls.length > 0);
+
+        const totalToolCalls = iterationToolCalls.reduce((n, g) => n + g.toolCalls.length, 0);
+        console.log(
+          `[judge] Loaded ${totalToolCalls} tool call(s) across ${iterationToolCalls.length} iteration(s) for gate '${gate ?? "select"}'`,
+        );
 
         // Build onProgress callback that publishes criterion results via Redis
         const onProgress = (requestId && logPublisher)
@@ -164,13 +208,37 @@ app.post(
           personaInstructions,
           onProgress,
           gate,
+          iterationToolCalls,
           trajectory,
+          projectId,
+          currentAgentResponse,
         });
 
         const elapsed = Date.now() - startTime;
         console.log(
           `[judge] Evaluation complete in ${elapsed}ms: passed=${result.passed}`
         );
+
+        trackMetric({
+          name: "judge.evaluation_duration_ms",
+          value: elapsed,
+          properties: { requestId: requestId || "unknown", gate: gate || "select" },
+        });
+
+        trackMetric({
+          name: "judge.criteria_count",
+          value: criteria.length,
+          properties: { requestId: requestId || "unknown" },
+        });
+
+        trackEvent({
+          name: "judge.evaluation_completed",
+          properties: {
+            requestId: requestId || "unknown",
+            passed: String(result.passed),
+            criteriaCount: String(criteria.length),
+          },
+        });
 
         res.json(result);
       } finally {

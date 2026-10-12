@@ -15,10 +15,14 @@ function makeCtx(
   doc: unknown,
   metas: CriterionMeta[] = [],
 ): HandlerContext & { collection: { updateOne: ReturnType<typeof vi.fn> } } {
+  const scopedDoc =
+    typeof doc === "object" && doc !== null
+      ? { projectId: "proj-test", ...doc }
+      : doc;
   return {
     blobStorage: {} as any,
     collection: {
-      findOne: vi.fn().mockResolvedValue(doc),
+      findOne: vi.fn().mockResolvedValue(scopedDoc),
       updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
     } as any,
     criteriaCollection: {

@@ -72,6 +72,12 @@ export interface MultiTurnConfig {
    * therefore blob paths `iteration-N/...`) stay globally unique. Defaults to 0.
    */
   iterationOffset?: number;
+  /**
+   * The run's project. Threaded to the judge so its criteria resolution is
+   * scoped to that project (per-project catalog isolation). Absent ⇒ the judge
+   * falls back to global/unscoped criteria (legacy).
+   */
+  projectId?: string;
 }
 
 export interface MultiTurnResult {
@@ -117,6 +123,7 @@ export async function runMultiTurnLoop(
     workspacePath,
     gate,
     iterationOffset = 0,
+    projectId,
   } = config;
 
   // Defensive: criteria is required when maxIterations > 1
@@ -198,6 +205,15 @@ export async function runMultiTurnLoop(
               await iterLog("info", `Extracted ${extracted.length} tool call(s) from HAR`, {
                 toolCallsUrl: turnToolCallsUrl,
                 toolCallCount: turnToolCallCount,
+              });
+            } else {
+              // A HAR was captured but yielded zero tool calls. This is almost
+              // always an unsupported wire format (e.g. a new API shape the
+              // parser doesn't recognize) rather than a genuinely tool-less
+              // session — surface it loudly so the judge isn't silently starved
+              // of tool-call evidence.
+              await iterLog("warn", "HAR captured but 0 tool calls extracted — possible unsupported API format; judge will have no tool-call evidence", {
+                harUrl: turnHarUrl,
               });
             }
           } catch (extractError) {
@@ -441,8 +457,11 @@ export async function runMultiTurnLoop(
         conversationHistory: turns,
         personaInstructions,
         requestId,
+        iteration,
         ...(gate && { gate }),
         ...(turnToolCallsUrl && { toolCallsUrl: turnToolCallsUrl }),
+        ...(projectId && { projectId }),
+        ...(codingResponse && { currentAgentResponse: codingResponse }),
       });
       judgePassed = judgeResult.passed;
       judgeFeedback = judgeResult.feedback;

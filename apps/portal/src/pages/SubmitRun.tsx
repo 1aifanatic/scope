@@ -14,20 +14,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import {
   Send, Loader2, Server, Info, BookOpen, Sparkles, Puzzle, SlidersHorizontal,
-  X, Save, Plus, ChevronDown, FilePlus2, History, ArrowLeft, Check, FolderGit2,
+  X, Save, Plus, ChevronDown, FilePlus2, History, ArrowLeft, Check, FolderGit2, FileText, Boxes,
 } from "lucide-react";
 import {
-  WORKER_TYPES, type CodingAgent, type McpServerDocument,
-  type ProfileWithVersion, type ProfileVersionDocument, type Run,
+  getActiveAgentVersions, isAgentAvailable, isAgentVersionAvailable, type CodingAgent, type McpServerDocument,
+  type ProfileWithVersion, type ProfileVersionDocument, type ResourceBindingSpec, type Run,
 } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { CreateCriterionDialog } from "@/components/CreateCriterionDialog";
 import { SkillPicker } from "@/components/SkillPicker";
 import { CodebasePicker } from "@/components/CodebasePicker";
+import { ResourcePicker } from "@/components/ResourcePicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { ProfileCreateForm } from "@/components/ProfileCreateForm";
 import { ProfilePicker } from "@/components/ProfilePicker";
+import { AgentBadge } from "@/components/AgentBadge";
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { AdvancedSection } from "@/components/AdvancedSection";
 import { AdvancedModeToggle } from "@/components/AdvancedModeToggle";
@@ -41,6 +43,7 @@ import {
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
 import { useVisibleGates } from "@/hooks/useVisibleGates";
+import { useStrictAgentCapabilities } from "@/hooks/useStrictAgentCapabilities";
 import { KbdBadge } from "@/components/KbdBadge";
 import {
   GATE_METADATA,
@@ -105,7 +108,7 @@ function randomVariationColor(): string {
 interface GalleryCardProps {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
-  description?: string;
+  description?: React.ReactNode;
   onClick: () => void;
 }
 
@@ -184,6 +187,7 @@ function CollapsibleCard({ icon: Icon, title, summary, open, onOpenChange, disab
 export function SubmitRun() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const strictAgentCapabilities = useStrictAgentCapabilities();
 
   // Non-select gates visible in the authoring UI. Run/Deploy are hidden behind
   // feature flags until ready; gateDrafts still holds all gates so its shape is
@@ -198,7 +202,7 @@ export function SubmitRun() {
   const [task, setTask] = useState("");
   const [pickedCriteria, setPickedCriteria] = useState<string[]>([]);
   const [pickedObservations, setPickedObservations] = useState<string[]>([]);
-  const [worker, setWorker] = useState<string>("coder-acp-copilot");
+  const [worker, setWorker] = useState<string>("");
   const [model, setModel] = useState<string>("");
   const [reasoningEffort, setReasoningEffort] = useState<string>("");
   const [maxIterations, setMaxIterations] = useState<number>(10);
@@ -210,11 +214,13 @@ export function SubmitRun() {
   }));
   const [occurrences, setOccurrences] = useState<number>(5);
   const [priority, setPriority] = useState<number>(0);
+  const [agentsMd, setAgentsMd] = useState<string>("");
 
   // Optional add-ons
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [selectedCodebaseSpec, setSelectedCodebaseSpec] = useState<string | null>(null);
+  const [selectedResourceSpecs, setSelectedResourceSpecs] = useState<ResourceBindingSpec[]>([]);
   const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
 
   // Profile
@@ -243,6 +249,8 @@ export function SubmitRun() {
   const [mcpOpen, setMcpOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [codebaseOpen, setCodebaseOpen] = useState(false);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
+  const [agentsMdOpen, setAgentsMdOpen] = useState(false);
   const [extensionsOpen, setExtensionsOpen] = useState(false);
   const [graphSelection, setGraphSelection] = useState<GraphSelection>({ kind: "base" });
 
@@ -251,9 +259,9 @@ export function SubmitRun() {
   const [generateDescription, setGenerateDescription] = useState("");
 
   // ─── Queries ────────────────────────────────────────────────────────────
-  const { data: agents = [] } = useQuery({
-    queryKey: ["agents"],
-    queryFn: () => api.listAgents(),
+  const { data: agents = [], isSuccess: agentsLoaded } = useQuery({
+    queryKey: ["agents", "include-deleted"],
+    queryFn: () => api.listAgents({ includeDeleted: true }),
   });
 
   const { data: mcpServers = [] } = useQuery({
@@ -281,55 +289,102 @@ export function SubmitRun() {
   // ─── Derived ────────────────────────────────────────────────────────────
   const activeMcpServers = mcpServers.filter((s: McpServerDocument) => !s.deletedAt);
   const activeAgents = agents.filter((a: CodingAgent) => !a.deletedAt);
-  const availableAgents = activeAgents.filter((a: CodingAgent) => a.available !== false);
+  const availableAgents = agents.filter(isAgentAvailable);
+  const agentNameById = new Map(agents.map((agent) => [agent._id, agent.name]));
   const selectedAgent = activeAgents.find((a: CodingAgent) => a._id === worker);
-  const isVscodeWorker = worker.includes("vscode");
+  const supportsMcpServers = !strictAgentCapabilities || selectedAgent?.capabilities?.supportsMcpServers === true;
+  const supportsSkills = !strictAgentCapabilities || selectedAgent?.capabilities?.supportsSkills === true;
+  const supportsExtensions = !strictAgentCapabilities || selectedAgent?.capabilities?.supportsExtensions === true;
+  const showMcpServers = supportsMcpServers || (profileLocked && selectedMcpServers.length > 0);
+  const showSkills = supportsSkills || (profileLocked && selectedSkills.length > 0);
+  const showExtensions = supportsExtensions || (profileLocked && selectedExtensions.length > 0);
   const profileList = profiles as ProfileWithVersion[];
+  const profileVersionIsAvailable = (version: ProfileVersionDocument) =>
+    isAgentVersionAvailable(
+      agents.find((agent) => agent._id === version.workerType),
+      version.agentVersion,
+    );
+  const selectableProfileList = profileList.filter((profile) => profileVersionIsAvailable(profile.version));
   const selectedBaseProfile = profileList.find((profile) => profile._id === selectedProfileId);
-  const topProfiles = profileList.slice(0, 3);
+  const selectedBaseProfileVersion = selectedProfileId
+    ? profileVersions.find((version) => version.version === selectedProfileVersion) ?? selectedBaseProfile?.version
+    : undefined;
+  const topProfiles = selectableProfileList.slice(0, 3);
 
   // ─── Effects ────────────────────────────────────────────────────────────
-  // When agent changes, reset model + clear extensions for non-vscode workers
   useEffect(() => {
-    if (selectedProfileId) return;
+    if (!agentsLoaded || profileLocked) return;
+    if (!availableAgents.some((agent) => agent._id === worker)) {
+      setWorker(availableAgents[0]?._id ?? "");
+    }
+  }, [agentsLoaded, availableAgents, profileLocked, worker]);
+
+  // When the agent changes, reset dependent values and unsupported add-ons.
+  useEffect(() => {
+    if (selectedProfileId || !agentsLoaded) return;
     if (selectedAgent) {
       setModel(selectedAgent.defaultModel ?? "");
     } else {
       setModel("");
     }
-    if (!worker.includes("vscode")) {
+    if (strictAgentCapabilities && selectedAgent?.capabilities?.supportsReasoningEffort !== true) {
+      setReasoningEffort("");
+    }
+    if (!supportsMcpServers) {
+      setSelectedMcpServers([]);
+    }
+    if (!supportsSkills) {
+      setSelectedSkills([]);
+    }
+    if (!supportsExtensions) {
       setSelectedExtensions([]);
     }
-  }, [worker, selectedAgent?.defaultModel]);
+  }, [
+    worker,
+    agentsLoaded,
+    selectedAgent?.defaultModel,
+    selectedAgent?.capabilities?.supportsReasoningEffort,
+    strictAgentCapabilities,
+    supportsMcpServers,
+    supportsSkills,
+    supportsExtensions,
+    selectedProfileId,
+  ]);
 
-  // Auto-open Extensions section when switching to a VS Code worker that has selected extensions
+  // Auto-open Extensions when the selected worker supports them.
   useEffect(() => {
-    if (isVscodeWorker && selectedExtensions.length > 0) {
+    if (showExtensions && selectedExtensions.length > 0) {
       setExtensionsOpen(true);
     }
-  }, [isVscodeWorker, selectedExtensions.length]);
+  }, [showExtensions, selectedExtensions.length]);
 
-  // Fetch active versions for selected agent
-  const { data: agentVersions = [] } = useQuery({
-    queryKey: ["agent-versions", worker],
-    queryFn: () => api.listAgentVersions(worker, "active"),
-    enabled: !!worker,
-  });
-
-  const sortedVersions = [...agentVersions].sort(
+  const sortedVersions = selectedAgent ? getActiveAgentVersions(selectedAgent).sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+  ) : [];
+  const selectedVersionIsHistorical = !!selectedAgentVersion
+    && !sortedVersions.some((version) => version.agentVersion === selectedAgentVersion);
 
   // Model capabilities and reasoning-effort management
-  const { capabilitiesMap: modelCapabilitiesMap, activeModelIds } = useModelCapabilities(worker || undefined);
+  const {
+    capabilitiesMap: modelCapabilitiesMap,
+    activeModelIds,
+    capabilitiesLoaded,
+  } = useModelCapabilities(worker || undefined);
+  const modelIsHistorical = !!model && !activeModelIds.includes(model);
   const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
   const { supportedEfforts, workerEffortWarning } = useReasoningEffort({
     model,
     capabilitiesMap: modelCapabilitiesMap,
     value: reasoningEffort,
     onChange: onEffortChange,
-    agentSupportsEffort: selectedAgent?.capabilities?.supportsReasoningEffort,
+    agentSupportsEffort: strictAgentCapabilities
+      ? selectedAgent?.capabilities?.supportsReasoningEffort
+      : true,
+    capabilitiesLoaded,
   });
+  const displayedSupportedEfforts = supportedEfforts.length > 0
+    ? supportedEfforts
+    : profileLocked && reasoningEffort ? [reasoningEffort] : [];
 
   useEffect(() => {
     if (selectedProfileId) return;
@@ -338,7 +393,7 @@ export function SubmitRun() {
     } else {
       setSelectedAgentVersion("");
     }
-  }, [worker, agentVersions.length]);
+  }, [worker, sortedVersions.length, selectedProfileId]);
 
   // ─── Handlers ───────────────────────────────────────────────────────────
   const applyVersionConfig = (v: ProfileVersionDocument) => {
@@ -348,9 +403,11 @@ export function SubmitRun() {
     setSelectedAgentVersion(v.agentVersion ?? "");
     setSelectedMcpServers(v.mcpServers ?? []);
     setSelectedSkills(v.skillRevisions ?? []);
+    setSelectedResourceSpecs(v.resources ?? []);
     setSelectedExtensions(v.extensions ?? []);
     if ((v.mcpServers ?? []).length > 0) setMcpOpen(true);
     if ((v.skillRevisions ?? []).length > 0) setSkillsOpen(true);
+    if ((v.resources ?? []).length > 0) setResourcesOpen(true);
     if ((v.extensions ?? []).length > 0) setExtensionsOpen(true);
   };
 
@@ -403,7 +460,7 @@ export function SubmitRun() {
   const addVariationDraft = () => {
     setVariationDrafts((prev) => {
       const used = new Set(prev.map((v) => v.profileId).filter(Boolean));
-      const nextProfile = profileList.find((p) => p._id !== selectedProfileId && !used.has(p._id));
+      const nextProfile = selectableProfileList.find((p) => p._id !== selectedProfileId && !used.has(p._id));
       if (!nextProfile) {
         toast.info("All available profiles are already used in variations.");
         return prev;
@@ -435,7 +492,7 @@ export function SubmitRun() {
 
   const getAvailableVariationProfiles = (excludeIndex?: number) => {
     const used = getUsedVariationProfileIds(excludeIndex);
-    return profileList.filter((p) => p._id !== selectedProfileId && !used.has(p._id));
+    return selectableProfileList.filter((p) => p._id !== selectedProfileId && !used.has(p._id));
   };
 
   useEffect(() => {
@@ -507,6 +564,20 @@ export function SubmitRun() {
       setSelectedCodebaseSpec(run.codebaseRevisionId);
       setCodebaseOpen(true);
     }
+    const resources = run.resources ?? (run.run?.resources ?? []).map((resource) => ({
+      ref: resource.ref,
+      ...(resource.params ? { params: resource.params } : {}),
+    }));
+    if (resources.length > 0) {
+      setSelectedResourceSpecs(resources);
+      setResourcesOpen(true);
+    }
+    if (run.agentsMdPromptId) {
+      setAgentsMdOpen(true);
+      api.getTaskPromptContent(run.agentsMdPromptId)
+        .then((content) => setAgentsMd(content.text))
+        .catch(() => undefined);
+    }
     if (run.extensions && run.extensions.length > 0) {
       setSelectedExtensions(run.extensions);
       setExtensionsOpen(true);
@@ -525,6 +596,7 @@ export function SubmitRun() {
         ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
         ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
         ...(selectedSkills.length > 0 ? { skillRevisions: selectedSkills } : {}),
+        ...(selectedResourceSpecs.length > 0 ? { resources: selectedResourceSpecs } : {}),
         ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}),
       }),
     onSuccess: (data) => {
@@ -626,10 +698,12 @@ export function SubmitRun() {
       ...(gatesEnabled ? { gates: gateConfigs } : {}),
       ...(priority !== 0 ? { priority } : {}),
       ...(occurrences > 1 ? { count: occurrences } : {}),
+      ...(agentsMd.trim() ? { agentsMd: agentsMd } : {}),
       ...(inVariationMode ? {} : { ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}) }),
       ...(inVariationMode ? {} : { ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}) }),
       ...(inVariationMode ? {} : { ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}) }),
       ...(selectedCodebaseSpec ? { codebase: selectedCodebaseSpec } : {}),
+      ...(selectedResourceSpecs.length > 0 ? { resources: selectedResourceSpecs } : {}),
       ...(inVariationMode ? {} : { ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}) }),
       ...(inVariationMode
         ? {
@@ -647,8 +721,24 @@ export function SubmitRun() {
     doSubmit();
   };
 
+  const selectedVariationTargetsAvailable = variationDrafts.every((draft) => {
+    if (!draft.profileId) return true;
+    const profile = profileList.find((candidate) => candidate._id === draft.profileId);
+    if (!profile) return false;
+    const version = draft.profileVersion === profile.latestVersion
+      ? profile.version
+      : (variationProfileVersions[draft.profileId] ?? []).find(
+          (candidate) => candidate.version === draft.profileVersion,
+        );
+    return !!version && profileVersionIsAvailable(version);
+  });
+
   const canSubmit =
     !!task.trim() &&
+    !!selectedAgent &&
+    isAgentAvailable(selectedAgent) &&
+    !selectedVersionIsHistorical &&
+    selectedVariationTargetsAvailable &&
     !submitMutation.isPending &&
     !(selectedAgent && activeModelIds.length > 0 && !model) &&
     !(maxIterations !== 1 && pickedCriteria.length === 0) &&
@@ -716,9 +806,9 @@ export function SubmitRun() {
   // ─── Render helpers ─────────────────────────────────────────────────────
   const summaryChips: string[] = [
     `${maxIterations} iteration${maxIterations === 1 ? "" : "s"}`,
-    `${pickedCriteria.length} select criteri${pickedCriteria.length === 1 ? "on" : "a"}`,
+    `${pickedCriteria.length} requirements criteri${pickedCriteria.length === 1 ? "on" : "a"}`,
     pickedObservations.length > 0 ? `${pickedObservations.length} observation${pickedObservations.length === 1 ? "" : "s"}` : "",
-    gatesEnabled ? `${gateConfigs.length} configured gates` : "single-pass Select",
+    gatesEnabled ? `${gateConfigs.length} configured gates` : "single-pass Requirements",
     occurrences > 1 ? `×${occurrences} runs` : "",
     worker,
     model || "",
@@ -729,6 +819,8 @@ export function SubmitRun() {
     selectedMcpServers.length > 0 ? `${selectedMcpServers.length} MCP` : "",
     selectedSkills.length > 0 ? `${selectedSkills.length} skill${selectedSkills.length === 1 ? "" : "s"}` : "",
     selectedCodebaseSpec ? `codebase ${selectedCodebaseSpec}` : "",
+    selectedResourceSpecs.length > 0 ? `${selectedResourceSpecs.length} resource${selectedResourceSpecs.length === 1 ? "" : "s"}` : "",
+    agentsMd.trim() ? "AGENTS.md" : "",
     selectedExtensions.length > 0 ? `${selectedExtensions.length} ext` : "",
   ].filter(Boolean);
 
@@ -777,7 +869,12 @@ export function SubmitRun() {
                 key={p._id}
                 icon={SlidersHorizontal}
                 title={p.name}
-                description={`Profile · v${p.latestVersion} · ${p.version?.workerType ?? "—"}`}
+                description={
+                  <span className="inline-flex items-center gap-1">
+                    <span>Profile · v{p.latestVersion} ·</span>
+                    <AgentBadge agentId={p.version.workerType} triggerLink={false} />
+                  </span>
+                }
                 onClick={() => applyProfile(p._id)}
               />
             ))}
@@ -786,14 +883,20 @@ export function SubmitRun() {
                 key={r._id}
                 icon={History}
                 title={truncate(r.scenario?.task ?? "Untitled run", 60)}
-                description={`Recent · ${r.workerType}${r.model ? ` · ${r.model}` : ""}`}
+                description={
+                  <span className="inline-flex items-center gap-1">
+                    <span>Recent ·</span>
+                    <AgentBadge agentId={r.workerType} triggerLink={false} />
+                    {r.model && <span>· {r.model}</span>}
+                  </span>
+                }
                 onClick={() => applyRecentRun(r)}
               />
             ))}
           </div>
-          {profileList.length > 3 && (
+          {selectableProfileList.length > 3 && (
             <p className="mt-3 text-xs text-muted-foreground">
-              {profileList.length - 3} more profile{profileList.length - 3 === 1 ? "" : "s"} available — use the Profile field below.
+              {selectableProfileList.length - 3} more profile{selectableProfileList.length - 3 === 1 ? "" : "s"} available — use the Profile field below.
             </p>
           )}
         </CollapsibleCard>
@@ -928,6 +1031,50 @@ export function SubmitRun() {
             </div>
           )}
 
+          {/* ─── Resources (optional, discreet) ───────────────────────────── */}
+          {!(resourcesOpen || selectedResourceSpecs.length > 0) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-xs text-muted-foreground"
+              onClick={() => setResourcesOpen(true)}
+            >
+              <Boxes className="h-3.5 w-3.5" />
+              Add resources
+            </Button>
+          ) : (
+            <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-xs">
+                    Resources{" "}
+                    <span className="font-normal text-muted-foreground">(optional)</span>
+                  </Label>
+                  <HelpTooltip text="Optional lifecycle dependencies. Pick bare resources to pin their latest revision at submit time, or choose a specific immutable revision." />
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                  onClick={() => {
+                    setSelectedResourceSpecs([]);
+                    setResourcesOpen(false);
+                  }}
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Remove
+                </Button>
+              </div>
+              <ResourcePicker
+                selected={selectedResourceSpecs}
+                onChange={setSelectedResourceSpecs}
+                profileBindings={selectedBaseProfileVersion?.resources ?? []}
+              />
+            </div>
+          )}
+
           <div className="space-y-2">
             <div className="flex items-center gap-1.5">
               <Label htmlFor="criteria">
@@ -1047,6 +1194,61 @@ export function SubmitRun() {
             </div>
           </div>
 
+          {/* ─── AGENTS.md (optional, discreet) ──────────────────────────── */}
+          {!(agentsMdOpen || agentsMd.trim()) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-xs text-muted-foreground"
+              onClick={() => setAgentsMdOpen(true)}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              Add AGENTS.md
+            </Button>
+          ) : (
+            <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="agentsMd" className="text-xs">
+                    AGENTS.md{" "}
+                    <span className="font-normal text-muted-foreground">(optional)</span>
+                  </Label>
+                  <HelpTooltip text="Project-level instructions written to <workspace>/AGENTS.md before the run. Search the prompt library for an existing agents.md prompt or type a new one." />
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                  onClick={() => {
+                    setAgentsMd("");
+                    setAgentsMdOpen(false);
+                  }}
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Remove
+                </Button>
+              </div>
+              <TaskPromptPicker
+                type="agents.md"
+                placeholder="Search existing AGENTS.md prompts or type a new one below…"
+                onSelect={(text) => setAgentsMd(text)}
+              />
+              <Textarea
+                id="agentsMd"
+                rows={6}
+                placeholder="# AGENTS.md&#10;Project-level instructions written to the workspace root before the run."
+                value={agentsMd}
+                onChange={(e) => setAgentsMd(e.target.value)}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Stored as an <code>agents.md</code> prompt and written to <code>&lt;workspace&gt;/AGENTS.md</code> before the run. Leave empty to omit.
+              </p>
+            </div>
+          )}
+
           <AdvancedSection show={advanced}>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
@@ -1076,7 +1278,7 @@ export function SubmitRun() {
         <CardHeader>
           <CardTitle>Gate pipeline</CardTitle>
           <CardDescription>
-            Optional phase gates after Select. Leave all disabled for the existing single-pass flow.
+            Optional phase gates after Requirements. Leave all disabled for the existing single-pass flow.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1230,9 +1432,9 @@ export function SubmitRun() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {profileList.length === 0 ? (
+          {selectableProfileList.length === 0 && !selectedProfileId ? (
             <div className="space-y-3 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-              <p>Create a profile to enable profile-based configuration and profile variations.</p>
+              <p>Create a profile with an available agent to enable profile-based configuration and profile variations.</p>
               <Button
                 type="button"
                 variant="outline"
@@ -1250,10 +1452,11 @@ export function SubmitRun() {
                 <Label className="text-sm">Base Profile</Label>
                 <div className="flex items-center gap-2">
                   <ProfilePicker
-                    profiles={profileList}
+                    profiles={selectableProfileList}
                     selectedProfileId={selectedProfileId}
                     onSelect={applyProfile}
                     placeholder="Search existing profiles…"
+                    workerNameById={agentNameById}
                   />
                   <Button
                     type="button"
@@ -1295,6 +1498,7 @@ export function SubmitRun() {
                     </SelectTrigger>
                     <SelectContent>
                       {profileVersions
+                        .filter(profileVersionIsAvailable)
                         .slice()
                         .sort((a: ProfileVersionDocument, b: ProfileVersionDocument) => b.version - a.version)
                         .map((v: ProfileVersionDocument) => (
@@ -1384,10 +1588,14 @@ export function SubmitRun() {
                     {selectedGraphPreview.name} {selectedGraphPreview.version ? `v${selectedGraphPreview.version}` : ""}
                   </p>
                   <p className="mt-1 text-muted-foreground">
-                    {selectedGraphPreview.versionDocument?.workerType ?? "worker: n/a"} · {selectedGraphPreview.versionDocument?.model ?? "model: n/a"}
+                    {selectedGraphPreview.versionDocument
+                      ? (agentNameById.get(selectedGraphPreview.versionDocument.workerType) ?? "Unknown agent")
+                      : "worker: n/a"}{" "}
+                    · {selectedGraphPreview.versionDocument?.model ?? "model: n/a"}
                   </p>
                   <p className="mt-1 text-muted-foreground">
                     {(selectedGraphPreview.versionDocument?.mcpServers?.length ?? 0)} MCP · {(selectedGraphPreview.versionDocument?.skillRevisions?.length ?? 0)} skills · {(selectedGraphPreview.versionDocument?.extensions?.length ?? 0)} extensions
+                    · {(selectedGraphPreview.versionDocument?.resources?.length ?? 0)} resources
                   </p>
                 </div>
               )}
@@ -1421,10 +1629,16 @@ export function SubmitRun() {
               {variationDrafts.map((draft, index) => {
                 const selectedVariationProfile = profileList.find((p) => p._id === draft.profileId);
                 const availableProfiles = getAvailableVariationProfiles(index);
+                const fetchedVariationVersions = variationProfileVersions[draft.profileId] ?? [];
+                const selectedVariationVersion = fetchedVariationVersions.find(
+                  (version) => version.version === draft.profileVersion,
+                ) ?? selectedVariationProfile?.version;
+                const selectedVariationIsUnavailable = !!selectedVariationVersion
+                  && !profileVersionIsAvailable(selectedVariationVersion);
                 const hasAvailableProfiles = availableProfiles.length > 0;
                 const variationVersionOptions = (() => {
                   if (!draft.profileId) return [] as number[];
-                  const fetched = variationProfileVersions[draft.profileId] ?? [];
+                  const fetched = fetchedVariationVersions.filter(profileVersionIsAvailable);
                   if (fetched.length > 0) {
                     return fetched.map((v) => v.version).sort((a, b) => b - a);
                   }
@@ -1457,6 +1671,11 @@ export function SubmitRun() {
                             <SelectValue placeholder="Select profile" />
                           </SelectTrigger>
                           <SelectContent>
+                            {selectedVariationIsUnavailable && selectedVariationProfile && (
+                              <SelectItem value={selectedVariationProfile._id} disabled>
+                                {selectedVariationProfile.name} (unavailable)
+                              </SelectItem>
+                            )}
                             {availableProfiles.map((p) => (
                               <SelectItem key={p._id} value={p._id}>
                                 {p.name}
@@ -1545,21 +1764,30 @@ export function SubmitRun() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {availableAgents.length > 0
-                    ? availableAgents.map((a: CodingAgent) => (
-                        <SelectItem key={a._id} value={a._id}>
-                          {a.name}
-                        </SelectItem>
-                      ))
-                    : WORKER_TYPES.map((w) => (
-                        <SelectItem key={w} value={w}>
-                          {w}
-                        </SelectItem>
-                      ))}
+                  {profileLocked && worker && !availableAgents.some((agent) => agent._id === worker) && (
+                    <SelectItem value={worker} disabled>
+                      <span className="flex items-center gap-1">
+                        <AgentBadge
+                          agentId={worker}
+                          agent={selectedAgent}
+                          triggerLink={false}
+                        />
+                        <span>(unavailable)</span>
+                      </span>
+                    </SelectItem>
+                  )}
+                  {availableAgents.map((a: CodingAgent) => (
+                    <SelectItem key={a._id} value={a._id}>
+                      <AgentBadge agentId={a._id} agent={a} triggerLink={false} />
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
+              {!profileLocked && agentsLoaded && availableAgents.length === 0 && (
+                <p className="text-xs text-muted-foreground">No available agents have an active worker version.</p>
+              )}
             </div>
-            {selectedAgent && activeModelIds.length > 0 && (
+            {(activeModelIds.length > 0 || (profileLocked && !!model)) && (
               <div className="space-y-2">
                 <Label htmlFor="model">Model *</Label>
                 {/* Model is required; ignore spurious empty-value callbacks Radix
@@ -1575,19 +1803,22 @@ export function SubmitRun() {
                     <SelectValue placeholder="Select model" />
                   </SelectTrigger>
                   <SelectContent>
-                    <ModelSelectItems
-                      models={activeModelIds}
-                      capabilitiesMap={modelCapabilitiesMap}
-                      defaultModel={selectedAgent.defaultModel}
-                    />
+                   {profileLocked && modelIsHistorical && (
+                     <SelectItem value={model} disabled>{model} (unavailable)</SelectItem>
+                   )}
+                   <ModelSelectItems
+                     models={activeModelIds}
+                     capabilitiesMap={modelCapabilitiesMap}
+                     defaultModel={selectedAgent?.defaultModel}
+                   />
                   </SelectContent>
                 </Select>
               </div>
             )}
-            {supportedEfforts.length > 0 && (
+            {displayedSupportedEfforts.length > 0 && (
               <div className="space-y-2">
                 <ReasoningEffortSelect
-                  supportedEfforts={supportedEfforts}
+                  supportedEfforts={displayedSupportedEfforts}
                   value={reasoningEffort}
                   onChange={onEffortChange}
                   disabled={profileLocked}
@@ -1598,7 +1829,7 @@ export function SubmitRun() {
             )}
           </div>
 
-          {sortedVersions.length > 0 && (
+          {(sortedVersions.length > 0 || (profileLocked && selectedVersionIsHistorical)) && (
             <AdvancedSection show={advanced}>
               <div className="space-y-2 sm:max-w-xs">
                 <Label htmlFor="agentVersion">Agent version *</Label>
@@ -1607,7 +1838,12 @@ export function SubmitRun() {
                     <SelectValue placeholder="Latest" />
                   </SelectTrigger>
                   <SelectContent>
-                    {sortedVersions.map((v, i) => (
+                   {profileLocked && selectedVersionIsHistorical && (
+                     <SelectItem value={selectedAgentVersion} disabled>
+                       {selectedAgentVersion} (unavailable)
+                     </SelectItem>
+                   )}
+                   {sortedVersions.map((v, i) => (
                       <SelectItem key={v.agentVersion} value={v.agentVersion}>
                         {v.agentVersion}{i === 0 ? " (latest)" : ""}
                       </SelectItem>
@@ -1624,7 +1860,7 @@ export function SubmitRun() {
       </Card>
 
       {/* ─── MCP Servers (collapsible) ─────────────────────────────────── */}
-      {activeMcpServers.length > 0 && (
+      {showMcpServers && (activeMcpServers.length > 0 || selectedMcpServers.length > 0) && (
         <CollapsibleCard
           icon={Server}
           title="MCP Servers"
@@ -1674,7 +1910,7 @@ export function SubmitRun() {
       )}
 
       {/* ─── Skills (collapsible) ──────────────────────────────────────── */}
-      <CollapsibleCard
+      {showSkills && <CollapsibleCard
         icon={BookOpen}
         title="Skills"
         help={
@@ -1693,10 +1929,10 @@ export function SubmitRun() {
         disabled={profileLocked}
       >
         <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} disabled={profileLocked} />
-      </CollapsibleCard>
+      </CollapsibleCard>}
 
-      {/* ─── Extensions (collapsible, VS Code only) ────────────────────── */}
-      {isVscodeWorker && (
+      {/* ─── Extensions (collapsible) ──────────────────────────────────── */}
+      {showExtensions && (
         <CollapsibleCard
           icon={Puzzle}
           title="Extensions"

@@ -9,7 +9,9 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, withProjectOption, getDefaultApiUrl } from "../utils/shared.js";
+import { requireProjectId } from "../utils/config.js";
+import { apiFetch } from "../utils/api-client.js";
 import { mapYamlReportTemplate } from "../utils/yaml-mappers.js";
 
 export function registerReportTemplateCommands(program: Command): void {
@@ -30,7 +32,7 @@ reportTemplate
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/available-models`);
+      const response = await apiFetch(options.url, `/report-templates/available-models`);
       if (!response.ok) {
         const error = await response.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -51,16 +53,17 @@ reportTemplate
     }
   });
 
-withOutputOption(
+withProjectOption(withOutputOption(
 reportTemplate
   .command("list")
   .description("List all report templates")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-)
+))
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
+    const projectId = requireProjectId(options.project);
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates`);
+      const response = await apiFetch(options.url, `/report-templates`, { projectId });
 
       if (!response.ok) {
         const error = await response.json();
@@ -106,17 +109,18 @@ reportTemplate
     }
   });
 
-withOutputOption(
+withProjectOption(withOutputOption(
 reportTemplate
   .command("get")
   .description("Get details of a single report template")
   .requiredOption("-i, --id <id>", "Report template ID (slug)")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-)
+))
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
+    const projectId = requireProjectId(options.project);
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${options.id}`);
+      const response = await apiFetch(options.url, `/report-templates/${options.id}`, { projectId });
 
       if (!response.ok) {
         const error = await response.json();
@@ -186,8 +190,10 @@ reportTemplate
   .option("--trigger-ids <ids...>", "Trigger IDs (criteria IDs, task prompt IDs, or feature IDs)")
   .option("--trigger-match <match>", "Trigger match mode: any or all (default: all)")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .action(async (options) => {
     try {
+      const projectId = requireProjectId(options.project);
       const body: Record<string, unknown> = {
         id: options.id,
         name: options.name,
@@ -216,10 +222,11 @@ reportTemplate
         body.trigger = trigger;
       }
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates`, {
+      const response = await apiFetch(options.url, `/report-templates`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        projectId,
       });
 
       if (!response.ok) {
@@ -251,8 +258,10 @@ reportTemplate
   .option("--trigger-ids <ids...>", "Trigger IDs")
   .option("--trigger-match <match>", "Trigger match mode: any or all")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .action(async (options) => {
     try {
+      const projectId = requireProjectId(options.project);
       const body: Record<string, unknown> = {};
       if (options.name !== undefined) body.name = options.name;
       if (options.description !== undefined) body.description = options.description;
@@ -284,10 +293,11 @@ reportTemplate
         process.exit(1);
       }
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${options.id}`, {
+      const response = await apiFetch(options.url, `/report-templates/${options.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        projectId,
       });
 
       if (!response.ok) {
@@ -308,10 +318,13 @@ reportTemplate
   .description("Delete a report template (soft-delete)")
   .requiredOption("-i, --id <id>", "Report template ID (slug)")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${options.id}`, {
+      const projectId = requireProjectId(options.project);
+      const response = await apiFetch(options.url, `/report-templates/${options.id}`, {
         method: "DELETE",
+        projectId,
       });
 
       if (!response.ok) {
@@ -333,6 +346,7 @@ reportTemplate
   .argument("<path>", "Path to a .yaml file or directory of .yaml files")
   .option("--dry-run", "Preview what would be imported without sending to API")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID that newly created templates are filed into (overrides SCOPE_PROJECT and the saved selection)")
   .action(async (inputPath: string, options) => {
     try {
       const absPath = resolve(inputPath);
@@ -405,6 +419,9 @@ reportTemplate
         return;
       }
 
+      // Newly created templates are root creates and must be filed into a project.
+      const projectId = requireProjectId(options.project);
+
       console.log();
       let created = 0;
       let updated = 0;
@@ -413,14 +430,15 @@ reportTemplate
       for (const t of allTemplates) {
         const id = t.id as string;
         // Try to GET existing
-        const getResp = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${id}`);
+        const getResp = await apiFetch(options.url, `/report-templates/${id}`, { projectId });
         if (getResp.ok) {
           // Update
           const { id: _id, ...updateBody } = t;
-          const resp = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates/${id}`, {
+          const resp = await apiFetch(options.url, `/report-templates/${id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(updateBody),
+            projectId,
           });
           if (resp.ok) {
             updated++;
@@ -431,10 +449,11 @@ reportTemplate
           }
         } else if (getResp.status === 404) {
           // Create
-          const resp = await fetch(`${normalizeUrl(options.url)}/api/v1/report-templates`, {
+          const resp = await apiFetch(options.url, `/report-templates`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(t),
+            projectId,
           });
           if (resp.ok) {
             created++;

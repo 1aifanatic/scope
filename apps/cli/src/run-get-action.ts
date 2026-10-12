@@ -5,9 +5,11 @@
  * Action handler for `run get` subcommand — extracted for testability.
  */
 import { colorLevel, dimTimestamp, errorText, successText, label, value, banner, warnBanner, criterionIcon } from "./utils/style.js";
-import { GATE_METADATA, GATE_ORDER, TAXONOMY_ELEMENT_METADATA, type ConversationTurn, type GateId, type GateRunSummary, type RequestDocument, type TaxonomyElementId } from "shared";
+import { TAXONOMY_ELEMENT_METADATA } from "shared";
+import { GATE_METADATA, GATE_ORDER, type ConversationTurn, type GateId, type GateRunSummary, type RequestDocument, type TaxonomyElementId } from "shared/types";
 import { formatData, isMachineReadable } from "./utils/formatters.js";
 import type { OutputFormat, DisplayField } from "./utils/types.js";
+import { apiFetch } from "./utils/api-client.js";
 
 function gateLabel(gate: GateId): string {
   return GATE_METADATA[gate]?.label ?? gate;
@@ -28,9 +30,6 @@ function gateStatusIcon(summary: GateRunSummary | undefined): string {
   return "○";
 }
 
-/** Strip trailing slashes from a URL */
-const normalizeUrl = (url: string): string => url.replace(/\/+$/, '');
-
 export interface RunGetOptions {
   id: string;
   url: string;
@@ -40,7 +39,7 @@ export interface RunGetOptions {
 export async function runGetAction(options: RunGetOptions): Promise<void> {
   const format = (options.output || 'table') as OutputFormat;
   try {
-  const response = await fetch(`${normalizeUrl(options.url)}/api/v1/requests/${options.id}`);
+  const response = await apiFetch(options.url, `/requests/${options.id}`);
 
   if (!response.ok) {
     const error = await response.json();
@@ -181,7 +180,9 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
     // Build criterionId → taxonomyElementId map from the criteria store (best effort).
     const taxById = new Map<string, TaxonomyElementId | undefined>();
     try {
-      const cr = await fetch(`${normalizeUrl(options.url)}/api/v1/criteria?kind=observation`);
+      const cr = await apiFetch(options.url, "/criteria?kind=observation", {
+        projectId: run.projectId,
+      });
       if (cr.ok) {
         const obs = await cr.json() as Array<{ id: string; taxonomyElementId?: TaxonomyElementId }>;
         for (const o of obs) taxById.set(o.id, o.taxonomyElementId);
@@ -247,11 +248,6 @@ export async function runGetAction(options: RunGetOptions): Promise<void> {
   // Error
   if (rs?.error) {
     console.log(`${label('Error:')}          ${errorText(rs.error)}`);
-  }
-
-  // Prompt feature extraction
-  if (run.promptFeatureExtractionId) {
-    console.log(`${label('Prompt Features:')} ${value(run.promptFeatureExtractionId)}`);
   }
 
   // Soft-deleted

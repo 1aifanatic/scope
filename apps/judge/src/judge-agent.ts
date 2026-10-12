@@ -8,6 +8,7 @@ import {
   DetailedEvaluationResult,
   DependencyGraph,
   GateId,
+  IterationToolCalls,
 } from "shared";
 import { getCriteriaProvider } from "shared/criteria-provider-factory";
 import { createJudgeStrategy } from "./judge-strategies.js";
@@ -23,10 +24,16 @@ export interface EvaluationInput {
   onProgress?: (result: CriterionResult) => void;
   /** Which gate is being evaluated. Defaults to select. */
   gate?: GateId;
-  /** The coding agent's captured trajectory (normalized from the HAR tool calls
-   * for gates, or the ATIF for observations), exposed to the judge via the
-   * unified trajectory tools. */
+  /** The coding agent's captured tool calls/outputs grouped per iteration across
+   *  the whole run (1..N), exposed to the judge via list_tool_calls /
+   *  search_tool_outputs / get_tool_output. */
+  iterationToolCalls?: IterationToolCalls[];
+  /** ATIF trajectory supplied by observation post-processing. */
   trajectory?: AgentTrajectory;
+  /** The run's project — scopes criteria resolution to that project (per-project isolation). */
+  projectId?: string;
+  /** The coding agent's response (prose) for the iteration being judged, exposed to the judge via read_agent_response. */
+  currentAgentResponse?: string;
 }
 
 export interface EvaluationResult {
@@ -61,7 +68,7 @@ export async function evaluateWorkspace(
   // 3. Resolve criteria IDs from provider (with ancestor dependencies)
   let normalizedCriteria: CriteriaConfig[];
   try {
-    const provider = getCriteriaProvider();
+    const provider = getCriteriaProvider(input.projectId);
     normalizedCriteria = await provider.resolveWithAncestors(input.criteria);
     console.log(
       `[judge-agent] Loaded ${normalizedCriteria.length} criteria (including ancestors) from provider`
@@ -104,7 +111,9 @@ export async function evaluateWorkspace(
       personaInstructions: input.personaInstructions,
       onProgress: input.onProgress,
       gate: input.gate,
+      iterationToolCalls: input.iterationToolCalls,
       trajectory: input.trajectory,
+      currentAgentResponse: input.currentAgentResponse,
     });
 
     console.log(

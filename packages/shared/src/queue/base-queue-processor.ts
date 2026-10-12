@@ -10,6 +10,7 @@ import { LogPublisher } from "../logging/log-publisher.js";
 import { BlobStorage } from "../storage/blob-storage.js";
 import { cancelExit } from "./cancel-exit.js";
 import { withRetry } from "../utils/retry.js";
+import { durationSetFields } from "../run-duration.js";
 import {
   startVisibilityHeartbeat,
   type VisibilityHeartbeat,
@@ -217,6 +218,8 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
     let currentPopReceipt = message.popReceipt;
     let payload: Record<string, unknown> | undefined;
     let heartbeat: VisibilityHeartbeat | undefined;
+    let runStartedAt: Date | string | undefined;
+    let document: TDocument | undefined;
 
     try {
       const decodedContent = Buffer.from(message.messageText, "base64").toString("utf-8");
@@ -232,6 +235,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
         await this.safeDeleteMessage(message.messageId, currentPopReceipt);
         return;
       }
+      document = doc as TDocument;
 
       // Resolve the runId for log persistence. Prefer the runId carried in
       // the queue message (set by the API for new attempts); fall back to
@@ -241,6 +245,9 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
       const docRunId = typeof (doc as any)?.run?._id === "string" ? (doc as any).run._id : undefined;
       const logRunId = payloadRunId ?? docRunId ?? documentId!;
       runId = logRunId;
+      // Capture this attempt's startedAt so the error-path failure write can
+      // denormalize run.durationMs in a single $set (doc is out of scope there).
+      runStartedAt = (doc as any)?.run?.startedAt as Date | string | undefined;
 
       // Create log function for this document
       const log = async (
@@ -318,26 +325,40 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
           );
 
           // Try to record the failure on the current run (run.* shape).
-          // The runId in the queue message ensures we don't overwrite a run
-          // that was started by a concurrent retry. The status:"processing"
-          // guard ensures we don't clobber a run already marked terminal by a
-          // cancel, a concurrent retry, or the stuck-run reaper — mirroring the
-          // success-path final write. A non-match is always a "skip" (never a
-          // legacy fallback), since a runId-bearing message targets a migrated
-          // run.* document.
+          // The run id and worker ownership guards ensure this worker can only
+          // terminalize the exact processing attempt it claimed. A non-match is
+          // always a skip (never a legacy fallback), since a runId-bearing
+          // message targets a migrated run.* document.
           const runId = (typeof payload?.runId === "string" ? payload.runId : undefined);
           const errMsg = error instanceof Error ? error.message : String(error);
           const errorCode = (error as any)?.errorCode as string | undefined;
           if (runId) {
+            const finishedAt = new Date();
             const result = await withRetry(() => this.collection.updateOne(
-              { _id: documentId, "run._id": runId, "run.status": "processing" } as any,
+              {
+                _id: documentId,
+                "run._id": runId,
+                "run.status": "processing",
+                "run.worker.instanceId": this.instanceId,
+              } as any,
               {
                 $set: {
                   "run.status": "done",
                   "run.outcome": "failed",
                   "run.error": errMsg,
                   ...(errorCode ? { "run.errorCode": errorCode } : {}),
-                  "run.finishedAt": new Date(),
+                  "run.finishedAt": finishedAt,
+                  // Denormalize run.durationMs in the same write (issue #1138).
+                  // The queue processor may have claimed and mutated the loaded
+                  // document after the initial read, so prefer that current value
+                  // when the run was queued at dequeue time.
+                  ...durationSetFields(
+                    runStartedAt
+                      ?? (document as TDocument & {
+                        run?: { startedAt?: Date | string };
+                      } | undefined)?.run?.startedAt,
+                    finishedAt,
+                  ),
                   "run.updatedAt": new Date(),
                   updatedAt: new Date(),
                 },

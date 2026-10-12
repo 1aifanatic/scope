@@ -16,7 +16,7 @@ Two paths trigger post-processing:
 
 1. **Event-driven (primary):** Coder workers enqueue a post-processing message immediately when a run completes, currently setting the deprecated `run.postProcessorStatus: "queued"` compatibility field atomically in the same DB write while the system migrates to per-handler status.
 2. **Scheduler backfill:** The `PostProcessorDispatcher` polls every 30 seconds for runs that have `status: "done"` but no post-processing marker set (or a stale handler version). During the migration window this may consult the deprecated flat fields; the long-term source of truth is `run.handlerStatus[handlerId]`. This catches runs that completed before the event-driven dispatch was deployed, or that need re-processing after a version bump.
-3. **Scheduler notify & registration server:** The scheduler also exposes `GET /health`, `POST /notify/run-terminal`, `POST /notify/handler-complete`, and `POST /handlers/register` on a lightweight `node:http` server. Workers and post-process handlers use the notify endpoints to signal terminal states so the scheduler can re-evaluate which root or downstream handlers are ready to dispatch. The `/handlers/register` endpoint is the single writer to the `services` collection — see [Handler Registration](#handler-registration).
+3. **Scheduler notify & registration server:** The scheduler also exposes `GET /health`, `POST /notify/run-terminal`, `POST /notify/handler-complete`, and `POST /handlers/register` on a lightweight `node:http` server. Workers and post-process handlers use the notify endpoints to signal terminal states so the scheduler can re-evaluate which root or downstream handlers are ready to dispatch. The `/handlers/register` endpoint is the single writer to the `services` collection — see [Handler Registration](#handler-registration). All POST endpoints cap the request body at 64 KB (`MAX_BODY_BYTES` in `notify-routes.ts`); oversized payloads are rejected with `413 Payload Too Large` and `Connection: close` before the body is fully buffered, guarding the singleton scheduler against unbounded-memory requests.
 
 ## ATIF Generation
 
@@ -102,6 +102,8 @@ The post-processor uses a registry pattern for extensibility:
 ```typescript
 interface PostProcessHandler {
   readonly type: string;
+  readonly version: number;
+  readonly autoBackfill: boolean;
   process(message: PostProcessorMessage, ctx: HandlerContext): Promise<void>;
 }
 
@@ -127,6 +129,23 @@ processor.registerHandler(new AtifHandler());
 processor.registerHandler(new TaxonomyHandler());
 processor.start();
 ```
+
+## Idempotency and Dispatch Semantics
+
+Post-processing delivery is treated as **at-least-once**. Queue messages may be duplicated or redelivered, and the scheduler may enqueue a handler message before the corresponding `queued` marker is durably written back to MongoDB.
+
+To keep this safe, idempotency is enforced at the **post-processor worker entrypoint**, not inside each individual handler:
+
+1. The scheduler decides whether work is needed from `run.handlerStatus[handlerId]` + handler metadata (`version`, `autoBackfill`).
+2. The worker re-checks that same eligibility when a message is dequeued, scoped to the specific `runId`.
+3. The worker atomically claims the handler by transitioning its status to `processing`. The claim filter accepts both the *absent* state and the `queued` marker as valid source states — it only excludes `processing` (another worker is mid-flight) and, for non-backfill handlers, `done` (already complete; for `autoBackfill` handlers a stale `done` is re-claimable via the version gate). Because the scheduler writes the best-effort `queued` marker in-process immediately after enqueueing (enqueue-before-claim), a dequeued message almost always sees `queued`; excluding `queued` from the claim filter would make the worker discard its own message and strand the run at `queued` forever (the 30s backfill poll also skips `queued`), so `queued → processing` **must** be a permitted worker transition.
+4. If the message is stale, duplicated, or the handler is already current, the worker deletes the queue message and no-ops.
+
+This means:
+
+- A crash after queue send but before the scheduler writes `queued` no longer wedges the run forever.
+- Duplicate queue messages are harmless.
+- Handler implementations can stay simple; correctness does not depend on each handler re-implementing duplicate guards.
 
 ### Adding a New Handler
 
@@ -169,6 +188,10 @@ dependsOn: []
 ```
 
 On deploy, a generic registration script — `packages/shared/src/scripts/register-handler.ts` — reads the `handler.yaml` pointed to by `HANDLER_YAML_PATH`, waits for the scheduler's `/health`, and POSTs the parsed document to `${SCHEDULER_URL}/handlers/register` (with retry). The scheduler validates the document, runs a cycle check against the existing topology, and upserts it into the `services` collection via `HandlerDispatcher.registerHandler`. **Workers never write to the `services` collection directly** — the scheduler is the sole owner.
+
+Because handler topology is read on the dispatch hot path (every notify reads it 2–3 times, and every poll cycle once) but only changes on deploys, the scheduler caches it in-memory with a TTL (default 5 min, `SCHEDULER_HANDLER_CACHE_TTL_MS`). Coherence comes primarily from invalidation, not expiry: `registerHandler` invalidates the cache immediately after upserting, and since the scheduler is a singleton (`replicas: 1`, `Recreate`) and the sole writer of the `services` collection, a change is reflected at once regardless of TTL. The TTL is therefore only a defensive backstop for out-of-band writes or a future scale-out to more than one replica, and is deliberately kept well above the poll interval so the poll loop doesn't force a fresh read every cycle. Cycle-check validation always reads fresh (bypassing the cache).
+
+> **Limitation — the topology cache assumes a single scheduler replica.** In-memory cache invalidation is process-local, so it is only correct while the scheduler runs as one replica. This holds today (`deploy/base/scheduler.yaml`: `replicas: 1`, `strategy: Recreate`, so pods never overlap). **If the scheduler is ever scaled beyond one replica, this cache becomes stale-prone:** a `registerHandler` on one replica invalidates only that replica's cache, so the others keep serving old topology for up to the TTL. The blast radius is bounded — with idempotent dispatch a newly added handler is still dispatched by whichever replica has fresh topology, and a removed/re-wired handler self-heals within the TTL — but it is real. Before scaling out, replace process-local invalidation with a cross-replica signal (e.g. Redis pub/sub on `registerHandler`, or a change-stream watcher on the `services` collection), or lower `SCHEDULER_HANDLER_CACHE_TTL_MS` to shrink the staleness window.
 
 ```mermaid
 flowchart LR
@@ -247,7 +270,7 @@ stateDiagram-v2
 | Status | Meaning |
 | --- | --- |
 | *(absent)* | Run hasn't been dispatched for post-processing yet |
-| `queued` | Message sent to queue, awaiting pickup |
+| `queued` | Message sent to queue, awaiting pickup (best-effort marker; the worker entrypoint is authoritative) |
 | `processing` | Worker is actively processing |
 | `done` | Post-processing completed successfully |
 | `failed` | Handler threw an error (may be retried by scheduler on next poll) |

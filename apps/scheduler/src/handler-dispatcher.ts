@@ -25,6 +25,20 @@ export class HandlerDispatcher implements NotifyHandler {
   private dispatching = false;
   private queueClients = new Map<string, QueueClient>();
 
+  /** Cached handler topology. The `services` collection changes only on deploys
+   *  (via registerHandler), yet loadHandlers() sits on the notify/poll hot path
+   *  (2–3 reads per notify, plus every poll cycle). A TTL cache eliminates nearly
+   *  all of those reads — significant on CosmosDB where each query costs RUs.
+   *
+   *  Coherence comes primarily from `registerHandler` invalidating the cache the
+   *  moment topology changes, not from expiry: the scheduler is a singleton
+   *  (`replicas: 1`, `Recreate`) and the sole writer of the `services` collection,
+   *  so a same-process registration is reflected immediately regardless of TTL.
+   *  The TTL is therefore a coarse defensive backstop (out-of-band writes, or a
+   *  future scale-out to >1 replica) and is intentionally set well above the poll
+   *  interval so the poll loop doesn't force a fresh read every cycle. */
+  private handlerCache: { docs: HandlerServiceDocument[]; expiresAt: number } | null = null;
+
   /** Retry policy for the report-trigger POST. The 30s poll net is the durable
    *  backstop, so in-call retries are modest. Overridable in tests. */
   private reportRetryOptions: RetryOptions = {
@@ -41,6 +55,7 @@ export class HandlerDispatcher implements NotifyHandler {
     private readonly pollIntervalMs: number = 30_000,
     private readonly batchSize: number = 30,
     private readonly apiUrl: string = process.env.API_URL || "http://api:80",
+    private readonly handlerCacheTtlMs: number = 300_000,
   ) {}
 
   start(): void {
@@ -89,9 +104,11 @@ export class HandlerDispatcher implements NotifyHandler {
       `[HandlerDispatcher] Notify: handler-complete ${handlerId} for ${requestId} (status=${status})`,
     );
 
-    // Update the handler status on the run document
-    await this.collection.updateOne(
-      { _id: requestId } as any,
+    // Only apply terminal status from an active in-flight execution.
+    // This avoids stale/duplicate notifies regressing a newly re-dispatched
+    // handler back to "done" or "failed".
+    const updateResult = await this.collection.updateOne(
+      { _id: requestId, [`run.handlerStatus.${handlerId}.status`]: "processing" } as any,
       {
         $set: {
           [`run.handlerStatus.${handlerId}.status`]: status,
@@ -99,6 +116,13 @@ export class HandlerDispatcher implements NotifyHandler {
         },
       } as any,
     );
+
+    if (updateResult.matchedCount === 0) {
+      console.log(
+        `[HandlerDispatcher] Ignored stale/duplicate completion for ${handlerId} on ${requestId}`,
+      );
+      return;
+    }
 
     if (status === "failed") {
       // Don't dispatch downstream on failure, but the failure may have drained
@@ -128,8 +152,9 @@ export class HandlerDispatcher implements NotifyHandler {
   }
 
   async registerHandler(doc: HandlerServiceDocument): Promise<void> {
-    // Validate the resulting topology has no cycles before persisting.
-    const existing = await this.loadHandlers();
+    // Validate the resulting topology has no cycles before persisting. Read
+    // fresh (bypass the cache) so validation reflects any concurrent registrations.
+    const existing = await this.loadHandlers(true);
     const merged = [
       ...existing.filter((h) => h._id !== doc._id),
       doc,
@@ -149,6 +174,8 @@ export class HandlerDispatcher implements NotifyHandler {
       } as any,
       { upsert: true },
     );
+    // Topology changed — drop the cache so the next read picks up the new handler.
+    this.invalidateHandlerCache();
     console.log(
       `[HandlerDispatcher] Registered handler ${_id} (version=${doc.version}, queue=${doc.queue}, dependsOn=[${doc.dependsOn.join(", ")}])`,
     );
@@ -279,26 +306,21 @@ export class HandlerDispatcher implements NotifyHandler {
         const graph = this.buildGraph(handlers);
 
         for (const handler of handlers) {
-          // Find runs that need this handler dispatched
-          for (let i = 0; i < this.batchSize; i++) {
-            const filter = this.buildDispatchFilter(handler, handlers, graph);
-            if (!filter) break;
+          const filter = this.buildDispatchFilter(handler, handlers, graph);
+          if (!filter) continue;
 
-            const claimed = await this.collection.findOneAndUpdate(
-              filter as any,
-              {
-                $set: {
-                  [`run.handlerStatus.${handler._id}.status`]: "queued",
-                  [`run.handlerStatus.${handler._id}.updatedAt`]: new Date(),
-                },
-              } as any,
-              { sort: { updatedAt: -1 }, returnDocument: "after" },
-            );
+          const candidates = await this.collection
+            .find(filter as any, {
+              projection: { _id: 1, "run._id": 1 },
+              sort: { updatedAt: -1 },
+              limit: this.batchSize,
+            })
+            .toArray();
 
-            if (!claimed) break;
-
-            await this.enqueueToHandler(handler, claimed._id, (claimed as any).run?._id);
-            console.log(`[HandlerDispatcher] Poll-dispatched ${handler._id} for ${claimed._id}`);
+          for (const candidate of candidates) {
+            const runId = (candidate as any).run?._id as string | undefined;
+            if (!runId) continue;
+            await this.dispatchIfEligible(candidate._id, runId, handler, graph, handlers);
           }
         }
       }
@@ -338,7 +360,7 @@ export class HandlerDispatcher implements NotifyHandler {
 
   private async dispatchIfEligible(
     requestId: string,
-    _runId: string,
+    runId: string,
     handler: HandlerServiceDocument,
     graph: DependencyGraph,
     allHandlers: HandlerServiceDocument[],
@@ -346,6 +368,7 @@ export class HandlerDispatcher implements NotifyHandler {
     // Check if all dependencies are satisfied for this request
     const doc = await this.collection.findOne({ _id: requestId } as any);
     if (!doc?.run || doc.run.status !== "done") return;
+    if (doc.run._id !== runId) return;
 
     const handlerStatus = (doc.run as any).handlerStatus as
       | Record<string, HandlerRunStatus>
@@ -359,24 +382,43 @@ export class HandlerDispatcher implements NotifyHandler {
       }
     }
 
-    // Check this handler hasn't already been dispatched
+    // Check whether this handler still needs work.
     const currentStatus = handlerStatus?.[handler._id]?.status;
-    if (currentStatus === "queued" || currentStatus === "processing" || currentStatus === "done") {
-      return;
-    }
-
-    // Check version — skip if already at current version
     const currentVersion = handlerStatus?.[handler._id]?.version;
-    if (currentVersion !== undefined && currentVersion >= handler.version && !handler.autoBackfill) {
+    const statusExclusions = handler.autoBackfill
+      ? ["queued", "processing"]
+      : ["queued", "processing", "done"];
+
+    if (currentStatus && statusExclusions.includes(currentStatus)) {
       return;
     }
 
-    // Atomic claim
-    const claimed = await this.collection.findOneAndUpdate(
+    if (handler.autoBackfill) {
+      if (currentVersion !== undefined && currentVersion >= handler.version) {
+        return;
+      }
+    } else if (currentVersion !== undefined) {
+      return;
+    }
+
+    // Queue FIRST, then write the best-effort "queued" marker back to Mongo.
+    // The queue message is the durable work signal; the DB status is only an
+    // optimization / observability hint. If we crash after sendMessage() but
+    // before this update, the worker entrypoint claim still makes the message
+    // safe and prevents a permanent "queued" wedge.
+    const enqueued = await this.enqueueToHandler(handler, requestId, runId);
+    if (!enqueued) return;
+
+    // This is NOT the authoritative processing claim. It only records that a
+    // message was successfully placed on the queue and is expected to be picked
+    // up soon. The worker performs the real claim when it atomically flips the
+    // handler from eligible -> processing for this specific run attempt.
+    const queueMarkFilter = this.buildDispatchFilter(handler, allHandlers, graph);
+    const queueMarkResult = await this.collection.updateOne(
       {
         _id: requestId,
-        "run.status": "done",
-        [`run.handlerStatus.${handler._id}.status`]: { $nin: ["queued", "processing"] },
+        "run._id": runId,
+        ...(queueMarkFilter ?? {}),
       } as any,
       {
         $set: {
@@ -384,12 +426,15 @@ export class HandlerDispatcher implements NotifyHandler {
           [`run.handlerStatus.${handler._id}.updatedAt`]: new Date(),
         },
       } as any,
-      { returnDocument: "after" },
     );
 
-    if (!claimed) return;
+    if ((queueMarkResult.matchedCount ?? 0) === 0) {
+      console.log(
+        `[HandlerDispatcher] ${handler._id} for ${requestId} advanced concurrently after enqueue; leaving queue message to worker idempotency guard`,
+      );
+      return;
+    }
 
-    await this.enqueueToHandler(handler, requestId, (claimed as any).run?._id);
     console.log(`[HandlerDispatcher] Dispatched ${handler._id} for ${requestId}`);
   }
 
@@ -400,10 +445,14 @@ export class HandlerDispatcher implements NotifyHandler {
     allHandlers: HandlerServiceDocument[],
     _graph: DependencyGraph,
   ): Record<string, unknown> | null {
+    const statusExclusions = handler.autoBackfill
+      ? ["queued", "processing"]
+      : ["queued", "processing", "done"];
+
     const filter: Record<string, unknown> = {
       "run.status": "done",
       deletedAt: { $exists: false },
-      [`run.handlerStatus.${handler._id}.status`]: { $nin: ["queued", "processing", "done"] },
+      [`run.handlerStatus.${handler._id}.status`]: { $nin: statusExclusions },
     };
 
     // All dependencies must be "done"
@@ -431,7 +480,7 @@ export class HandlerDispatcher implements NotifyHandler {
     handler: HandlerServiceDocument,
     requestId: string,
     runId: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const queueClient = await this.getOrCreateQueueClient(handler.queue);
     const message = Buffer.from(
       JSON.stringify({
@@ -443,16 +492,13 @@ export class HandlerDispatcher implements NotifyHandler {
 
     try {
       await queueClient.sendMessage(message);
+      return true;
     } catch (err) {
-      // Roll back status on queue failure
-      await this.collection.updateOne(
-        { _id: requestId } as any,
-        { $unset: { [`run.handlerStatus.${handler._id}.status`]: "" } } as any,
-      );
       console.error(
-        `[HandlerDispatcher] Queue send failed for ${handler._id}/${requestId}, rolled back:`,
+        `[HandlerDispatcher] Queue send failed for ${handler._id}/${requestId}:`,
         err,
       );
+      return false;
     }
   }
 
@@ -466,12 +512,23 @@ export class HandlerDispatcher implements NotifyHandler {
     return client;
   }
 
-  private async loadHandlers(): Promise<HandlerServiceDocument[]> {
-    const docs = await this.db
+  private async loadHandlers(forceFresh = false): Promise<HandlerServiceDocument[]> {
+    const now = Date.now();
+    if (!forceFresh && this.handlerCache && this.handlerCache.expiresAt > now) {
+      return this.handlerCache.docs;
+    }
+    const docs = (await this.db
       .collection("services")
       .find({ type: "post-process-handler" })
-      .toArray();
-    return docs as unknown as HandlerServiceDocument[];
+      .toArray()) as unknown as HandlerServiceDocument[];
+    this.handlerCache = { docs, expiresAt: now + this.handlerCacheTtlMs };
+    return docs;
+  }
+
+  /** Drops the cached topology so the next loadHandlers() re-reads from Mongo.
+   *  Called after registerHandler persists a change. */
+  private invalidateHandlerCache(): void {
+    this.handlerCache = null;
   }
 
   private buildGraph(handlers: HandlerServiceDocument[]): DependencyGraph {

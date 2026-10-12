@@ -5,13 +5,14 @@ import "dotenv/config";
 import { MongoClient } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
-import { RequestScheduler, WorkerTypeConfig } from "./request-scheduler.js";
+import { RequestScheduler } from "./request-scheduler.js";
 import { PostProcessorDispatcher } from "./post-processor-dispatcher.js";
 import { HandlerDispatcher } from "./handler-dispatcher.js";
 import { createHttpServer, type NotifyHandler } from "./notify-routes.js";
 import { StuckRunReaper } from "./stuck-run-reaper.js";
 import { RedisHeartbeatStore, type HeartbeatStore } from "shared";
-import type { RequestDocument } from "shared";
+import type { CodingAgentDocument, RequestDocument } from "shared";
+import { initTelemetry, trackMetric, trackEvent, shutdownTelemetry } from "telemetry";
 
 // ── Configuration ────────────────────────────────────────────────────
 
@@ -30,6 +31,18 @@ const STORAGE_CONNECTION_STRING =
 const POLL_INTERVAL_MS = parseInt(
   process.env.SCHEDULER_POLL_INTERVAL_MS || "2000",
   10,
+);
+const TARGET_QUEUE_DEPTH = parsePositiveInt(
+  process.env.SCHEDULER_TARGET_QUEUE_DEPTH,
+  5,
+  1,
+  "SCHEDULER_TARGET_QUEUE_DEPTH",
+);
+const QUEUE_RECONCILIATION_INTERVAL_MS = parsePositiveInt(
+  process.env.SCHEDULER_QUEUE_RECONCILIATION_INTERVAL_MS,
+  30_000,
+  1_000,
+  "SCHEDULER_QUEUE_RECONCILIATION_INTERVAL_MS",
 );
 const HEALTH_PORT = parseInt(process.env.PORT || "8080", 10);
 const API_URL = process.env.API_URL || "http://api:80";
@@ -88,44 +101,6 @@ const RUN_HEARTBEAT_STALE_MS = parsePositiveInt(
   "SCOPE_RUN_HEARTBEAT_STALE_MS",
 );
 
-/**
- * Parse per-worker-type queue depth config from environment.
- * Format: SCHEDULER_QUEUE_DEPTH_<WORKER_TYPE_SCREAMING_SNAKE>=<number>
- *
- * Also reads SCHEDULER_WORKER_TYPES (comma-separated) to know which
- * worker types to schedule for.
- */
-function buildWorkerTypeConfigs(): WorkerTypeConfig[] {
-  const workerTypes = (
-    process.env.SCHEDULER_WORKER_TYPES || "coder-acp-copilot,coder-acp-claude-code"
-  )
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  const configs: WorkerTypeConfig[] = [];
-
-  for (const workerType of workerTypes) {
-    // Convert worker-type to SCREAMING_SNAKE for env var lookup
-    const envKey = `SCHEDULER_QUEUE_DEPTH_${workerType.replace(/-/g, "_").toUpperCase()}`;
-    const targetQueueDepth = parseInt(process.env[envKey] || "5", 10);
-
-    // Queue name follows existing convention: queue-<workerType>
-    const queueName =
-      process.env[`QUEUE_NAME_${workerType.replace(/-/g, "_").toUpperCase()}`] ||
-      `queue-${workerType}`;
-
-    const queueClient = createQueueClient(queueName);
-
-    configs.push({ workerType, queueClient, targetQueueDepth });
-    console.log(
-      `[Scheduler] Worker type: ${workerType}, queue: ${queueName}, targetDepth: ${targetQueueDepth}`,
-    );
-  }
-
-  return configs;
-}
-
 function createQueueClient(queueName: string): QueueClient {
   if (STORAGE_CONNECTION_STRING) {
     return new QueueClient(STORAGE_CONNECTION_STRING, queueName);
@@ -138,6 +113,9 @@ function createQueueClient(queueName: string): QueueClient {
 // ── Main ─────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  initTelemetry("scope-scheduler");
+  const coldStartMs = process.uptime() * 1000;
+
   console.log("[Scheduler] Starting...");
   console.log(`[Scheduler] MongoDB: ${MONGO_URI.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
   console.log(`[Scheduler] Poll interval: ${POLL_INTERVAL_MS}ms`);
@@ -149,29 +127,26 @@ async function main(): Promise<void> {
 
   const db = mongoClient.db(MONGO_DATABASE);
   const collection = db.collection<RequestDocument>(MONGO_COLLECTION);
-
-  // Build worker type configs from environment
-  const workerTypeConfigs = buildWorkerTypeConfigs();
-
-  if (workerTypeConfigs.length === 0) {
-    console.error("[Scheduler] No worker types configured. Set SCHEDULER_WORKER_TYPES.");
-    process.exit(1);
-  }
-
-  // Ensure all queues exist (creates them in Azurite on first run)
-  for (const wt of workerTypeConfigs) {
-    await wt.queueClient.createIfNotExists();
-    console.log(`[Scheduler] Ensured queue exists for ${wt.workerType}`);
-  }
+  const agentCollection = db.collection<CodingAgentDocument>("agents");
 
   // Start the scheduler
   const scheduler = new RequestScheduler(
     collection,
-    workerTypeConfigs,
-    POLL_INTERVAL_MS,
+    agentCollection,
+    createQueueClient,
+    {
+      pollIntervalMs: POLL_INTERVAL_MS,
+      targetQueueDepth: TARGET_QUEUE_DEPTH,
+      queueReconciliationIntervalMs: QUEUE_RECONCILIATION_INTERVAL_MS,
+    },
   );
   scheduler.start();
   console.log("[Scheduler] Dispatch loop started");
+  trackMetric({ name: "scheduler.cold_start_ms", value: coldStartMs, properties: { service: "scheduler" } });
+  trackEvent({
+    name: "scheduler.dispatch_started",
+    properties: { discovery: "agent-registry" },
+  });
 
   // Start the post-processor dispatcher
   const postProcessorQueueName = process.env.QUEUE_NAME_POST_PROCESSOR || "post-processor-queue";
@@ -181,6 +156,14 @@ async function main(): Promise<void> {
 
   const ppPollIntervalMs = parseInt(
     process.env.SCHEDULER_PP_POLL_INTERVAL_MS || "30000",
+    10,
+  );
+
+  // Handler topology is deploy-static and invalidated on registration, so this
+  // TTL only backstops out-of-band/multi-replica changes — keep it well above
+  // the poll interval so the poll loop doesn't force a fresh read every cycle.
+  const handlerCacheTtlMs = parseInt(
+    process.env.SCHEDULER_HANDLER_CACHE_TTL_MS || "300000",
     10,
   );
 
@@ -201,9 +184,12 @@ async function main(): Promise<void> {
     ppPollIntervalMs,
     30,
     API_URL,
+    handlerCacheTtlMs,
   );
   handlerDispatcher.start();
-  console.log("[Scheduler] Handler dispatcher (DAG) started");
+  console.log(
+    `[Scheduler] Handler dispatcher (DAG) started (poll=${ppPollIntervalMs}ms, topologyCacheTtl=${handlerCacheTtlMs}ms)`,
+  );
 
   // Start the stuck-run reaper (authoritative backstop). Redis is non-fatal:
   // on misconfig or connection failure the reaper self-disables (its sweeps
@@ -257,6 +243,7 @@ async function main(): Promise<void> {
     if (heartbeatStore) await heartbeatStore.close();
     httpServer.close();
     await mongoClient.close();
+    await shutdownTelemetry();
     console.log("[Scheduler] Shutdown complete");
     process.exit(0);
   };

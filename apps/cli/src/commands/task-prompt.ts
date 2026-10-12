@@ -9,7 +9,9 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { criterionIcon, dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, getDefaultApiUrl } from "../utils/shared.js";
+import { withOutputOption, withProjectOption, getDefaultApiUrl } from "../utils/shared.js";
+import { requireProjectId } from "../utils/config.js";
+import { apiFetch } from "../utils/api-client.js";
 import { parsePromptTypeOption, type PromptType } from "../utils/gates.js";
 
 export function registerTaskPromptCommands(program: Command): void {
@@ -24,18 +26,19 @@ const taskPrompt = program
 
 configureHelp(taskPrompt);
 
-withOutputOption(
+withProjectOption(withOutputOption(
 taskPrompt
   .command("list")
   .description("List all task prompts")
   .option("-s, --search <search>", "Filter by text content")
-  .option("--type <type>", "Filter by prompt type/gate (select, build, test, run, deploy)")
+  .option("--type <type>", "Filter by prompt type/gate (select, build, test, run, deploy, agents.md)")
   .option("-l, --limit <n>", "Maximum number of results", "50")
   .option("--offset <n>", "Number of results to skip", "0")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-)
+))
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
+    const projectId = requireProjectId(options.project);
     try {
       const params = new URLSearchParams();
       if (options.search) params.set("search", options.search);
@@ -44,7 +47,7 @@ taskPrompt
       if (options.limit) params.set("limit", options.limit);
       if (options.offset) params.set("offset", options.offset);
       const qs = params.toString();
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts${qs ? `?${qs}` : ""}`);
+      const response = await apiFetch(options.url, `/task-prompts${qs ? `?${qs}` : ""}`, { projectId });
 
       if (!response.ok) {
         const error = await response.json();
@@ -69,10 +72,12 @@ taskPrompt
         },
         { key: 'type', label: 'Type', formatter: (tp: any) => tp.type ?? 'select' },
         { key: 'text', label: 'Text', formatter: (tp: any) => {
-          const text = tp.text.replace(/\n/g, ' ');
+          const text = (tp.text ?? '').replace(/\n/g, ' ');
+          if (!text) return tp.contentBlobUrl ? '(blob)' : '';
           return text.length > 60 ? text.substring(0, 60) + '…' : text;
         }, tableFormatter: (tp: any) => {
-          const text = tp.text.replace(/\n/g, ' ');
+          const text = (tp.text ?? '').replace(/\n/g, ' ');
+          if (!text) return dimTimestamp(tp.contentBlobUrl ? '(blob)' : '');
           const truncated = text.length > 60 ? text.substring(0, 60) + '…' : text;
           return dimTimestamp(truncated);
         }},
@@ -101,7 +106,7 @@ taskPrompt
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(options.id)}`);
+      const response = await apiFetch(options.url, `/task-prompts/${encodeURIComponent(options.id)}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -110,7 +115,7 @@ taskPrompt
       }
 
       const tp = await response.json() as {
-        _id: string; text: string; type?: PromptType;
+        _id: string; text?: string; type?: PromptType; contentBlobUrl?: string;
         features?: Array<{ featureId: string; detected: boolean; evaluated: boolean }>;
         featuresExtractedAt?: string;
         createdAt: string; deletedAt?: string;
@@ -139,8 +144,12 @@ taskPrompt
       console.log(`${label('Created:')}   ${value(tp.createdAt)}`);
       if (tp.deletedAt) console.log(`${label('Deleted:')}   ${value(tp.deletedAt)}`);
       console.log(`${label('Text:')}`);
-      for (const line of tp.text.trim().split('\n')) {
-        console.log(`  ${line}`);
+      if (tp.text) {
+        for (const line of tp.text.trim().split('\n')) {
+          console.log(`  ${line}`);
+        }
+      } else {
+        console.log(`  ${dimTimestamp('(stored in blob — fetch via /api/v1/task-prompts/:id/content)')}`);
       }
 
       if (tp.features && tp.features.length > 0) {
@@ -181,8 +190,10 @@ taskPrompt
   .option("-f, --file <path>", "Read task prompt text from file")
   .option("--type <type>", "Prompt type/gate", "select")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+  .option("--project <id>", "Project ID for scoped operations (overrides SCOPE_PROJECT and the saved selection)")
   .action(async (options) => {
     try {
+      const projectId = requireProjectId(options.project);
       let text = options.text;
       if (!text && options.file) {
         const absPath = resolve(options.file);
@@ -198,10 +209,11 @@ taskPrompt
       }
 
       const type = parsePromptTypeOption(options.type) ?? "select";
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts`, {
+      const response = await apiFetch(options.url, `/task-prompts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, type }),
+        projectId,
       });
 
       if (!response.ok) {
@@ -210,7 +222,7 @@ taskPrompt
         process.exit(1);
       }
 
-      const tp = await response.json() as { _id: string; text: string; type?: PromptType; createdAt: string };
+      const tp = await response.json() as { _id: string; text?: string; type?: PromptType; createdAt: string };
       console.log(successText(`Task prompt registered.`));
       console.log(`${label('ID:')}      ${value(tp._id)}`);
       console.log(`${label('Type:')}    ${value(tp.type ?? type)}`);
@@ -228,7 +240,7 @@ taskPrompt
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(options.id)}`, {
+      const response = await apiFetch(options.url, `/task-prompts/${encodeURIComponent(options.id)}`, {
         method: "DELETE",
       });
 
@@ -265,7 +277,7 @@ taskPrompt
       const body: Record<string, unknown> = {};
       if (options.model) body.model = options.model;
 
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/task-prompts/${encodeURIComponent(options.id)}/extract-features${qs}`, {
+      const response = await apiFetch(options.url, `/task-prompts/${encodeURIComponent(options.id)}/extract-features${qs}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

@@ -1,21 +1,47 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { CodingAgentQueueProcessor, WorkerProcessor, WorkerProcessorOptions, WorkerResult, QueueProcessorConfig, LogEvent, WorkerLogFn, TokenManagerClient, createProxyClient, isProxyEnabled, type ProxyClient, McpGatewayClient, McpServerConfig, KubedockClient, createFreshWorkspace, cleanupWorkspaces } from "shared";
+import { initTelemetry, trackMetric, trackTrace, trackEvent } from "telemetry";
 import { runACPSession } from "./acp-client.js";
 import dotenv from "dotenv";
 
 dotenv.config();
 
+// Initialize telemetry before any other setup
+initTelemetry(process.env.WORKER_NAME || "coder-acp-claude-code");
+
 const WORKER_NAME = process.env.WORKER_NAME || "coder-acp-claude-code";
 const tokenClient = new TokenManagerClient();
-const AGENT_VERSION = `claude-agent-acp-${process.env.CLAUDE_CODE_ACP_VERSION || "unknown"}-sdk-${process.env.CLAUDE_AGENT_SDK_VERSION || "unknown"}`;
+const AGENT_VERSION =
+  process.env.SCOPE_AGENT_VERSION ||
+  `claude-agent-acp-${process.env.CLAUDE_CODE_ACP_VERSION || "unknown"}-sdk-${process.env.CLAUDE_AGENT_SDK_VERSION || "unknown"}`;
+
+/**
+ * Detect the first structured "AI turn" signal from a subprocess log line.
+ */
+function isFirstAiCallSignal(msg: string): boolean {
+  if (msg.includes("createTurn")) return true;
+  const trimmed = msg.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return typeof parsed === "object" && parsed !== null && typeof parsed.type === "string";
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
 
 class ClaudeCodeProcessor implements WorkerProcessor {
   readonly workerName = WORKER_NAME;
+  readonly skillAgentType = "claude-code" as const;
   workspacePath: string | undefined = undefined;
   private gateway: McpGatewayClient | null = null;
   private mcpConfigs: McpServerConfig[] = [];
+  private static coldStartTracked = false;
+  private kubedock: KubedockClient | null = null;
 
   getAgentVersion(): string {
     return AGENT_VERSION;
@@ -32,6 +58,17 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     this.workspacePath = createFreshWorkspace();
     await log("info", "Fresh workspace created", { workspacePath: this.workspacePath });
 
+    // Purge orphan containers from previous runs (crash recovery)
+    if (KubedockClient.isEnabled()) {
+      this.kubedock = new KubedockClient();
+      try {
+        const purged = await this.kubedock.purgeContainers();
+        if (purged > 0) await log("info", "Purged orphan containers from previous run", { count: purged });
+      } catch (err) {
+        await log("warn", `Failed to purge orphan containers — continuing anyway`, { error: String(err) });
+      }
+    }
+
     this.mcpConfigs = options?.mcpServerConfigs ?? [];
     if (this.mcpConfigs.length > 0) {
       if (!McpGatewayClient.isEnabled()) {
@@ -45,6 +82,17 @@ class ClaudeCodeProcessor implements WorkerProcessor {
   }
 
   async teardown(log: WorkerLogFn): Promise<void> {
+    // Clean up containers spawned during this run
+    if (this.kubedock) {
+      try {
+        const removed = await this.kubedock.purgeContainers();
+        if (removed > 0) await log("info", "Cleaned up containers from run", { count: removed });
+      } catch (err) {
+        await log("warn", `Failed to clean up containers — will be purged on next run`, { error: String(err) });
+      }
+      this.kubedock = null;
+    }
+
     if (this.gateway && this.mcpConfigs.length > 0) {
       await Promise.all(this.mcpConfigs.map((c) =>
         this.gateway!.deregisterServer(c.slug).catch((err) => {
@@ -68,6 +116,24 @@ class ClaudeCodeProcessor implements WorkerProcessor {
     log: (level: LogEvent["level"], message: string, data?: Record<string, unknown>) => Promise<void>,
     options?: WorkerProcessorOptions
   ): Promise<WorkerResult> {
+    const runStartTime = Date.now();
+    const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const workerType = WORKER_NAME;
+    let firstAiCallTracked = false;
+    let lastProtocolEventTime = Date.now();
+
+    // Periodically emit subprocess idle gaps during active runs
+    const idleMonitor = setInterval(() => {
+      const gapMs = Date.now() - lastProtocolEventTime;
+      if (gapMs > 60_000) {
+        trackMetric({
+          name: "worker.subprocess_idle_s",
+          value: gapMs / 1000,
+          properties: { runId, workerType },
+        });
+      }
+    }, 30_000);
+
     const skillConfigs = options?.skillConfigs ?? [];
     await log("info", "Starting Claude Code ACP processor", {
       inputLength: message.length,
@@ -77,6 +143,11 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       mcpServers: this.mcpConfigs.map((s) => ({ name: s.name, type: s.type, url: s.url })),
       skillCount: skillConfigs.length,
       skills: skillConfigs.map((s) => s.name),
+    });
+
+    trackEvent({
+      name: "worker.run_started",
+      properties: { runId, workerType, model: options?.model || "default" },
     });
 
     // Proxy integration — start recording if enabled
@@ -113,6 +184,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       // Run ACP session with Claude Code
       const env: Record<string, string> = {
         [envVarName]: tokenResponse.value,
+        ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}),
       };
       if (options?.model) {
         env.ANTHROPIC_MODEL = options.model;
@@ -147,6 +219,20 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         env,
         cwd: this.workspacePath!,
         onLog: async (msg) => {
+          lastProtocolEventTime = Date.now();
+          if (!firstAiCallTracked && isFirstAiCallSignal(msg)) {
+            firstAiCallTracked = true;
+            trackMetric({
+              name: "worker.first_ai_call_ms",
+              value: Date.now() - runStartTime,
+              properties: { runId, workerType },
+            });
+          }
+          trackTrace({
+            message: msg,
+            severityLevel: "Verbose",
+            properties: { runId, workerType },
+          });
           await log("debug", msg);
         },
         mcpServers: this.gateway && this.mcpConfigs.length > 0
@@ -159,6 +245,31 @@ class ClaudeCodeProcessor implements WorkerProcessor {
         stopReason: result.stopReason,
         responseLength: result.response.length 
       });
+
+      const runDurationMs = Date.now() - runStartTime;
+      trackMetric({
+        name: "worker.run_duration_ms",
+        value: runDurationMs,
+        properties: { runId, workerType, stopReason: result.stopReason },
+      });
+
+      if (!ClaudeCodeProcessor.coldStartTracked) {
+        ClaudeCodeProcessor.coldStartTracked = true;
+        trackMetric({
+          name: "worker.cold_start_ms",
+          value: process.uptime() * 1000,
+          properties: { workerType },
+        });
+      }
+
+      const subprocessIdleS = (Date.now() - lastProtocolEventTime) / 1000;
+      trackMetric({
+        name: "worker.subprocess_idle_s",
+        value: subprocessIdleS,
+        properties: { runId, workerType },
+      });
+
+      clearInterval(idleMonitor);
 
       const response = result.response || `[${this.workerName}] No response from Claude Code`;
       const { harFilePath, tokenUsage, aiCallCount } = devProxy
@@ -177,6 +288,7 @@ class ClaudeCodeProcessor implements WorkerProcessor {
       }
       const errorMessage = error instanceof Error ? error.message : String(error);
       await log("error", `Claude Code processing failed: ${errorMessage}`);
+      clearInterval(idleMonitor);
       throw error;
     }
   }
