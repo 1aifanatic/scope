@@ -52,7 +52,6 @@ export function SubmissionDetail() {
       </div>
     );
   }
-
   const submission = submissionQuery.data;
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
@@ -161,4 +160,3 @@ export function SubmissionDetail() {
     </div>
   );
 }
-

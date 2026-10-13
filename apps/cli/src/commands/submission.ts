@@ -34,7 +34,6 @@ interface SubmissionSummary {
     reason: string;
   }>;
 }
-
 async function responseJson<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
@@ -203,4 +202,3 @@ export function registerSubmissionCommands(program: Command): void {
       }
     });
 }
-

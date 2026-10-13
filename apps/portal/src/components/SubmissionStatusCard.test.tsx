@@ -66,4 +66,3 @@ describe("SubmissionStatusCard", () => {
     expect(screen.getByText("1/2")).toBeDefined();
   });
 });
-

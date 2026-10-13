@@ -49,4 +49,3 @@ describe("migration 034: CreateSubmissionIndexes", () => {
     );
   });
 });
-
