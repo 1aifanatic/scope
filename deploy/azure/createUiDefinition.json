@@ -8,8 +8,8 @@
         "name": "environmentNameControl",
         "type": "Microsoft.Common.TextBox",
         "label": "Environment name",
-        "defaultValue": "[concat('scope-', substring(guid(), 0, 6))]",
-        "toolTip": "A short name used to derive the names of the resources this template creates (e.g. \"scope-demo\"). Lowercase alphanumeric and hyphens only, 3-20 characters. A random suffix is pre-filled so multiple deployments in the same tenant don't collide; feel free to change it.",
+        "defaultValue": "scope",
+        "toolTip": "A short name used to derive the names of the resources this template creates (e.g. \"scope-demo\"). Lowercase alphanumeric and hyphens only, 3-20 characters.",
         "constraints": {
           "required": true,
           "regex": "^[a-z0-9-]{3,20}$",
