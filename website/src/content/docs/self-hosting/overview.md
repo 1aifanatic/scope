@@ -1,119 +1,97 @@
 ---
-title: Self-hosting overview
-description: Run your own Scope deployment on Kubernetes, provisioned on Azure Kubernetes Service with azd and Bicep.
+title: Self-hosting
+description: Provision Scope infrastructure on Azure and deploy the application to AKS with Helm.
 ---
 
-Scope ships as a set of container images, a **Helm chart** that deploys
-them to Kubernetes, and **Azure infrastructure as code** that provisions
-an Azure Kubernetes Service (AKS) cluster with its managed backing
-services. Use this section to run a shared, long-lived Scope deployment
-for your team.
+Scope includes a resource-group-scoped Azure deployment and a Helm chart for
+running the platform on Azure Kubernetes Service (AKS). The supported
+self-hosting flow has three phases:
 
-If you only want to try Scope or change its code, use
-[Local development](/getting-started/local-development/) instead. It runs
-the whole stack with Docker Compose and needs no Azure subscription.
+1. Provision Azure infrastructure from
+   [`deploy/azure`](https://github.com/microsoft/scope/tree/main/deploy/azure).
+2. Install the six core services with the
+   [`deploy/helm/scope`](https://github.com/microsoft/scope/tree/main/deploy/helm/scope)
+   chart.
+3. Build and enable the two ACP coding-agent workers with
+   [`scripts/bootstrap-workers.sh`](https://github.com/microsoft/scope/blob/main/scripts/bootstrap-workers.sh).
 
-## Where things live
-
-| Path | Contents |
-| --- | --- |
-| [deploy/helm/scope](https://github.com/microsoft/scope/tree/main/deploy/helm/scope) | Helm chart for the Scope workloads |
-| [infra/aks](https://github.com/microsoft/scope/tree/main/infra/aks) | Azure Developer CLI (`azd`) project, Bicep modules, and provisioning hooks for AKS |
-
-## Choose a path
-
-1. **Provision infrastructure.** On Azure, follow
-   [Provision AKS](/self-hosting/provision-aks/). It creates the cluster,
-   the backing services, and the workload identities, and installs the
-   cluster add-ons Scope depends on. On another cluster, provide the
-   equivalents yourself (see [Prerequisites](#prerequisites)).
-2. **Deploy Scope.** Pick one of two paths. Both use the same chart and
-   the same values:
-   - [Deploy with Helm](/self-hosting/deploy-helm/): run
-     `helm install` and `helm upgrade` yourself or from a CI pipeline.
-   - [Deploy with Flux](/self-hosting/deploy-flux/): declare a Flux
-     `HelmRelease` in Git and let the cluster reconcile it.
-3. **Configure and operate.** Tune the chart with the
-   [Configuration](/self-hosting/configuration/) reference, and use
-   [Operations](/self-hosting/operations/) for upgrades, scaling, secret
-   rotation, and troubleshooting.
-
-| | Helm | Flux |
-| --- | --- | --- |
-| Who applies changes | You or your CI pipeline | Flux controllers in the cluster |
-| Source of truth | Your values file and the chart revision you install | A `HelmRelease` committed to Git |
-| Drift correction | None; rerun `helm upgrade` | Automatic on every reconcile |
-| Extra cluster components | None | Flux controllers |
-| Good fit | Single environment, quick setup, existing CD tooling | Several environments, promotion through Git |
+The Azure template is an open-source quickstart. It is separate from the
+repository's internal development infrastructure.
 
 ## Architecture
 
-```text
-┌──────────────────────────── AKS cluster ────────────────────────────┐
-│  Cluster add-ons:  External Secrets · Azure Service Operator ·      │
-│                    KEDA · cert-manager · Reloader  (· Flux)         │
-│                                                                     │
-│  scoped namespace (Helm release)                                    │
-│   portal ─► api ─► scheduler ──enqueue──┐                           │
-│              │      judge   gateway     ▼                           │
-│              │      token-manager    coder workers (KEDA, 0→N)      │
-│              │                       post-processor, report-gen     │
-└──────────────┼──────────────────────────┼───────────────────────────┘
-               ▼                          ▼          private endpoints
-   Cosmos DB (MongoDB API) · Azure Managed Redis · Storage (queues, blobs)
-   Key Vault ◄── External Secrets, token-manager · Container registry
+The infrastructure template creates the network, AKS cluster, managed data
+services, container registry, and workload identities. Helm installs the
+application into the `scope` namespace.
+
+```mermaid
+flowchart TD
+    User[Administrator] --> Azure[deploy/azure Bicep]
+    Azure --> AKS[AKS: System and User Linux pools]
+    Azure --> Data[Cosmos DB, Managed Redis, Storage]
+    Azure --> KV[Key Vault]
+    Azure --> ACR[Azure Container Registry]
+    User --> Helm[deploy/helm/scope]
+    Helm --> Core[API, Portal, Judge, Token Manager, Scheduler, Report Generator]
+    Helm --> Workers[Optional Copilot and Claude Code workers]
+    GHCR[Public GHCR images] --> Core
+    ACR --> Workers
+    KV --> CSI[Key Vault Secrets Provider CSI]
+    CSI --> Core
+    Data --> Core
+    Data --> Workers
 ```
 
-- **External Secrets Operator** copies connection strings and keys from
-  Azure Key Vault into Kubernetes Secrets, using workload identity.
-- **Azure Service Operator** creates the per-worker storage queues, the
-  blob containers, and the MongoDB database and collections declared by
-  the chart.
-- **KEDA** scales each worker from zero, one replica per queued message.
-- **Reloader** restarts pods when a synced secret changes.
+AKS has one fixed-size System node pool and one fixed-size User Linux node
+pool. OIDC and workload identity are enabled. The native Azure Key Vault
+Secrets Provider add-on syncs selected Key Vault objects into one Kubernetes
+Secret.
 
-### Workloads
+The core images come from `ghcr.io/microsoft`. The API builder-stage image
+runs database migrations. The ACP worker images are built in the provisioned
+ACR because they are enabled separately after the core install.
 
-The chart deploys these components into one namespace (`scoped` by
-default):
+## Installed workloads
 
-| Component | Kind | Role |
+| Workload | Chart resource | Purpose |
 | --- | --- | --- |
-| `portal` | Deployment + Service | Web UI |
-| `api` | Deployment + Service | REST API, log streaming, orchestration |
-| `scheduler` | Deployment | Dispatches queued requests to worker queues |
-| `judge` | Deployment + Service | Scores run output against the criteria DAG |
-| `token-manager` | Deployment + Service | Stores and distributes agent tokens |
-| `gateway` | Deployment + Service | AI gateway between workers and model providers |
-| `coder-acp-copilot` | Deployment + KEDA `ScaledObject` | GitHub Copilot worker |
-| `coder-acp-claude-code` | Deployment + KEDA `ScaledObject` | Claude Code worker |
-| `coder-acp-copilot-windows` | Deployment + KEDA `ScaledObject` | GitHub Copilot worker on Windows (optional) |
-| `post-processor`, `report-generator` | Deployment + KEDA `ScaledObject` | Post-run processing and reports |
-| `model-scanner-copilot`, `model-scanner-anthropic` | CronJob | Detect available models |
-| `db-migration` | Job (Helm hook) | Applies database migrations before the API starts |
-| Agent version registration | Jobs (Helm hooks) | Register each worker's agent version with the API |
+| API | Deployment and `api` Service | REST API and orchestration |
+| Portal | Deployment and `scope-portal` Service | Web interface |
+| Judge | Deployment and Service | Criteria evaluation |
+| Token Manager | Deployment and Service | Provider credential management |
+| Scheduler | Deployment and Service | Request scheduling |
+| Report Generator | Deployment | Background report generation |
+| Database migration | Post-install/post-upgrade Job | Applies MongoDB migrations |
+| Copilot worker | Optional Deployment | GitHub Copilot through ACP |
+| Claude Code worker | Optional Deployment | Claude Code through ACP |
 
-See [Coding agents & capabilities](/reference/workers/) for what each
-worker runs.
+Each coding-agent worker can run an MCPJungle native sidecar for MCP server
+aggregation. The chart does not yet template the AI Gateway/DevProxy sidecar
+or Kubedock, so scenarios that require HAR capture or in-task Docker access
+are not supported by this deployment.
+
+The chart also does not install an ingress controller, DNS, TLS,
+cert-manager, autoscaling, or an observability stack.
+
+## Identity boundary
+
+The deployment creates two federated user-assigned identities:
+
+- The backend identity can access Key Vault, Redis, Blob Storage, and queues.
+- The worker identity can access Blob Storage and queues only. It has no Key
+  Vault role because worker pods execute benchmark-controlled agent code.
+
+Worker credentials should be registered through the Portal's **Secrets** tab
+or the Token Manager API. Static Key Vault objects are available only as a
+fallback.
 
 ## Prerequisites
 
-[Provision AKS](/self-hosting/provision-aks/) provides everything below.
-If you bring your own cluster, you need:
+- An Azure subscription and permission to create resources and role
+  assignments in a resource group.
+- Azure CLI with Bicep when deploying from the command line.
+- `kubectl`, Helm, `jq`, and access to the repository checkout.
+- Provider credentials for the coding agents and models you enable.
 
-| Requirement | Used for |
-| --- | --- |
-| Kubernetes cluster with Linux nodes (and Windows nodes for the Windows worker) | Running the workloads |
-| [Helm](https://helm.sh/) 3 | Installing the chart |
-| [KEDA](https://keda.sh/) | Scaling workers on queue length |
-| [External Secrets Operator](https://external-secrets.io/) | Syncing secrets from Azure Key Vault, unless you create the Kubernetes Secrets yourself |
-| [Azure Service Operator v2](https://azure.github.io/azure-service-operator/) | Creating storage queues, blob containers, and MongoDB collections, unless you create them yourself |
-| [Reloader](https://github.com/stakater/Reloader) | Restarting pods when secrets change (recommended) |
-| MongoDB-compatible database | Scope data; Azure Cosmos DB for MongoDB on AKS |
-| Redis | Caching and real-time log fan-out |
-| Azure Storage account (queues and blobs) | Worker queues and run artifacts |
-| Container registry | Hosting the Scope images |
-
-Coding workers also need credentials for the agents they run: a token
-from an account with an active GitHub Copilot entitlement for the Copilot
-workers, and an Anthropic API key for Claude Code.
+Continue with [Provision Azure infrastructure](/self-hosting/provision-aks/),
+then [Deploy with Helm](/self-hosting/deploy-helm/).

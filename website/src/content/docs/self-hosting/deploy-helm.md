@@ -1,179 +1,142 @@
 ---
 title: Deploy with Helm
-description: Install and upgrade Scope on Kubernetes with helm install and helm upgrade.
+description: Install Scope's core services and ACP workers on the provisioned AKS cluster.
 ---
 
-This path installs the Scope chart from
-[deploy/helm/scope](https://github.com/microsoft/scope/tree/main/deploy/helm/scope)
-with the Helm CLI. Use it for a single environment, for a quick first
-deployment, or when an existing CI/CD pipeline already runs Helm. To have
-the cluster reconcile the release from Git instead, see
-[Deploy with Flux](/self-hosting/deploy-flux/).
+The Scope chart is in
+[`deploy/helm/scope`](https://github.com/microsoft/scope/tree/main/deploy/helm/scope).
+Use it after [provisioning Azure infrastructure](/self-hosting/provision-aks/).
 
-## Before you start
+## Image strategy
 
-- A cluster that meets the [prerequisites](/self-hosting/overview/#prerequisites).
-  On Azure, run [Provision AKS](/self-hosting/provision-aks/) first.
-- `kubectl` pointing at the cluster. After `azd up`, run
-  `az aks get-credentials --resource-group <rg> --name <cluster>`.
-- [Helm](https://helm.sh/docs/intro/install/) 3 and a clone of
-  `microsoft/scope` checked out at the release you want to deploy.
-- The agent and model secrets in Key Vault. See
-  [Secrets](/self-hosting/configuration/#secrets).
+The API, Portal, Judge, Token Manager, Scheduler, and Report Generator images
+default to public packages under `ghcr.io/microsoft`. The database migration
+Job uses the API Dockerfile's `builder` stage: `builder` for `latest`, or
+`builder-<sha>` when `global.imageTag` is pinned.
 
-## 1. Publish the images
+The Copilot and Claude Code worker images are not published with the core
+images. Phase 3 builds them in the provisioned ACR.
 
-The chart pulls every component from one registry, under
-`<registry>/scoped/<component>:<tag>`. Build the images from the repository
-root and push them to your registry. With Azure Container Registry, ACR
-Tasks build in Azure, so you don't need Docker locally:
+## Phase 1: generate values
 
 ```bash
-ACR=<your-registry-name>          # for example, from AZURE_CONTAINER_REGISTRY_NAME
-TAG=$(git rev-parse --short HEAD)
-
-for app in api judge portal scheduler token-manager; do
-  az acr build --registry "$ACR" --image "scoped/$app:$TAG" \
-    --file "apps/$app/Dockerfile" .
-done
-
-for worker in coder-acp-copilot coder-acp-claude-code post-processor report-generator; do
-  az acr build --registry "$ACR" --image "scoped/$worker:$TAG" \
-    --file "apps/workers/$worker/Dockerfile" .
-done
-
-for scanner in copilot anthropic; do
-  az acr build --registry "$ACR" --image "scoped/model-scanner-$scanner:$TAG" \
-    --file "apps/model-scanners/$scanner/Dockerfile" .
-done
-
-az acr build --registry "$ACR" --image "scoped/db-migrations:$TAG" \
-  --file packages/db-migrations/Dockerfile .
-az acr build --registry "$ACR" --image "scoped/gateway:$TAG" apps/gateway
+./scripts/generate-values-from-bicep.sh \
+  --resource-group <resource-group>
 ```
 
-Use an immutable tag, such as the commit SHA, for every release. Don't
-reuse tags: Kubernetes won't pull a changed image under the same tag.
+The script auto-detects the latest matching group deployment and writes
+`my-values.yaml`. Its optional flags are:
 
-The Portal reads its sign-in settings at **build time**. If you enable
-[Entra sign-in](/self-hosting/configuration/#authentication), pass
-`--build-arg VITE_AUTH_CLIENT_ID=...`, `VITE_AUTH_AUTHORITY`, and
-`VITE_AUTH_SCOPES` when building `portal`.
+- `--deployment-name <name>`
+- `--values-file <path>`
+- `--image-registry <registry>`
+- `--force`
 
-The Windows Copilot worker builds from
-[apps/workers/coder-acp-copilot-windows](https://github.com/microsoft/scope/tree/main/apps/workers/coder-acp-copilot-windows)
-on a Windows build host. Skip it unless you enable Windows workers.
+Review the generated file before installing. See
+[Configuration](/self-hosting/configuration/) for application, secret,
+worker, and ingress settings.
 
-## 2. Write a values file
-
-Create `scope-values.yaml` from the provisioning outputs. From the
-`infra/aks` folder:
+## Phase 2: install the core application
 
 ```bash
-cat > scope-values.yaml <<EOF
-image:
-  registry: $(azd env get-value AZURE_CONTAINER_REGISTRY_ENDPOINT)
-  tag: ${TAG}
-
-azure:
-  tenantId: $(azd env get-value AZURE_TENANT_ID)
-  keyVault:
-    uri: $(azd env get-value AZURE_KEYVAULT_URI)
-  workloadIdentity:
-    externalSecretsClientId: $(azd env get-value AZURE_IDENTITY_CLIENT_ID)
-    tokenManagerClientId: $(azd env get-value KV_SECRETS_OFFICER_IDENTITY_CLIENT_ID)
-  storage:
-    accountName: $(azd env get-value AZURE_STORAGE_ACCOUNT_NAME)
-    accountArmId: $(azd env get-value AZURE_STORAGE_ACCOUNT_ARM_ID)
-  cosmosDb:
-    accountArmId: $(azd env get-value AZURE_COSMOSDB_ACCOUNT_ARM_ID)
-EOF
+helm upgrade --install scope deploy/helm/scope \
+  --namespace scope \
+  --create-namespace \
+  -f my-values.yaml \
+  --wait \
+  --timeout 5m
 ```
 
-Every other value has a working default. See
-[Configuration](/self-hosting/configuration/) to enable sign-in, choose
-workers, expose the Portal, or adjust scaling. Keep the values file in
-source control; it holds no secrets.
+The service accounts and `SecretProviderClass` are normal chart resources.
+The `scope-db-migrate` Job is a `post-install,post-upgrade` hook so those
+resources exist before the Job mounts Key Vault secrets. Core services can
+start shortly before migration completes and use their normal transient
+database retry behavior.
 
-## 3. Install
+Agent registration is not a Helm hook.
+
+## Phase 3: enable coding-agent workers
 
 ```bash
-helm upgrade --install scope ./deploy/helm/scope \
-  --namespace scoped --create-namespace \
-  --values scope-values.yaml \
-  --wait --timeout 15m
+./scripts/bootstrap-workers.sh \
+  --acr <acr-name-or-login-server> \
+  --values-file my-values.yaml
 ```
 
-The install runs in this order:
+The script:
 
-1. External Secrets creates the Kubernetes Secrets from Key Vault, and
-   Azure Service Operator creates the queues, blob containers, and MongoDB
-   database and collections.
-2. The `db-migration` Job applies database migrations. API pods stay
-   not-ready until migrations finish, because the API readiness probe
-   checks the migrations collection.
-3. The API, Portal, Judge, gateway, scheduler, and token manager start.
-4. One registration Job per enabled worker registers the worker's agent
-   version and queue with the API. The Jobs retry until the API is ready.
+1. Builds and pushes both ACP worker images with `az acr build`.
+2. Enables their Deployments with `helm upgrade`.
+3. Waits for both rollouts.
+4. Registers both agent types through the API.
 
-Workers start at zero replicas and scale up when runs are queued.
+It does **not** register worker credentials. Add a scopeless GitHub OAuth
+token and/or Anthropic API key through the Portal's **Secrets** tab or the
+Token Manager API.
 
-## 4. Verify
+Run `./scripts/bootstrap-workers.sh --help` for the namespace, release,
+chart, image-tag, skip-build, skip-worker, and skip-registration flags. Pass
+the original `--values-file`; without it, the script falls back to
+`--reuse-values`, which can omit defaults introduced after the first install.
+
+## Verify
 
 ```bash
-kubectl -n scoped get pods
-kubectl -n scoped get jobs
-kubectl -n scoped get externalsecrets,scaledobjects
+kubectl get pods -n scope
+kubectl get jobs -n scope
+
+kubectl -n scope port-forward svc/api 18080:80
+kubectl -n scope port-forward svc/scope-portal 5100:80
 ```
 
-All Deployments except the workers should be `Running` and ready, the
-Jobs `Complete`, and every `ExternalSecret` `SecretSynced`.
-
-Open the Portal through a port-forward. The Portal proxies `/api` to the
-API, so one forward is enough:
+Open <http://localhost:5100>, or use the CLI:
 
 ```bash
-kubectl -n scoped port-forward svc/portal 8080:80
+scope agent list --url http://localhost:18080
+scope project list --url http://localhost:18080
 ```
 
-Browse to `http://localhost:8080`, then follow
-[Your first run](/getting-started/first-run/). To expose the Portal
-permanently, see [Expose the Portal](/self-hosting/configuration/#expose-the-portal).
-
-## Upgrade
-
-Publish images for the new release, update `image.tag`, and run the same
-command:
+To run a sample, import the reusable criteria into a project before
+submitting:
 
 ```bash
-helm upgrade --install scope ./deploy/helm/scope \
-  --namespace scoped --values scope-values.yaml \
-  --wait --timeout 15m
+scope criteria import config/criteria \
+  --project <project-id> \
+  --url http://localhost:18080
+
+scope run submit \
+  --scenario config/scenarios/hello-world-express-v2.yaml \
+  --persona config/personas/vibe-coder.yaml \
+  --worker coder-acp-copilot \
+  --project <project-id> \
+  --url http://localhost:18080
 ```
 
-Each upgrade reruns the migration and registration Jobs. Check the
-chart's release notes before upgrading across versions. Migrations only
-move forward, so take a database backup first if you may need to roll
-back (see [Operations](/self-hosting/operations/#back-up-and-restore)).
+The chart's
+[`SAMPLE-SCENARIO.md`](https://github.com/microsoft/scope/blob/main/deploy/helm/scope/SAMPLE-SCENARIO.md)
+explains why criteria are seeded separately.
 
-## Roll back
+## Upgrade and rollback
+
+Update the core images by pinning `global.imageTag` and running the same
+`helm upgrade --install` command with your values file. Re-run
+`bootstrap-workers.sh` to build, deploy, and register a new worker image or
+agent version.
 
 ```bash
-helm history scope -n scoped
-helm rollback scope <revision> -n scoped --wait
+helm history scope -n scope
+helm rollback scope <revision> -n scope --wait --timeout 5m
 ```
 
-A rollback restores the previous images and settings. It doesn't undo
-database migrations that the newer release applied.
+Prefer `-f my-values.yaml` during upgrades. Use `--reuse-values` only when
+you intentionally want the release's previously computed values, including
+their potentially stale defaults.
 
 ## Uninstall
 
 ```bash
-helm uninstall scope -n scoped
+helm uninstall scope -n scope
 ```
 
-Kubernetes resources are removed. Azure Service Operator **keeps** the
-Azure queues, blob containers, and MongoDB collections: the chart marks
-them to be retained, so uninstalling never deletes run data. Delete the
-Azure resources separately, or tear down the whole environment with
-`azd down`.
+This removes chart-managed Kubernetes resources. It does not remove the Azure
+resource group.

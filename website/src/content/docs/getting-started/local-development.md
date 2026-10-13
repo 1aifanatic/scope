@@ -150,7 +150,6 @@ examples.
 | --- | --- | --- |
 | GitHub Copilot | Agent Client Protocol (ACP) | `pnpm docker:dev:copilot` |
 | Claude Code | ACP | `pnpm docker:dev:claude-code` |
-| GitHub Copilot on Windows | Windows ACP worker | Deployment-specific; see [Windows workers](/self-hosting/configuration/#windows-workers). |
 
 The `pnpm docker:dev:all` command enables both local ACP workers, not every
 deployment-specific integration. Each provider requires its own credentials
