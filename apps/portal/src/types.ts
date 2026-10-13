@@ -267,6 +267,24 @@ export interface SubmissionRequestSummary {
   profileId?: string;
 }
 
+export interface SubmissionRunAttempt {
+  _id: string;
+  attemptNumber: number;
+  vectorFingerprint: string;
+  requests: Array<{ requestId: string; runId: string }>;
+  createdAt: string;
+  updatedAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  dependencyProjection: SubmissionDependencyProjection[];
+  handlerStatus?: Submission["handlerProgress"];
+  blocking: SubmissionBlockingDetail[];
+  report?: { reportId?: string; url?: string; updatedAt?: string };
+  supersededAt?: string;
+  supersededBySubmissionRunId?: string;
+  supersededReason?: "request-vector-changed" | "manual-retry";
+}
+
 export interface Submission {
   submissionId: string;
   projectId: string;

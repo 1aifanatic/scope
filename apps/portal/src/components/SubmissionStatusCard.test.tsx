@@ -10,7 +10,7 @@ import { SubmissionStatusCard } from "./SubmissionStatusCard";
 afterEach(cleanup);
 
 describe("SubmissionStatusCard", () => {
-  it("renders readiness and exact observation progress", () => {
+  it("renders readiness and arbitrary dependency progress", () => {
     const submission: Submission = {
       submissionId: "submission-1",
       projectId: "project-1",
@@ -45,7 +45,7 @@ describe("SubmissionStatusCard", () => {
         {
           requestId: "request-2",
           runId: "run-2",
-          handlerId: "pp-observations",
+          handlerId: "security-scan",
           state: "failed",
         },
       ],
@@ -53,7 +53,7 @@ describe("SubmissionStatusCard", () => {
         {
           requestId: "request-2",
           runId: "run-2",
-          handlerId: "pp-observations",
+          handlerId: "security-scan",
           reason: "dependency-failed",
         },
       ],
@@ -64,7 +64,10 @@ describe("SubmissionStatusCard", () => {
     expect(screen.getByText("Report generation")).toBeDefined();
     expect(screen.getByText("Generation blocked")).toBeDefined();
     expect(screen.getByText("3")).toBeDefined();
+    expect(screen.getByText("Dependencies ready")).toBeDefined();
     expect(screen.getByText("1/2")).toBeDefined();
+    expect(screen.getByText("Observations 1/1")).toBeDefined();
+    expect(screen.getByText("Security Scan 0/1")).toBeDefined();
   });
 
   it.each([

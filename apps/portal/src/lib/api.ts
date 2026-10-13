@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType, ResourceDocument, ResourceRevisionDocument, ResourceBindingSpec, CreateResourceBody, CreateResourceRevisionBody, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, RunFacetsResponse, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType, RunSortField, RunSortDir, CriterionKind, TaxonomyElementId, CriterionSubject, Submission } from "@/types";
+import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType, ResourceDocument, ResourceRevisionDocument, ResourceBindingSpec, CreateResourceBody, CreateResourceRevisionBody, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, RunFacetsResponse, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType, RunSortField, RunSortDir, CriterionKind, TaxonomyElementId, CriterionSubject, Submission, SubmissionRunAttempt } from "@/types";
 
 import type { Project, CreateProjectRequest, UpdateProjectRequest } from "@/types";
 import { qs } from "./url";
@@ -247,18 +247,26 @@ export const api = {
     request(`/submissions/${id}`),
 
   getSubmissionRuns: (id: string): Promise<{
-    runs: Array<{
-      _id: string;
-      attemptNumber: number;
-      requests: Array<{ requestId: string; runId: string }>;
-      createdAt: string;
-      report?: { reportId?: string; url?: string; updatedAt?: string };
-      handlerStatus?: Submission["handlerProgress"];
-      supersededAt?: string;
-      supersededBySubmissionRunId?: string;
-      supersededReason?: "request-vector-changed" | "manual-retry";
-    }>;
+    runs: SubmissionRunAttempt[];
   }> => request(`/submissions/${id}/runs`),
+
+  getSubmissionRun: (
+    id: string,
+    submissionRunId: string,
+  ): Promise<SubmissionRunAttempt> =>
+    request(
+      `/submissions/${encodeURIComponent(id)}/runs/${encodeURIComponent(submissionRunId)}`,
+    ),
+
+  getSubmissionReports: (id: string): Promise<Report[]> =>
+    request(`/submissions/${encodeURIComponent(id)}/reports`),
+
+  submissionRunLogsUrl: (
+    id: string,
+    submissionRunId: string,
+    fromStart = true,
+  ): string =>
+    `${BASE}/submissions/${encodeURIComponent(id)}/runs/${encodeURIComponent(submissionRunId)}/logs?fromStart=${fromStart}`,
 
   retrySubmission: (
     id: string,

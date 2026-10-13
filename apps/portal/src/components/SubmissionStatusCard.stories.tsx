@@ -41,7 +41,7 @@ const submission: Submission = {
     {
       requestId: "request-2",
       runId: "run-2",
-      handlerId: "pp-observations",
+      handlerId: "security-scan",
       state: "ready",
     },
   ],
@@ -95,7 +95,7 @@ export const Blocked: Story = {
         {
           requestId: "request-2",
           runId: "run-2",
-          handlerId: "pp-observations",
+          handlerId: "security-scan",
           reason: "dependency-failed",
         },
       ],
