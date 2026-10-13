@@ -15,9 +15,8 @@ be added alongside it in the future. The deployment flow is:
 1. Provision a Kubernetes cluster and its required data, secret, identity,
    and image-registry services. For the Azure option, follow
    [Provision Azure infrastructure](/self-hosting/provision-aks/).
-2. Install the six core services with the
-   [`deploy/helm/scope`](https://github.com/microsoft/scope/tree/main/deploy/helm/scope)
-   chart.
+2. Install the six core services by following
+   [Deploy with Helm](/self-hosting/deploy-helm/).
 3. Configure the coding-agent workers. The Azure quickstart builds and
    enables the two ACP workers with
    [`scripts/bootstrap-workers.sh`](https://github.com/microsoft/scope/blob/main/scripts/bootstrap-workers.sh).
