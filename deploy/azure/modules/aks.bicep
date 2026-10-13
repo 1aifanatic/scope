@@ -18,11 +18,14 @@ param kubernetesVersion string = ''
 @description('Resource ID of the subnet to deploy AKS node pools into.')
 param vnetSubnetResourceId string
 
-// Defaults are deliberately small rather than production-sized: 1 node per
-// pool keeps the total footprint to 2 nodes / 4 vCPUs so it fits inside the
-// common 10-vCPU default regional quota many subscriptions start with. This
-// trades away multi-node HA for the System pool - fine for a quickstart/dev
-// deployment, but bump systemNodeCount to 3 for a production environment.
+// Defaults are deliberately small rather than production-sized: 1 System
+// node + 2 User nodes keeps the total footprint to 3 nodes / 6 vCPUs, still
+// comfortably inside the common 10-vCPU default regional quota many
+// subscriptions start with. The User pool defaults to 2 nodes (not 1) to
+// leave CPU headroom for an optional ACP worker pod - see the userNodeCount
+// comment below. This trades away multi-node HA for the System pool - fine
+// for a quickstart/dev deployment, but bump systemNodeCount to 3 for a
+// production environment.
 // Standard_D2s_v5 (general-purpose, non-burstable) is used instead of a
 // B-series burstable size because SKU availability for a given vCPU family
 // varies a lot by subscription/region (e.g. some subscriptions only allow
@@ -37,8 +40,14 @@ param systemNodeCount int = 1
 @description('VM size for the User node pool. Defaults to a modest, broadly-available general-purpose size; use a larger size (e.g. Standard_D4s_v5) for production.')
 param userNodeVmSize string = 'Standard_D2s_v5'
 
-@description('Node count for the User node pool. Defaults to 1 for a minimal/dev footprint; scale up for production workloads.')
-param userNodeCount int = 1
+// Defaults to 2 (not 1) because the core app alone (api/portal/judge/
+// token-manager/scheduler/report-generator) already consumes ~85% of a
+// single Standard_D2s_v5 node's allocatable CPU, leaving no room to
+// schedule an optional Phase 3 ACP worker pod (coder-acp-copilot: 500m main
+// + 250m MCP-gateway sidecar = 750m) on top - confirmed live via
+// `Insufficient cpu` scheduling failures with a single user node.
+@description('Node count for the User node pool. Defaults to 2 to leave CPU headroom for an optional ACP worker pod alongside the core app; 1 is enough for the core app alone, but scale up further for production workloads.')
+param userNodeCount int = 2
 
 // publicNetworkAccess is explicitly set to 'Enabled' (overriding the module's
 // 'Disabled' default) rather than enabling enablePrivateCluster, because this

@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "16184617517614499056"
+      "templateHash": "27922245146307351"
     }
   },
   "parameters": {
@@ -63,10 +63,10 @@
     },
     "aksUserNodeCount": {
       "type": "int",
-      "defaultValue": 1,
+      "defaultValue": 2,
       "minValue": 1,
       "metadata": {
-        "description": "Node count for the AKS User node pool. Defaults to 1 for a minimal/dev footprint; scale up for production workloads."
+        "description": "Node count for the AKS User node pool. Defaults to 2 to leave CPU headroom for an optional ACP worker pod alongside the core app; 1 is enough for the core app alone, but scale up further for production workloads."
       }
     },
     "acrSkuName": {
@@ -38003,7 +38003,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "12031242022114676163"
+              "templateHash": "12304380602994357761"
             }
           },
           "parameters": {
@@ -38064,9 +38064,9 @@
             },
             "userNodeCount": {
               "type": "int",
-              "defaultValue": 1,
+              "defaultValue": 2,
               "metadata": {
-                "description": "Node count for the User node pool. Defaults to 1 for a minimal/dev footprint; scale up for production workloads."
+                "description": "Node count for the User node pool. Defaults to 2 to leave CPU headroom for an optional ACP worker pod alongside the core app; 1 is enough for the core app alone, but scale up further for production workloads."
               }
             }
           },

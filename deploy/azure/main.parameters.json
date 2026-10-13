@@ -26,7 +26,7 @@
       "value": "Standard_D2s_v5"
     },
     "aksUserNodeCount": {
-      "value": 1
+      "value": 2
     },
     "acrSkuName": {
       "value": "Basic"

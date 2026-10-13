@@ -85,11 +85,11 @@
                 "name": "userNodeCountControl",
                 "type": "Microsoft.Common.Slider",
                 "label": "User node pool count",
-                "defaultValue": 1,
+                "defaultValue": 2,
                 "min": 1,
                 "max": 10,
                 "step": 1,
-                "toolTip": "Number of nodes in the User node pool. Defaults to 1 for a minimal/dev footprint; scale up for production workloads.",
+                "toolTip": "Number of nodes in the User node pool. Defaults to 2 to leave CPU headroom for an optional ACP worker pod alongside the core app; scale up further for production workloads.",
                 "showStepMarkers": false
               }
             ]

@@ -43,9 +43,9 @@ param aksSystemNodeCount int = 1
 @description('VM size for the AKS User node pool. Defaults to a modest, broadly-available general-purpose size; use a larger size (e.g. Standard_D4s_v5) for production.')
 param aksUserNodeVmSize string = 'Standard_D2s_v5'
 
-@description('Node count for the AKS User node pool. Defaults to 1 for a minimal/dev footprint; scale up for production workloads.')
+@description('Node count for the AKS User node pool. Defaults to 2 to leave CPU headroom for an optional ACP worker pod alongside the core app; 1 is enough for the core app alone, but scale up further for production workloads.')
 @minValue(1)
-param aksUserNodeCount int = 1
+param aksUserNodeCount int = 2
 
 @description('SKU for the Azure Container Registry. Defaults to Basic - sufficient for a single small worker image.')
 @allowed([
