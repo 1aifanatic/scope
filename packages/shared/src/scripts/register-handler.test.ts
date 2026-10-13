@@ -6,11 +6,11 @@ import { parseHandlerDocument } from "./register-handler.js";
 
 describe("parseHandlerDocument", () => {
   const valid = {
-    _id: "pp-taxonomy",
+    _id: "pp-example",
     type: "post-process-handler",
     version: 1,
-    queue: "pp-taxonomy-queue",
-    selector: "taxonomy",
+    queue: "pp-example-queue",
+    selector: "example",
     autoBackfill: false,
     dependsOn: ["pp-atif"],
   };
@@ -50,5 +50,19 @@ describe("parseHandlerDocument", () => {
 
   it("rejects a non-object input", () => {
     expect(() => parseHandlerDocument("nope")).toThrow(/mapping/);
+  });
+
+  it("accepts the pp-readout submission handler contract", () => {
+    const readout = {
+      _id: "pp-readout",
+      type: "submission-handler",
+      version: 1,
+      queue: "pp-readout-queue",
+      selector: "readout",
+      autoBackfill: false,
+      dependsOn: ["pp-observations"],
+      dependencyMode: "all-runs",
+    };
+    expect(parseHandlerDocument(readout)).toEqual(readout);
   });
 });

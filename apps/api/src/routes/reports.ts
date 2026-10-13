@@ -15,6 +15,7 @@ import {
   ReportResponseSchema,
   TriggerReportsInputSchema,
   evaluateTrigger,
+  withRetry,
 } from "shared";
 import type { TaskPromptDocument } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
@@ -108,18 +109,29 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/reports",
   tags: ["Reports"],
   summary: "List reports",
-  query: z.object({ requestId: z.string().optional(), projectId: z.string().optional() }),
+  query: z.object({
+    requestId: z.string().optional(),
+    submissionId: z.string().optional(),
+    submissionRunId: z.string().optional(),
+    projectId: z.string().optional(),
+  }),
   response: z.array(ReportResponseSchema),
   handler: async (req, res, next) => {
     try {
       const requestIdFilter = req.query.requestId as string;
+      const submissionIdFilter = req.query.submissionId as string;
+      const submissionRunIdFilter = req.query.submissionRunId as string;
       const filter: Record<string, unknown> = {};
       if (requestIdFilter) {
         // Parent-scoped: the run id already pins the project.
         filter.requestId = requestIdFilter;
+      } else if (submissionIdFilter) {
+        filter.submissionId = submissionIdFilter;
+        if (submissionRunIdFilter) filter.submissionRunId = submissionRunIdFilter;
       } else {
         // Top-level reports list requires an explicit project (400 if absent).
         filter.projectId = getQueryProjectId(req);
+        if (submissionRunIdFilter) filter.submissionRunId = submissionRunIdFilter;
       }
 
       const reports = await ctx.reportCollection
@@ -128,13 +140,21 @@ apiRoute(ctx.app, ctx.registry, {
         .toArray();
 
       // Enrich reports with the task from their associated run
-      const requestIds = [...new Set(reports.map(r => r.requestId))];
+      const requestIds = [
+        ...new Set(reports.flatMap((report) => report.requestId ? [report.requestId] : [])),
+      ];
       const runs = requestIds.length > 0
         ? await ctx.requestCollection.find({ _id: { $in: requestIds } as any }, { projection: { _id: 1, "scenario.task": 1 } }).toArray()
         : [];
       const taskByRequestId = new Map(runs.map(r => [r._id, r.scenario?.task]));
 
-      res.json(reports.map(r => ({ ...r, id: r._id, task: taskByRequestId.get(r.requestId) })));
+      res.json(reports.map((report) => ({
+        ...report,
+        id: report._id,
+        ...(report.requestId
+          ? { task: taskByRequestId.get(report.requestId) }
+          : {}),
+      })));
     } catch (error) {
       next(error);
     }
@@ -202,6 +222,39 @@ apiRoute(ctx.app, ctx.registry, {
 });
 
 apiRoute(ctx.app, ctx.registry, {
+  method: "get",
+  path: "/api/v1/reports/:id/structured",
+  tags: ["Reports"],
+  summary: "Download a report's structured JSON artifact",
+  params: z.object({ id: z.string() }),
+  response: z.any(),
+  rawResponse: true,
+  errorResponses: {
+    404: { description: "Report or structured artifact not found" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const report = await ctx.reportCollection.findOne({ _id: req.params.id });
+      if (!report?.structuredArtifact) {
+        res.status(404).json({ error: "Structured report artifact not found" });
+        return;
+      }
+      const structured = await withRetry(() =>
+        ctx.blobStorage.downloadJson(report.structuredArtifact!.url)
+      );
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${req.params.id}.structured.json"`,
+      );
+      res.json(structured);
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
+apiRoute(ctx.app, ctx.registry, {
   method: "post",
   path: "/api/v1/reports/bulk-status",
   tags: ["Reports"],
@@ -229,7 +282,7 @@ apiRoute(ctx.app, ctx.registry, {
       // Build a map of requestId → latest report status
       const statusMap: Record<string, { reportId: string; status: string }> = {};
       for (const report of reports) {
-        if (!statusMap[report.requestId]) {
+        if (report.requestId && !statusMap[report.requestId]) {
           statusMap[report.requestId] = {
             reportId: report._id,
             status: report.status,

@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Collection, Db } from "mongodb";
 import type {
   RequestDocument,
+  ReportDocument,
   ServiceHandlerDocument,
   SubmissionDocument,
   SubmissionRunHistoryDocument,
@@ -28,6 +29,7 @@ function buildApp(input: {
   requests: RequestDocument[];
   submission: SubmissionDocument;
   history?: SubmissionRunHistoryDocument[];
+  reports?: ReportDocument[];
 }) {
   let submission = structuredClone(input.submission);
   const services: ServiceHandlerDocument[] = [
@@ -90,6 +92,15 @@ function buildApp(input: {
     requestCollection: {
       find: vi.fn(() => queryResult(input.requests)),
     } as unknown as Collection<RequestDocument>,
+    reportCollection: {
+      findOne: vi.fn(async (filter: Record<string, unknown>) =>
+        (input.reports ?? []).find((report) =>
+          Object.entries(filter).every(([key, value]) =>
+            report[key as keyof ReportDocument] === value
+          )
+        ) ?? null
+      ),
+    } as unknown as Collection<ReportDocument>,
     submissionCollection,
     submissionRunsCollection: {
       find: vi.fn(() => queryResult(input.history ?? [])),
@@ -249,5 +260,43 @@ describe("submission routes", () => {
         reason: "dependency-not-ready",
       },
     ]);
+  });
+
+  it("selects only the current submission run readout", async () => {
+    const currentReport: ReportDocument = {
+      _id: "report-current",
+      projectId: "project-1",
+      submissionId: "submission-1",
+      submissionRunId: "submission-run-1",
+      status: "completed",
+      content: "# Current",
+      createdAt: new Date(),
+    };
+    const response = await request(
+      buildApp({
+        requests: [requestDocument],
+        submission: {
+          ...submissionDocument,
+          run: {
+            ...submissionDocument.run,
+            report: { reportId: "report-current" },
+          },
+        },
+        reports: [
+          {
+            ...currentReport,
+            _id: "report-historical",
+            submissionRunId: "submission-run-0",
+          },
+          currentReport,
+        ],
+      }),
+    ).get("/api/v1/submissions/submission-1/readout");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      _id: "report-current",
+      submissionRunId: "submission-run-1",
+    });
   });
 });

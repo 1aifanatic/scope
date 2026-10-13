@@ -33,13 +33,25 @@ export const ReportStatusSchema = z.enum([
   "failed",
 ]);
 
+export const StructuredReportArtifactSchema = z
+  .object({
+    schemaId: z.string(),
+    schemaVersion: z.string(),
+    contentType: z.literal("application/json"),
+    url: z.string(),
+  })
+  .openapi("StructuredReportArtifact");
+
 export const ReportResponseSchema = z
   .object({
     _id: z.string(),
-    requestId: z.string(),
+    requestId: z.string().optional(),
+    submissionId: z.string().optional(),
+    submissionRunId: z.string().optional(),
     templateId: z.string().optional(),
     reporter: ReporterSchema.optional(),
     content: z.string().optional(),
+    structuredArtifact: StructuredReportArtifactSchema.optional(),
     status: ReportStatusSchema,
     error: z.string().optional(),
     insightReferences: z.array(InsightReferenceSchema).optional(),

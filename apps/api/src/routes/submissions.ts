@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   SubmissionCoordinator,
   SubmissionListResponseSchema,
+  ReportResponseSchema,
   SubmissionResponseSchema,
   SubmissionRetryResponseSchema,
   SubmissionRunResponseSchema,
@@ -120,6 +121,34 @@ export function registerSubmissionsRoutes(ctx: RouteContext): void {
       res.json({
         submissions: await Promise.all(docs.map((doc) => toResponse(ctx, doc))),
       });
+    },
+  });
+
+  apiRoute(ctx.app, ctx.registry, {
+    method: "get",
+    path: "/api/v1/submissions/:id/readout",
+    tags: ["Submissions"],
+    summary: "Get the current submission readout report",
+    params: z.object({ id: z.string() }),
+    response: ReportResponseSchema,
+    errorResponses: { 404: { description: "Current readout not found" } },
+    handler: async (req, res) => {
+      const submission = await ctx.submissionCollection.findOne({ _id: req.params.id });
+      const reportId = submission?.run.report?.reportId;
+      if (!submission || !reportId) {
+        res.status(404).json({ error: "Current readout not found" });
+        return;
+      }
+      const report = await ctx.reportCollection.findOne({
+        _id: reportId,
+        submissionId: submission._id,
+        submissionRunId: submission.run._id,
+      });
+      if (!report) {
+        res.status(404).json({ error: "Current readout not found" });
+        return;
+      }
+      res.json({ ...report, id: report._id });
     },
   });
 
