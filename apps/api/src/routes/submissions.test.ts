@@ -30,6 +30,12 @@ function buildApp(input: {
   submission: SubmissionDocument;
   history?: SubmissionRunHistoryDocument[];
   reports?: ReportDocument[];
+  logs?: Array<{
+    timestamp: string;
+    level: "info" | "warn" | "error" | "debug";
+    source: string;
+    message: string;
+  }>;
 }) {
   let submission = structuredClone(input.submission);
   const services: ServiceHandlerDocument[] = [
@@ -115,6 +121,9 @@ function buildApp(input: {
         (input.history ?? []).find((run) => run._id === filter._id) ?? null,
       ),
     } as unknown as Collection<SubmissionRunHistoryDocument>,
+    blobStorage: {
+      getLogEvents: vi.fn(async () => input.logs ?? []),
+    },
   } as unknown as RouteContext;
   ctx.app.use(express.json());
   registerSubmissionsRoutes(ctx);
@@ -311,5 +320,37 @@ describe("submission routes", () => {
         submissionRunId: "submission-run-0",
       },
     ]);
+  });
+
+  it("replays logs for the exact submission attempt", async () => {
+    const response = await request(
+      buildApp({
+        requests: [requestDocument],
+        submission: {
+          ...submissionDocument,
+          run: {
+            ...submissionDocument.run,
+            handlerStatus: {
+              "pp-readout": { status: "done", version: 1 },
+            },
+          },
+        },
+        logs: [
+          {
+            timestamp: "2026-01-01T00:00:00.000Z",
+            level: "info",
+            source: "pp-readout",
+            message: "Submission report completed",
+          },
+        ],
+      }),
+    ).get(
+      "/api/v1/submissions/submission-1/runs/submission-run-1/logs?fromStart=true",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/event-stream");
+    expect(response.text).toContain("Submission report completed");
+    expect(response.text).toContain("event: done");
   });
 });
