@@ -17,9 +17,8 @@ be added alongside it in the future. The deployment flow is:
    [Provision Azure infrastructure](/self-hosting/provision-aks/).
 2. Install the six core services by following
    [Deploy with Helm](/self-hosting/deploy-helm/).
-3. Configure the coding-agent workers. The Azure quickstart builds and
-   enables the two ACP workers with
-   [`scripts/bootstrap-workers.sh`](https://github.com/microsoft/scope/blob/main/scripts/bootstrap-workers.sh).
+3. Configure the coding-agent workers. For the Azure quickstart, follow
+   [Enable coding-agent workers](/self-hosting/deploy-helm/#phase-3-enable-coding-agent-workers).
 
 To hand the release to GitOps instead, follow
 [Deploy with Flux](/self-hosting/deploy-flux/): declare a Flux
