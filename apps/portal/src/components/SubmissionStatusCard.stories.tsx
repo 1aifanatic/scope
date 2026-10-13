@@ -59,7 +59,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Processing: Story = {};
+export const GeneratingReport: Story = {};
 
 export const Retryable: Story = {
   args: {
@@ -73,7 +73,7 @@ export const Retryable: Story = {
   },
 };
 
-export const Completed: Story = {
+export const ReportReady: Story = {
   args: {
     submission: {
       ...submission,

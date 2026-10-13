@@ -61,8 +61,42 @@ describe("SubmissionStatusCard", () => {
 
     render(<SubmissionStatusCard submission={submission} />);
 
-    expect(screen.getByText("blocked")).toBeDefined();
+    expect(screen.getByText("Report generation")).toBeDefined();
+    expect(screen.getByText("Generation blocked")).toBeDefined();
     expect(screen.getByText("3")).toBeDefined();
     expect(screen.getByText("1/2")).toBeDefined();
+  });
+
+  it.each([
+    ["waiting", "Waiting on runs"],
+    ["ready", "Ready to generate"],
+    ["processing", "Generating report"],
+    ["done", "Report ready"],
+    ["failed", "Generation failed"],
+  ] as const)("renders %s as %s", (readiness, label) => {
+    const submission: Submission = {
+      submissionId: "submission-1",
+      projectId: "project-1",
+      requestIds: ["request-1"],
+      createdAt: new Date().toISOString(),
+      submissionRunId: "submission-run-1",
+      attemptNumber: 1,
+      readiness,
+      requests: [
+        {
+          requestId: "request-1",
+          runId: "run-1",
+          task: "Task",
+          status: "done",
+          workerType: "worker",
+        },
+      ],
+      dependencyProjection: [],
+      blocking: [],
+    };
+
+    render(<SubmissionStatusCard submission={submission} />);
+
+    expect(screen.getByText(label)).toBeDefined();
   });
 });

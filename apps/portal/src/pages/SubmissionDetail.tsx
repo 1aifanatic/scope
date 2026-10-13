@@ -35,7 +35,7 @@ export function SubmissionDetail() {
         submissionQuery.data!.submissionRunId,
       ),
     onSuccess: () => {
-      toast.success("Submission processing restarted");
+      toast.success("Report generation restarted");
       void queryClient.invalidateQueries({ queryKey: ["submission", id] });
     },
     onError: (error) => {
@@ -47,7 +47,7 @@ export function SubmissionDetail() {
     queryFn: () => api.getSubmissionRuns(id!),
     enabled: Boolean(id),
   });
-  const readoutQuery = useQuery({
+  const reportQuery = useQuery({
     queryKey: ["submission-readout", id, submissionQuery.data?.submissionRunId],
     queryFn: () => api.getSubmissionReadout(id!),
     enabled: Boolean(id && submissionQuery.data?.report?.reportId),
@@ -93,7 +93,7 @@ export function SubmissionDetail() {
           }
         >
           <RotateCcw className="mr-2 h-4 w-4" />
-          Retry processing
+          Retry report generation
         </Button>
       </div>
 
@@ -101,10 +101,10 @@ export function SubmissionDetail() {
 
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-base">Current readout</CardTitle>
-          {readoutQuery.data?.structuredArtifact && (
+          <CardTitle className="text-base">Current report</CardTitle>
+          {reportQuery.data?.structuredArtifact && (
             <Button variant="outline" size="sm" asChild>
-              <a href={api.reportStructuredUrl(readoutQuery.data._id)} download>
+              <a href={api.reportStructuredUrl(reportQuery.data._id)} download>
                 <Download className="mr-2 h-4 w-4" />
                 Structured JSON
               </a>
@@ -112,19 +112,19 @@ export function SubmissionDetail() {
           )}
         </CardHeader>
         <CardContent>
-          {readoutQuery.data?.content ? (
+          {reportQuery.data?.content ? (
             <div className="prose max-w-none dark:prose-invert">
               <MarkdownRenderer githubAlerts>
-                {readoutQuery.data.content}
+                {reportQuery.data.content}
               </MarkdownRenderer>
             </div>
           ) : submission.readiness === "blocked" ? (
             <p className="text-sm text-destructive">
-              Readout generation is blocked by observation dependencies.
+              Report generation is blocked by observation dependencies.
             </p>
           ) : submission.readiness === "failed" ? (
             <p className="text-sm text-destructive">
-              Readout generation failed and can be retried.
+              Report generation failed and can be retried.
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">
@@ -229,7 +229,7 @@ export function SubmissionDetail() {
                 {run.report?.reportId && (
                   <Button variant="outline" size="sm" asChild>
                     <Link to={`/reports/${run.report.reportId}`}>
-                      View readout
+                      View report
                     </Link>
                   </Button>
                 )}
