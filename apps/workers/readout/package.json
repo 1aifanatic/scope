@@ -1,5 +1,5 @@
 {
-  "name": "taxonomy-handler",
+  "name": "readout-handler",
   "version": "1.0.0",
   "type": "module",
   "main": "dist/index.js",
@@ -7,14 +7,14 @@
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "taxonomy": "tsx src/cli.ts",
     "lint": "eslint src/"
   },
   "dependencies": {
     "shared": "workspace:*",
     "@azure/storage-queue": "^12.25.0",
-    "@github/copilot-sdk": "^0.1.17",
-    "dotenv": "^16.4.5"
+    "@github/copilot-sdk": "1.0.1",
+    "dotenv": "^16.4.5",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",

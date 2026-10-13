@@ -535,14 +535,13 @@ export interface RunState {
     podName?: string;
   };
   harUrl?: string;
-  taxonomyUrl?: string;
   videoUrls?: string[];
   setupVideoUrls?: string[];
   tokenUsage?: TokenUsage;
   aiCallCount?: number;
   rawChatUrl?: string;
   rawChatFormat?: string;
-  /** Per-handler post-processing status. Keys are handler IDs (e.g. "pp-atif", "pp-taxonomy"). */
+  /** Per-handler post-processing status. Keys are handler IDs (e.g. "pp-atif"). */
   handlerStatus?: Record<string, HandlerRunStatus>;
   /** Whole-run observation results — one entry per selected `subject:"run"`
    *  observation criterion, evaluated once against the final snapshot + the
@@ -623,7 +622,6 @@ export const RUN_STATE_FIELD_NAMES = [
   "lastHeartbeatAt",
   "worker",
   "harUrl",
-  "taxonomyUrl",
   "videoUrls",
   "setupVideoUrls",
   "tokenUsage",
@@ -860,14 +858,24 @@ export interface Reporter {
   agentVersion: string;  // @github/copilot-sdk package version
 }
 
+export interface StructuredReportArtifact {
+  schemaId: string;
+  schemaVersion: string;
+  contentType: "application/json";
+  url: string;
+}
+
 /** Report document stored in MongoDB */
 export interface ReportDocument {
   _id: string;           // UUID
-  requestId: string;     // FK → RequestDocument._id
+  requestId?: string;    // FK → RequestDocument._id for run reports
+  submissionId?: string; // FK → SubmissionDocument._id for submission reports
+  submissionRunId?: string; // Exact immutable submission attempt
   projectId: string;     // FK → ProjectDocument._id (denormalized from request)
   templateId?: string;   // FK → ReportTemplateDocument.id (slug of template that generated this report)
   reporter?: Reporter;   // Set by the worker when it picks up the job
   content?: string;      // Generated markdown report
+  structuredArtifact?: StructuredReportArtifact;
   status: ReportStatus;
   error?: string;
   insightReferences?: InsightReference[];  // Insights discovered/referenced by this report
