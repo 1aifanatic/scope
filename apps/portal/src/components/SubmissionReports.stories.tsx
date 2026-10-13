@@ -103,9 +103,10 @@ export const MultipleReportTypes: Story = {
   args: { reports: [readoutReport, templateReport] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(
-      canvas.getByRole("tab", { name: "Executive Summary" }),
-    );
+    const executiveTab = canvas.getByRole("tab", { name: "Executive Summary" });
+    await expect(executiveTab).toHaveClass("rounded-b-none");
+    await userEvent.click(executiveTab);
+    await expect(executiveTab).toHaveAttribute("data-state", "active");
     await expect(
       canvas.getByRole("heading", { name: "Executive summary" }),
     ).toBeVisible();

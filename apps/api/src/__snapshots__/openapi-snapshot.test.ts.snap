@@ -906,6 +906,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "name": {
             "type": "string",
           },
+          "subject": {
+            "default": "run",
+            "enum": [
+              "run",
+              "submission",
+            ],
+            "type": "string",
+          },
           "systemPrompt": {
             "$ref": "#/components/schemas/ReportTemplateSystemPrompt",
           },
@@ -2539,6 +2547,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "projectId": {
             "type": "string",
           },
+          "subject": {
+            "default": "run",
+            "enum": [
+              "run",
+              "submission",
+            ],
+            "type": "string",
+          },
           "systemPrompt": {
             "$ref": "#/components/schemas/ReportTemplateSystemPrompt",
           },
@@ -4086,6 +4102,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "report": {
             "$ref": "#/components/schemas/SubmissionReportPointer",
           },
+          "reportsTriggeredAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
           "requests": {
             "items": {
               "$ref": "#/components/schemas/SubmissionRequestRef",
@@ -4241,6 +4264,21 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "required": [
           "requestId",
+        ],
+        "type": "object",
+      },
+      "TriggerSubmissionReportsInput": {
+        "properties": {
+          "submissionId": {
+            "type": "string",
+          },
+          "submissionRunId": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "submissionId",
+          "submissionRunId",
         ],
         "type": "object",
       },
@@ -4478,6 +4516,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             ],
           },
           "name": {
+            "type": "string",
+          },
+          "subject": {
+            "enum": [
+              "run",
+              "submission",
+            ],
             "type": "string",
           },
           "systemPrompt": {
@@ -9095,6 +9140,56 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Trigger reports",
+        "tags": [
+          "Reports",
+        ],
+      },
+    },
+    "/api/v1/reports/trigger-submission": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerSubmissionReportsInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "reports": {
+                      "items": {
+                        "$ref": "#/components/schemas/ReportResponse",
+                      },
+                      "type": "array",
+                    },
+                    "triggered": {
+                      "type": "number",
+                    },
+                  },
+                  "required": [
+                    "triggered",
+                    "reports",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Submission attempt not found",
+          },
+          "409": {
+            "description": "Submission attempt is not ready",
+          },
+        },
+        "summary": "Trigger submission reports",
         "tags": [
           "Reports",
         ],

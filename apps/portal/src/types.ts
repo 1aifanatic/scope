@@ -670,6 +670,7 @@ export interface ReportTemplate {
   _id: string;
   id: string;
   name: string;
+  subject?: "run" | "submission";
   description?: string;
   userPrompt: string;
   systemPrompt?: ReportTemplateSystemPrompt;

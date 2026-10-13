@@ -651,6 +651,8 @@ export interface SubmissionRunState {
   handlerStatus?: Record<string, HandlerRunStatus>;
   blocking: SubmissionBlockingDetail[];
   report?: SubmissionReportPointer;
+  /** Exactly-once guard for automatic submission-scoped report templates. */
+  reportsTriggeredAt?: Date;
   /** Internal scheduler hold used by bulk request retry so one completed
    * replacement batch produces one vector rollover. Expiry self-heals crashes. */
   reconcileAfter?: Date;
@@ -1015,6 +1017,7 @@ export interface ReportTemplateDocument {
   projectId: string;                     // FK → ProjectDocument._id (immutable scope)
   id: string;                            // Human-readable slug (e.g. "default", "failure-analysis")
   name: string;                          // Display name
+  subject?: "run" | "submission";        // Defaults to "run" for legacy templates
   description?: string;
   userPrompt: string;                    // REQUIRED — the instruction sent to the agent
   systemPrompt?: ReportTemplateSystemPrompt;  // OPTIONAL — customize base system prompt

@@ -3,6 +3,7 @@
 
 import {
   useCallback,
+  useEffect,
   useMemo,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -237,25 +238,30 @@ export function SubmissionReports({
   const selectedTypeReport = selectedType?.report;
 
   return (
-    <div className="space-y-4">
-      <Tabs
-        value={selectedType?.key}
-        onValueChange={(key) => {
-          const option = reportTypes.find((candidate) => candidate.key === key);
-          if (option) onSelect(option.report);
-        }}
+    <Tabs
+      value={selectedType?.key}
+      onValueChange={(key) => {
+        const option = reportTypes.find((candidate) => candidate.key === key);
+        if (option) onSelect(option.report);
+      }}
+    >
+      <TabsList
+        aria-label="Report types"
+        className="h-auto justify-start gap-1 rounded-none border-b-0 bg-transparent p-0"
       >
-        <TabsList aria-label="Report types">
-          {reportTypes.map((option) => (
-            <TabsTrigger key={option.key} value={option.key}>
-              {option.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+        {reportTypes.map((option) => (
+          <TabsTrigger
+            key={option.key}
+            value={option.key}
+            className="relative z-0 rounded-b-none rounded-t-md border border-b-0 bg-muted/40 px-4 py-2 text-muted-foreground shadow-none data-[state=active]:z-10 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-none"
+          >
+            {option.label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
 
       {selectedTypeReport ? (
-        <Card>
+        <Card className="-mt-px rounded-tl-none">
           <>
             <CardHeader className="gap-4 border-b">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -342,10 +348,8 @@ export function SubmissionReports({
             </CardContent>
           </>
         </Card>
-      ) : (
-        unavailable
-      )}
-    </div>
+      ) : unavailable}
+    </Tabs>
   );
 }
 
@@ -464,6 +468,20 @@ export function SubmissionDetail() {
     selectedAttemptReportTypes.find(
       (option) => option.key === selectedReportTypeKey,
     )?.report ?? selectedAttemptReportTypes[0]?.report;
+
+  useEffect(() => {
+    if (!requestedReportId || !selectedReport) return;
+    const canonicalReportId = reportId(selectedReport);
+    if (requestedReportId === canonicalReportId) return;
+    const next = new URLSearchParams(searchParams);
+    next.set("report", canonicalReportId);
+    setSearchParams(next, { replace: true });
+  }, [
+    requestedReportId,
+    searchParams,
+    selectedReport,
+    setSearchParams,
+  ]);
 
   const memberRows = useMemo<SubmissionMemberRow[]>(() => {
     if (!submission || !selectedAttempt) return [];
@@ -653,20 +671,20 @@ export function SubmissionDetail() {
   const setTab = (tab: SubmissionTab) => {
     const next = new URLSearchParams(searchParams);
     next.set("tab", tab);
-    setSearchParams(next, { replace: true });
+    setSearchParams(next);
   };
   const selectAttempt = (attemptId: string) => {
     const next = new URLSearchParams(searchParams);
     if (attemptId === submission.submissionRunId) next.delete("attempt");
     else next.set("attempt", attemptId);
     next.delete("report");
-    setSearchParams(next, { replace: true });
+    setSearchParams(next);
   };
   const selectReport = (report: Report) => {
     const next = new URLSearchParams(searchParams);
     next.set("tab", "reports");
     next.set("report", reportId(report));
-    setSearchParams(next, { replace: true });
+    setSearchParams(next);
   };
 
   return (

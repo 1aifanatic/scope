@@ -59,6 +59,18 @@ export const ReportResponseSchema = z
     updatedAt: z.coerce.date().optional(),
     projectId: z.string(),
   })
+  .superRefine((report, context) => {
+    if (
+      !report.requestId &&
+      !(report.submissionId && report.submissionRunId)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Report must identify either a request or an exact submission attempt",
+      });
+    }
+  })
   .openapi("ReportResponse");
 
 export const CreateReportInputSchema = z
@@ -86,6 +98,13 @@ export const TriggerReportsInputSchema = z
     requestId: z.string(),
   })
   .openapi("TriggerReportsInput");
+
+export const TriggerSubmissionReportsInputSchema = z
+  .object({
+    submissionId: z.string(),
+    submissionRunId: z.string(),
+  })
+  .openapi("TriggerSubmissionReportsInput");
 
 export const BulkTriggerReportsInputSchema = z
   .object({

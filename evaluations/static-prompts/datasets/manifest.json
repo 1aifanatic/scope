@@ -36,7 +36,7 @@
       "prompt-feature-extraction": 30,
       "judge-instructions": 30,
       "developer-feedback": 25,
-      "run-report": 31
+      "run-report": 32
     }
   },
   "files": [
@@ -92,8 +92,8 @@
     },
     {
       "path": "v1/readouts.jsonl",
-      "sha256": "a23f372bf8d4c4cb6668a2094facfe284bf8030685e6405b0c76a03a1f19f1e4",
-      "rows": 1,
+      "sha256": "7f5b6f50f66e5f182a265996817a910763722c01e68766c95bc9d2ba9abadda7",
+      "rows": 2,
       "families": [
         "run-report"
       ]

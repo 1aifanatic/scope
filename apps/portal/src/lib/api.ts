@@ -859,6 +859,7 @@ export const api = {
   createReportTemplate: (body: {
     id: string;
     name: string;
+    subject?: "run" | "submission";
     userPrompt: string;
     description?: string;
     systemPrompt?: ReportTemplateSystemPrompt;
@@ -875,6 +876,7 @@ export const api = {
   /** Update an existing report template */
   updateReportTemplate: (id: string, body: {
     name?: string;
+    subject?: "run" | "submission";
     description?: string;
     userPrompt?: string;
     systemPrompt?: ReportTemplateSystemPrompt | null;

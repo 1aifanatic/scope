@@ -14,6 +14,7 @@ import {
   InsightResponseSchema,
   ReportResponseSchema,
   TriggerReportsInputSchema,
+  TriggerSubmissionReportsInputSchema,
   evaluateTrigger,
   withRetry,
 } from "shared";
@@ -563,7 +564,11 @@ apiRoute(ctx.app, ctx.registry, {
 
       // Load all active report templates
       const templates = await ctx.reportTemplateCollection
-        .find({ deletedAt: { $exists: false } })
+        .find({
+          projectId: run.projectId,
+          deletedAt: { $exists: false },
+          $or: [{ subject: "run" }, { subject: { $exists: false } }],
+        })
         .toArray();
 
       // Evaluate each template's trigger against the run
@@ -604,6 +609,89 @@ apiRoute(ctx.app, ctx.registry, {
   },
 });
 
+// POST /api/v1/reports/trigger-submission — trigger submission-scoped templates
+// once the exact current attempt and its generated evidence are complete.
+apiRoute(ctx.app, ctx.registry, {
+  method: "post",
+  path: "/api/v1/reports/trigger-submission",
+  tags: ["Reports"],
+  summary: "Trigger submission reports",
+  body: TriggerSubmissionReportsInputSchema,
+  response: z.object({
+    triggered: z.number(),
+    reports: z.array(ReportResponseSchema),
+  }),
+  successStatus: 201,
+  errorResponses: {
+    404: { description: "Submission attempt not found" },
+    409: { description: "Submission attempt is not ready" },
+  },
+  handler: async (req, res, next) => {
+    try {
+      const { submissionId, submissionRunId } = req.body;
+      const submission = await ctx.submissionCollection.findOne({
+        _id: submissionId,
+        "run._id": submissionRunId,
+      });
+      if (!submission) {
+        res.status(404).json({ error: "Current submission attempt not found" });
+        return;
+      }
+      if (
+        submission.run.handlerStatus?.["pp-readout"]?.status !== "done" ||
+        !submission.run.report?.reportId
+      ) {
+        res.status(409).json({
+          error: "Submission attempt evidence is not complete",
+        });
+        return;
+      }
+
+      const templates = await ctx.reportTemplateCollection
+        .find({
+          projectId: submission.projectId,
+          subject: "submission",
+          deletedAt: { $exists: false },
+        })
+        .toArray();
+      const created: ReportDocument[] = [];
+      for (const template of templates) {
+        if (template.trigger && template.trigger.type !== "always") continue;
+        const existing = await ctx.reportCollection.findOne({
+          submissionId,
+          submissionRunId,
+          templateId: template.id,
+        });
+        if (existing) continue;
+
+        const reportDoc: ReportDocument = {
+          _id: uuidv4(),
+          projectId: submission.projectId,
+          submissionId,
+          submissionRunId,
+          templateId: template.id,
+          status: "pending",
+          createdAt: new Date(),
+        };
+        await ctx.reportCollection.insertOne(reportDoc);
+        await ctx.reportQueueClient.sendMessage(
+          Buffer.from(JSON.stringify({ reportId: reportDoc._id })).toString(
+            "base64",
+          ),
+        );
+        created.push(reportDoc);
+      }
+
+      res.status(201).json({
+        triggered: created.length,
+        reports: created,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+});
+
 // POST /api/v1/reports/bulk-trigger — evaluate report templates for multiple runs at once
 apiRoute(ctx.app, ctx.registry, {
   method: "post",
@@ -631,8 +719,13 @@ apiRoute(ctx.app, ctx.registry, {
       const notFound = requestIds.filter(id => !foundIds.has(id));
 
       // Load all active templates
+      const projectIds = [...new Set(runs.map((run) => run.projectId))];
       const templates = await ctx.reportTemplateCollection
-        .find({ deletedAt: { $exists: false } })
+        .find({
+          projectId: { $in: projectIds },
+          deletedAt: { $exists: false },
+          $or: [{ subject: "run" }, { subject: { $exists: false } }],
+        })
         .toArray();
 
       const created: Array<{ reportId: string; requestId: string; templateId: string }> = [];
@@ -645,6 +738,7 @@ apiRoute(ctx.app, ctx.registry, {
         }
 
         for (const template of templates) {
+          if (template.projectId !== run.projectId) continue;
           const triggerResult = evaluateTrigger(
             template.trigger as any,
             run as any,

@@ -5,7 +5,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   Report,
@@ -224,11 +230,31 @@ function renderDetail(initialEntry = "/submissions/submission-1") {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
-          <Route path="/submissions/:id" element={<SubmissionDetail />} />
+          <Route
+            path="/submissions/:id"
+            element={
+              <>
+                <SubmissionDetail />
+                <LocationProbe />
+              </>
+            }
+          />
           <Route path="/runs/:id" element={<div>Run detail destination</div>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
+  );
+}
+
+function LocationProbe() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <div>
+      <output aria-label="Current URL">{location.pathname}{location.search}</output>
+      <button type="button" onClick={() => navigate(-1)}>History back</button>
+      <button type="button" onClick={() => navigate(1)}>History forward</button>
+    </div>
   );
 }
 
@@ -263,7 +289,9 @@ describe("SubmissionDetail", () => {
   });
 
   it("selects the newest report when one attempt has duplicate report types", async () => {
-    renderDetail();
+    renderDetail(
+      "/submissions/submission-1?tab=reports&attempt=submission-run-2&report=report-current-older-duplicate",
+    );
 
     expect(
       await screen.findByRole("heading", { name: "Current generated report" }),
@@ -271,6 +299,49 @@ describe("SubmissionDetail", () => {
     expect(
       screen.getByRole("link", { name: "Structured JSON" }).getAttribute("href"),
     ).toBe("/api/v1/reports/report-current/structured");
+    expect(screen.getByLabelText("Current URL").textContent).toContain(
+      "report=report-current",
+    );
+  });
+
+  it("deep-links to a report type and preserves browser back and forward navigation", async () => {
+    renderDetail(
+      "/submissions/submission-1?tab=reports&attempt=submission-run-2&report=report-template-current",
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Executive summary report" }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("tab", { name: "Executive Summary" }).getAttribute(
+        "data-state",
+      ),
+    ).toBe("active");
+
+    await userEvent.click(
+      screen.getByRole("tab", { name: "Submission Readout" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Current generated report" }),
+    ).toBeDefined();
+    expect(screen.getByLabelText("Current URL").textContent).toContain(
+      "report=report-current",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "History back" }));
+    expect(
+      await screen.findByRole("heading", { name: "Executive summary report" }),
+    ).toBeDefined();
+    expect(screen.getByLabelText("Current URL").textContent).toContain(
+      "report=report-template-current",
+    );
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "History forward" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Current generated report" }),
+    ).toBeDefined();
   });
 
   it("renders the immutable member vector with the shared table and run navigation", async () => {
