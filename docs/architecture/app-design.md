@@ -546,6 +546,7 @@ The API exposes:
 - `GET /api/v1/submissions/:id/reports`
 - `GET /api/v1/submissions/:id/runs`
 - `GET /api/v1/submissions/:id/runs/:submissionRunId`
+- `GET /api/v1/submissions/:id/runs/:submissionRunId/logs`
 - `POST /api/v1/submissions/:id/retry`
 
 Responses expose readiness, exact blocking request/run pairs, handler progress,
@@ -553,6 +554,14 @@ supersession metadata, resolved request summaries, and the current report
 pointer without queue names or scheduler claim fields. Portal submit flows
 navigate to Submission Detail, and the CLI mirrors list/get/history/retry
 capabilities under `scope submission`.
+
+Submission Detail uses an attempt-scoped view rather than rendering every
+attempt at once. Its attempt picker switches the exact immutable request/run
+vector, dependency projection, processing logs, and report subject together.
+Horizontal Reports, Runs, and Processing tabs keep member runs one click away
+while a long report is open. Reports use a master/detail selector over the
+append-only submission report collection; only the report referenced by the
+embedded current attempt is labeled current.
 
 ## Runs List Query API
 

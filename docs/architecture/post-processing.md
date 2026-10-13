@@ -80,7 +80,11 @@ Gate criteria are always `subject: "iteration"` (the API rejects `"run"` for gat
    - **Runs exactly once per run:** the scheduler dispatches `pp-observations` a single time (it never sets `message.iteration`), so the run-subject branch needs no idempotency guard.
 5. Stamps `run.handlerStatus["pp-observations"] = { status: "done", version: N }` and notifies the scheduler.
 
-Dimension grouping is **derived at read time** by joining each result's `criterionId` → criterion `taxonomyElementId` (the three R&A Readout dimensions; unset = unclassified). It never feeds back to the agent and never affects pass/fail. (#1053 later extends this worker with a richer scorecard artifact.)
+Dimension grouping is **derived at read time** by joining each result's
+`criterionId` → criterion `taxonomyElementId` (the three R&A Readout
+dimensions; unset = unclassified). It never feeds back to the agent and never
+affects pass/fail. Submission report synthesis consumes these classifications
+after every exact-vector dependency is ready.
 
 
 ## Handler Interface
@@ -256,6 +260,13 @@ embedded current attempt's `reportId` is resolved through
 report artifact proxy. Internal handler, queue, and schema identifiers retain
 `readout` because they identify this specific synthesis implementation rather
 than the public resource.
+
+Submission-handler logs are persisted under the exact submission attempt and
+streamed through
+`GET /api/v1/submissions/:id/runs/:submissionRunId/logs`. Queue processors use
+the message's `submissionRunId` as the log attempt key, so superseded attempts
+remain independently replayable and cannot inherit logs from a newer current
+attempt.
 
 To **add or change a handler**, edit its `handler.yaml` (bump `version`, adjust `dependsOn`, etc.) — no code or migration changes are needed for registration.
 
