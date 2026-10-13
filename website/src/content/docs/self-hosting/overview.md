@@ -15,6 +15,10 @@ self-hosting flow has three phases:
 3. Build and enable the two ACP coding-agent workers with
    [`scripts/bootstrap-workers.sh`](https://github.com/microsoft/scope/blob/main/scripts/bootstrap-workers.sh).
 
+To hand the release to GitOps instead, follow
+[Deploy with Flux](/self-hosting/deploy-flux/): declare a Flux
+`HelmRelease` in Git and let the cluster reconcile it.
+
 The Azure template is an open-source quickstart. It is separate from the
 repository's internal development infrastructure.
 
