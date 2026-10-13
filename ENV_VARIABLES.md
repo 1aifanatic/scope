@@ -889,33 +889,32 @@ Timeout for the Copilot SDK session used by the report-generator worker. If the 
 
 Git commit hash embedded in reporter metadata. Automatically set during CI/CD builds. Used to track which version of the report-generator produced a given report.
 
-## Taxonomy Handler Configuration
+## Submission Readout Handler Configuration
 
-### AZURE_STORAGE_QUEUE_TAXONOMY
-**Default:** `pp-taxonomy-queue`
+### AZURE_STORAGE_QUEUE_READOUT
+**Default:** `pp-readout-queue`
 **Type:** string
 
-Azure Storage Queue name for taxonomy-generation jobs. The scheduler enqueues `{ type: "taxonomy", requestId, runId }` messages here after the `pp-atif` dependency completes, and the taxonomy worker polls this queue.
+Azure Storage Queue name for submission readout jobs. The scheduler enqueues
+`{ type: "readout", submissionId, submissionRunId }` only after
+`pp-observations` is done for every exact request/run pair in the current
+submission attempt.
 
-### TAXONOMY_MODEL
+### READOUT_MODEL
 **Default:** `gpt-5.4`
 **Type:** string
 
-The LLM model used by the taxonomy worker (via the Copilot SDK) to generate structured taxonomy JSON from run metadata and ATIF trajectories.
+The Copilot SDK model used by the dedicated `pp-readout` worker to synthesize a
+schema-validated structured submission readout. Markdown is derived from the
+validated structured object.
 
-> **Model choice matters for taxonomy quality.** A/B testing across nine models on a multi-iteration run with a real defect (agent lost context in iteration 2) showed the verdict ranged from 72 to 100 depending on the model. `gpt-4.1` (the previous default) missed action items and, on harder runs, produced the thinnest output; weaker models rubber-stamped a buggy run with a perfect score. `gpt-5.4` was the best value: it correctly caught the critical defect while using the fewest tokens and lowest cost of the models tested. Stronger alternatives (e.g. `claude-opus-4-7`) yield richer evidence at higher token cost; avoid `gpt-5.3-codex` as a default (≈1M tokens / ~7 min per run).
-
-### SCOPE_MT_API_URL
-**Default:** `http://localhost:3001` (local), `http://api:80` (Docker)
-**Type:** URL string
-
-Base URL of the Scope API. The taxonomy worker calls this to fetch the request document and active run state through its Copilot tools.
-
-### SESSION_TIMEOUT_MS
+### READOUT_SESSION_TIMEOUT_MS
 **Default:** `300000` (5 minutes)
 **Type:** integer (milliseconds)
 
-Timeout for the Copilot SDK session used by the taxonomy worker. If the model does not finish generating a valid taxonomy JSON document within this window, the worker marks `run.handlerStatus.pp-taxonomy` as failed.
+Timeout for one readout-generation attempt. Exhausted generation or schema
+validation marks the exact current submission attempt's `pp-readout` handler as
+failed; historical and superseded attempts remain immutable.
 
 ## Scheduler Configuration
 
@@ -964,13 +963,13 @@ TTL for the DAG dispatcher's in-memory cache of handler topology (the `services`
 **Default:** `post-processor-queue`
 **Type:** string
 
-Azure Storage Queue name used by both the scheduler (to enqueue post-processing work) and the post-processor worker (to dequeue). Must match between the two services. The `pp-taxonomy` observation handler shares this queue.
+Azure Storage Queue name used by both the scheduler (to enqueue post-processing work) and the post-processor worker (to dequeue). Must match between the two services. The `pp-observations` handler shares this queue.
 
 ### JUDGE_URL
 **Default:** falls back to `JUDGE_SERVICE_URL`, then `http://localhost:3002`
 **Type:** URL string
 
-Base URL of the judge service used by the `pp-taxonomy` post-process handler to evaluate observation criteria per iteration (snapshot + ATIF trajectory → boolean + evidence). The handler reuses the shared `JudgeClient`, so `JUDGE_CLIENT_TIMEOUT` / `JUDGE_CLIENT_RETRIES` apply. In K8s the post-processor reads `JUDGE_SERVICE_URL` from the `worker-config` ConfigMap (`envFrom`); in docker-compose the `post-processor` service sets `JUDGE_SERVICE_URL: http://judge:80` explicitly (it uses the `common-env` anchor, which — unlike `worker-env` — does not carry it). See issue #1156 and [docs/architecture/post-processing.md](docs/architecture/post-processing.md).
+Base URL of the judge service used by the `pp-observations` post-process handler to evaluate observation criteria per iteration (snapshot + ATIF trajectory → boolean + evidence). The handler reuses the shared `JudgeClient`, so `JUDGE_CLIENT_TIMEOUT` / `JUDGE_CLIENT_RETRIES` apply. In K8s the post-processor reads `JUDGE_SERVICE_URL` from the `worker-config` ConfigMap (`envFrom`); in docker-compose the `post-processor` service sets `JUDGE_SERVICE_URL: http://judge:80` explicitly (it uses the `common-env` anchor, which — unlike `worker-env` — does not carry it). See issue #1156 and [docs/architecture/post-processing.md](docs/architecture/post-processing.md).
 
 ### SCHEDULER_URL
 **Default:** (not set)

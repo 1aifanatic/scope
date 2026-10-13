@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { REPORT_SYSTEM_PROMPT } from "../../../packages/shared/src/index.js";
+import { READOUT_SYSTEM_PROMPT } from "../../../apps/workers/readout/src/prompt.js";
 import {
   buildCriteriaAuthoringRequest,
   buildCriteriaDependencySuggestionRequest,
@@ -66,7 +67,12 @@ describe("static prompt adapter registry", () => {
       },
       {
         family: "run-report",
-        variants: ["default", "append", "override-control"],
+        variants: [
+          "default",
+          "append",
+          "override-control",
+          "submission-readout",
+        ],
       },
     ]);
     expect(listPromptTargets().map(({ family }) => family)).toEqual([
@@ -94,6 +100,11 @@ describe("static prompt adapter registry", () => {
       adapterId: "run-report/override-control",
       family: "run-report",
       variant: "override-control",
+    });
+    expect(targets).toContainEqual({
+      adapterId: "run-report/submission-readout",
+      family: "run-report",
+      variant: "submission-readout",
     });
     expect(JSON.parse(JSON.stringify(targets))).toEqual(targets);
   });
@@ -421,5 +432,33 @@ describe("session prompt adapters", () => {
         "reference_insight",
       ]),
     );
+  });
+
+  it("composes the exact submission-readout prompt without tools", async () => {
+    const evidence = {
+      submissionId: "submission-1",
+      submissionRunId: "submission-run-1",
+      runs: [],
+    };
+    const result = await getPromptTarget(
+      "run-report",
+      "submission-readout",
+    ).run(
+      { evidence },
+      "submission-readout",
+      fakeContext(() => "{}"),
+    );
+
+    expect(result.request.messages).toEqual([
+      { role: "system", content: READOUT_SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: [
+          "Generate the submission readout synthesis for this exact immutable evidence vector.",
+          JSON.stringify(evidence),
+        ].join("\n\n"),
+      },
+    ]);
+    expect(result.request.tools).toEqual([]);
   });
 });

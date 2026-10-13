@@ -528,6 +528,16 @@ discard a message when `claimSubmissionHandler()` returns `null`. Final writes
 use `completeSubmissionHandler()`, whose compare-and-swap rejects stale
 publication after supersession.
 
+`pp-readout` writes a normal append-only `ReportDocument` directly; it does not
+invoke report templates or the report-generator worker. Run reports retain
+`requestId`. Submission reports instead carry `submissionId` and the exact
+`submissionRunId`, with no report-kind discriminator. Their optional structured
+artifact reference identifies `scope.submission-readout@1.0`,
+`application/json`, and the blob URL. The Markdown `content` is rendered from
+that validated object. Each successful regeneration uses a new report id, while
+the current embedded submission run points only to its latest successful
+report.
+
 The API exposes:
 
 - `GET /api/v1/submissions?projectId=...`
