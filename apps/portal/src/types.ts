@@ -187,7 +187,6 @@ export interface RunState {
    * instead. Empty/absent when no run-subject observations were selected.
    */
   observationResults?: CriterionResult[];
-  taxonomyUrl?: string;
 }
 
 export interface Run {
@@ -504,10 +503,18 @@ export interface Reporter {
 export interface Report {
   _id: string;
   id: string;
-  requestId: string;
+  requestId?: string;
+  submissionId?: string;
+  submissionRunId?: string;
   task?: string;
   reporter?: Reporter;
   content?: string;
+  structuredArtifact?: {
+    schemaId: string;
+    schemaVersion: string;
+    contentType: "application/json";
+    url: string;
+  };
   status: ReportStatus;
   error?: string;
   insightReferences?: InsightReference[];

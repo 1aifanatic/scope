@@ -503,16 +503,6 @@ export const api = {
     return `${BASE}/requests/${id}/atif${qs}`;
   },
 
-  /** Get taxonomy JSON URL for a request (latest run) */
-  taxonomyUrl: (id: string): string => {
-    return `${BASE}/requests/${id}/taxonomy`;
-  },
-
-  /** Get taxonomy JSON URL for a specific attempt */
-  runTaxonomyUrl: (requestId: string, runId: string): string => {
-    return `${BASE}/requests/${requestId}/runs/${runId}/taxonomy`;
-  },
-
   /** Download a batch archive of multiple runs as a single .tar.gz */
   batchArchive: async (ids: string[]): Promise<void> => {
     const resp = await apiClient(`${BASE}/requests/archive`, {
@@ -917,6 +907,9 @@ export const api = {
   getReport: (id: string): Promise<Report> => {
     return request(`/reports/${id}`);
   },
+
+  reportStructuredUrl: (id: string): string =>
+    `${BASE}/reports/${encodeURIComponent(id)}/structured`,
 
   /** Get reports for a specific run */
   getRunReports: (requestId: string): Promise<Report[]> => {
