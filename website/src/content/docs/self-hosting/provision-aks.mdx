@@ -3,16 +3,20 @@ title: Provision Azure infrastructure
 description: Create the Azure resources required to run Scope on AKS.
 ---
 
+import { LinkButton } from '@astrojs/starlight/components';
+
 The [`deploy/azure`](https://github.com/microsoft/scope/tree/main/deploy/azure)
 template provisions the infrastructure required by the Scope Helm chart.
 It does not install the application.
 
 ## Deploy through the Azure portal
 
-Use the permanent Deploy to Azure link, which reads the compiled template
-from the `main` branch:
+Use the permanent Azure portal deployment button, which reads the compiled
+template from the `main` branch:
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fmicrosoft%2Fscope%2Fmain%2Fdeploy%2Fazure%2Fazuredeploy.json)
+<LinkButton href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fmicrosoft%2Fscope%2Fmain%2Fdeploy%2Fazure%2Fazuredeploy.json">
+  Deploy playground to Azure
+</LinkButton>
 
 Choose a subscription, resource group, region, and environment name. The
 portal's advanced step exposes node pool, SKU, network, namespace, and
