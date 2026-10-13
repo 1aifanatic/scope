@@ -874,6 +874,8 @@ services:
     build:
       context: .
       dockerfile: apps/workers/readout/Dockerfile
+      args:
+        <<: *npm-build-args
     profiles: [readout, all]
     environment:
       <<: *common-env
@@ -900,6 +902,8 @@ services:
     build:
       context: .
       dockerfile: apps/workers/readout/Dockerfile
+      args:
+        <<: *npm-build-args
     profiles: [readout, all]
     environment:
       <<: *common-env
@@ -934,6 +938,8 @@ services:
     build:
       context: .
       dockerfile: apps/workers/post-processor/Dockerfile
+      args:
+        <<: *npm-build-args
     profiles: [post-processor]
     environment:
       <<: *common-env

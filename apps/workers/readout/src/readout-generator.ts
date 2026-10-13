@@ -93,6 +93,10 @@ export async function generateSubmissionReadout(input: {
     }
     throw new Error("Readout generation ended without a valid result");
   } finally {
-    await client.stop().catch(() => undefined);
+    await client.stop().catch(async (error: unknown) => {
+      await input.log("warn", "Failed to stop Copilot SDK client cleanly", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 }
