@@ -61,6 +61,31 @@ type Story = StoryObj<typeof meta>;
 
 export const Processing: Story = {};
 
+export const Retryable: Story = {
+  args: {
+    submission: {
+      ...submission,
+      readiness: "ready",
+      handlerProgress: {
+        "pp-readout": { status: "failed", version: 1, error: "Model timeout" },
+      },
+    },
+  },
+};
+
+export const Completed: Story = {
+  args: {
+    submission: {
+      ...submission,
+      readiness: "done",
+      report: { reportId: "report-123" },
+      handlerProgress: {
+        "pp-readout": { status: "done", version: 1 },
+      },
+    },
+  },
+};
+
 export const Blocked: Story = {
   args: {
     submission: {

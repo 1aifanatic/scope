@@ -2,10 +2,11 @@
 // Licensed under the MIT License.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, FileText, RotateCcw } from "lucide-react";
+import { ArrowLeft, Download, FileText, RotateCcw } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { SubmissionStatusCard } from "@/components/SubmissionStatusCard";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ShortId } from "@/components/ShortId";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,16 @@ export function SubmissionDetail() {
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Retry failed");
     },
+  });
+  const historyQuery = useQuery({
+    queryKey: ["submission-runs", id],
+    queryFn: () => api.getSubmissionRuns(id!),
+    enabled: Boolean(id),
+  });
+  const readoutQuery = useQuery({
+    queryKey: ["submission-readout", id, submissionQuery.data?.submissionRunId],
+    queryFn: () => api.getSubmissionReadout(id!),
+    enabled: Boolean(id && submissionQuery.data?.report?.reportId),
   });
 
   if (submissionQuery.isLoading) {
@@ -87,6 +98,43 @@ export function SubmissionDetail() {
       </div>
 
       <SubmissionStatusCard submission={submission} />
+
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-base">Current readout</CardTitle>
+          {readoutQuery.data?.structuredArtifact && (
+            <Button variant="outline" size="sm" asChild>
+              <a href={api.reportStructuredUrl(readoutQuery.data._id)} download>
+                <Download className="mr-2 h-4 w-4" />
+                Structured JSON
+              </a>
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent>
+          {readoutQuery.data?.content ? (
+            <div className="prose max-w-none dark:prose-invert">
+              <MarkdownRenderer githubAlerts>
+                {readoutQuery.data.content}
+              </MarkdownRenderer>
+            </div>
+          ) : submission.readiness === "blocked" ? (
+            <p className="text-sm text-destructive">
+              Readout generation is blocked by observation dependencies.
+            </p>
+          ) : submission.readiness === "failed" ? (
+            <p className="text-sm text-destructive">
+              Readout generation failed and can be retried.
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {submission.readiness === "done"
+                ? "The current report is not available."
+                : "Waiting for the exact run vector and observations to be ready."}
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {submission.blocking.length > 0 && (
         <Card className="border-destructive/40">
@@ -155,6 +203,39 @@ export function SubmissionDetail() {
               </Link>
             );
           })}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Submission history</CardTitle>
+        </CardHeader>
+        <CardContent className="divide-y">
+          {(historyQuery.data?.runs ?? []).map((run) => (
+            <div
+              key={run._id}
+              className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"
+            >
+              <div>
+                <div className="font-medium">Attempt {run.attemptNumber}</div>
+                <div className="font-mono text-xs text-muted-foreground">
+                  {run._id} · {run.requests.length} run{run.requests.length === 1 ? "" : "s"}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant={run.supersededAt ? "secondary" : "default"}>
+                  {run.supersededAt ? "superseded" : "current"}
+                </Badge>
+                {run.report?.reportId && (
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to={`/reports/${run.report.reportId}`}>
+                      View readout
+                    </Link>
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
         </CardContent>
       </Card>
     </div>

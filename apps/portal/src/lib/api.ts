@@ -246,6 +246,23 @@ export const api = {
   getSubmission: (id: string): Promise<Submission> =>
     request(`/submissions/${id}`),
 
+  getSubmissionRuns: (id: string): Promise<{
+    runs: Array<{
+      _id: string;
+      attemptNumber: number;
+      requests: Array<{ requestId: string; runId: string }>;
+      createdAt: string;
+      report?: { reportId?: string; url?: string; updatedAt?: string };
+      handlerStatus?: Submission["handlerProgress"];
+      supersededAt?: string;
+      supersededBySubmissionRunId?: string;
+      supersededReason?: "request-vector-changed" | "manual-retry";
+    }>;
+  }> => request(`/submissions/${id}/runs`),
+
+  getSubmissionReadout: (id: string): Promise<Report> =>
+    request(`/submissions/${id}/readout`),
+
   retrySubmission: (
     id: string,
     submissionRunId: string,
@@ -375,16 +392,6 @@ export const api = {
   atifUrl: (id: string, iteration?: number): string => {
     const qs = iteration ? `?iteration=${iteration}` : "";
     return `${BASE}/requests/${id}/atif${qs}`;
-  },
-
-  /** Get taxonomy JSON URL for a request (latest run) */
-  taxonomyUrl: (id: string): string => {
-    return `${BASE}/requests/${id}/taxonomy`;
-  },
-
-  /** Get taxonomy JSON URL for a specific attempt */
-  runTaxonomyUrl: (requestId: string, runId: string): string => {
-    return `${BASE}/requests/${requestId}/runs/${runId}/taxonomy`;
   },
 
   /** Download a batch archive of multiple runs as a single .tar.gz */
@@ -791,6 +798,9 @@ export const api = {
   getReport: (id: string): Promise<Report> => {
     return request(`/reports/${id}`);
   },
+
+  reportStructuredUrl: (id: string): string =>
+    `${BASE}/reports/${encodeURIComponent(id)}/structured`,
 
   /** Get reports for a specific run */
   getRunReports: (requestId: string): Promise<Report[]> => {

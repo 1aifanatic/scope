@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { Command } from "commander";
+import { writeFile } from "node:fs/promises";
 import { configureHelp } from "../utils/helpFormatter.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { DisplayField, OutputFormat } from "../utils/types.js";
@@ -33,6 +34,7 @@ interface SubmissionSummary {
     runId: string;
     reason: string;
   }>;
+  report?: { reportId?: string; url?: string; updatedAt?: string };
 }
 async function responseJson<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
@@ -108,6 +110,9 @@ export function registerSubmissionCommands(program: Command): void {
       console.log(`${label("Attempt:")} ${value(String(doc.attemptNumber))}`);
       console.log(`${label("Readiness:")} ${value(doc.readiness)}`);
       console.log(`${label("Submission run:")} ${value(doc.submissionRunId)}`);
+      if (doc.report?.reportId) {
+        console.log(`${label("Readout report:")} ${value(doc.report.reportId)}`);
+      }
       for (const request of doc.requests) {
         console.log(
           `  ${value(request.requestId)} ${request.status}` +
@@ -167,6 +172,52 @@ export function registerSubmissionCommands(program: Command): void {
       process.exitCode = 1;
     }
   });
+
+  submission
+    .command("readout")
+    .description("Get the current generated submission readout")
+    .argument("<id>", "Submission ID")
+    .option("--structured", "Download structured JSON instead of Markdown")
+    .option("-o, --file <path>", "Write output to a file")
+    .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
+    .action(async (id: string, options) => {
+      try {
+        const response = await apiFetch(
+          options.url,
+          `/submissions/${encodeURIComponent(id)}/readout`,
+        );
+        if (!response.ok) await throwApiError(response);
+        const report = await responseJson<{
+          _id: string;
+          content?: string;
+          structuredArtifact?: { schemaId: string; schemaVersion: string };
+        }>(response);
+        let output: string;
+        if (options.structured) {
+          const structuredResponse = await apiFetch(
+            options.url,
+            `/reports/${encodeURIComponent(report._id)}/structured`,
+          );
+          if (!structuredResponse.ok) await throwApiError(structuredResponse);
+          output = JSON.stringify(
+            await responseJson<unknown>(structuredResponse),
+            null,
+            2,
+          );
+        } else {
+          output = report.content ?? "";
+        }
+        if (options.file) {
+          await writeFile(options.file, `${output}\n`, "utf8");
+          console.log(successText(`Readout written to ${options.file}`));
+        } else {
+          console.log(output);
+        }
+      } catch (error) {
+        console.error(errorText("Error:"), error instanceof Error ? error.message : error);
+        process.exitCode = 1;
+      }
+    });
 
   submission
     .command("retry")

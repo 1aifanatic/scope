@@ -17,6 +17,15 @@ const readinessVariant: Record<
   failed: "destructive",
 };
 
+const readinessLabel: Record<Submission["readiness"], string> = {
+  waiting: "waiting",
+  ready: "retryable",
+  blocked: "blocked",
+  processing: "processing",
+  done: "completed",
+  failed: "failed",
+};
+
 export function SubmissionStatusCard({
   submission,
 }: {
@@ -30,7 +39,7 @@ export function SubmissionStatusCard({
       <CardHeader className="flex-row items-center justify-between space-y-0">
         <CardTitle className="text-base">Processing</CardTitle>
         <Badge variant={readinessVariant[submission.readiness]}>
-          {submission.readiness}
+          {readinessLabel[submission.readiness]}
         </Badge>
       </CardHeader>
       <CardContent className="grid gap-3 text-sm sm:grid-cols-3">
