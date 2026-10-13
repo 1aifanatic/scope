@@ -110,18 +110,9 @@
             "toolTip": "SKU for the Azure Container Registry that hosts the worker image. Basic is sufficient for a single small image and does not consume compute quota.",
             "constraints": {
               "allowedValues": [
-                {
-                  "label": "Basic",
-                  "value": "Basic"
-                },
-                {
-                  "label": "Standard",
-                  "value": "Standard"
-                },
-                {
-                  "label": "Premium",
-                  "value": "Premium"
-                }
+                { "label": "Basic", "value": "Basic" },
+                { "label": "Standard", "value": "Standard" },
+                { "label": "Premium", "value": "Premium" }
               ],
               "required": true
             }
@@ -134,26 +125,11 @@
             "toolTip": "Default consistency level for the Cosmos DB (MongoDB API) account.",
             "constraints": {
               "allowedValues": [
-                {
-                  "label": "Session",
-                  "value": "Session"
-                },
-                {
-                  "label": "Eventual",
-                  "value": "Eventual"
-                },
-                {
-                  "label": "Consistent prefix",
-                  "value": "ConsistentPrefix"
-                },
-                {
-                  "label": "Bounded staleness",
-                  "value": "BoundedStaleness"
-                },
-                {
-                  "label": "Strong",
-                  "value": "Strong"
-                }
+                { "label": "Session", "value": "Session" },
+                { "label": "Eventual", "value": "Eventual" },
+                { "label": "Consistent prefix", "value": "ConsistentPrefix" },
+                { "label": "Bounded staleness", "value": "BoundedStaleness" },
+                { "label": "Strong", "value": "Strong" }
               ],
               "required": true
             }
@@ -166,26 +142,11 @@
             "toolTip": "SKU for Azure Managed Redis (Balanced tier). Capacity is encoded in the SKU name itself. Defaults to the smallest size to minimize regional capacity/quota pressure.",
             "constraints": {
               "allowedValues": [
-                {
-                  "label": "Balanced B0",
-                  "value": "Balanced_B0"
-                },
-                {
-                  "label": "Balanced B1",
-                  "value": "Balanced_B1"
-                },
-                {
-                  "label": "Balanced B3",
-                  "value": "Balanced_B3"
-                },
-                {
-                  "label": "Balanced B5",
-                  "value": "Balanced_B5"
-                },
-                {
-                  "label": "Balanced B10",
-                  "value": "Balanced_B10"
-                }
+                { "label": "Balanced B0", "value": "Balanced_B0" },
+                { "label": "Balanced B1", "value": "Balanced_B1" },
+                { "label": "Balanced B3", "value": "Balanced_B3" },
+                { "label": "Balanced B5", "value": "Balanced_B5" },
+                { "label": "Balanced B10", "value": "Balanced_B10" }
               ],
               "required": true
             }
@@ -198,14 +159,8 @@
             "toolTip": "Data replication for high availability on Azure Managed Redis. Disabled roughly halves the underlying allocation and reduces the odds of regional InsufficientCapacity errors - recommended for a quickstart/dev deployment. Enable for production.",
             "constraints": {
               "allowedValues": [
-                {
-                  "label": "Disabled (recommended for dev/test)",
-                  "value": "Disabled"
-                },
-                {
-                  "label": "Enabled (recommended for production)",
-                  "value": "Enabled"
-                }
+                { "label": "Disabled (recommended for dev/test)", "value": "Disabled" },
+                { "label": "Enabled (recommended for production)", "value": "Enabled" }
               ],
               "required": true
             }
@@ -218,18 +173,9 @@
             "toolTip": "Replication SKU for the storage account (blob + queue).",
             "constraints": {
               "allowedValues": [
-                {
-                  "label": "Locally-redundant storage (LRS)",
-                  "value": "Standard_LRS"
-                },
-                {
-                  "label": "Zone-redundant storage (ZRS)",
-                  "value": "Standard_ZRS"
-                },
-                {
-                  "label": "Geo-redundant storage (GRS)",
-                  "value": "Standard_GRS"
-                }
+                { "label": "Locally-redundant storage (LRS)", "value": "Standard_LRS" },
+                { "label": "Zone-redundant storage (ZRS)", "value": "Standard_ZRS" },
+                { "label": "Geo-redundant storage (GRS)", "value": "Standard_GRS" }
               ],
               "required": true
             }
@@ -332,27 +278,27 @@
           }
         ]
       }
-    ],
-    "outputs": {
-      "environmentName": "[basics('environmentNameControl')]",
-      "location": "[location()]",
-      "kubernetesVersion": "[steps('aks').kubernetesVersionControl]",
-      "aksSystemNodeVmSize": "[steps('aks').systemNodePool.systemNodeVmSizeControl]",
-      "aksSystemNodeCount": "[steps('aks').systemNodePool.systemNodeCountControl]",
-      "aksUserNodeVmSize": "[steps('aks').userNodePool.userNodeVmSizeControl]",
-      "aksUserNodeCount": "[steps('aks').userNodePool.userNodeCountControl]",
-      "acrSkuName": "[steps('dataServices').acrSkuControl]",
-      "cosmosDbConsistencyLevel": "[steps('dataServices').cosmosConsistencyControl]",
-      "redisSkuName": "[steps('dataServices').redisSkuControl]",
-      "redisHighAvailability": "[steps('dataServices').redisHighAvailabilityControl]",
-      "storageSkuName": "[steps('dataServices').storageSkuControl]",
-      "vnetAddressPrefix": "[steps('networking').vnetAddressPrefixControl]",
-      "aksSubnetPrefix": "[steps('networking').aksSubnetPrefixControl]",
-      "privateEndpointSubnetPrefix": "[steps('networking').privateEndpointSubnetPrefixControl]",
-      "workloadIdentityServiceAccountNamespace": "[steps('workloadIdentity').workloadIdentityNamespaceControl]",
-      "workloadIdentityServiceAccountName": "[steps('workloadIdentity').workloadIdentityServiceAccountControl]",
-      "workerWorkloadIdentityServiceAccountNamespace": "[steps('workloadIdentity').workerWorkloadIdentityNamespaceControl]",
-      "workerWorkloadIdentityServiceAccountName": "[steps('workloadIdentity').workerWorkloadIdentityServiceAccountControl]"
-    }
+    ]
+  },
+  "outputs": {
+    "environmentName": "[basics('environmentNameControl')]",
+    "location": "[location()]",
+    "kubernetesVersion": "[steps('aks').kubernetesVersionControl]",
+    "aksSystemNodeVmSize": "[steps('aks').systemNodePool.systemNodeVmSizeControl]",
+    "aksSystemNodeCount": "[steps('aks').systemNodePool.systemNodeCountControl]",
+    "aksUserNodeVmSize": "[steps('aks').userNodePool.userNodeVmSizeControl]",
+    "aksUserNodeCount": "[steps('aks').userNodePool.userNodeCountControl]",
+    "acrSkuName": "[steps('dataServices').acrSkuControl]",
+    "cosmosDbConsistencyLevel": "[steps('dataServices').cosmosConsistencyControl]",
+    "redisSkuName": "[steps('dataServices').redisSkuControl]",
+    "redisHighAvailability": "[steps('dataServices').redisHighAvailabilityControl]",
+    "storageSkuName": "[steps('dataServices').storageSkuControl]",
+    "vnetAddressPrefix": "[steps('networking').vnetAddressPrefixControl]",
+    "aksSubnetPrefix": "[steps('networking').aksSubnetPrefixControl]",
+    "privateEndpointSubnetPrefix": "[steps('networking').privateEndpointSubnetPrefixControl]",
+    "workloadIdentityServiceAccountNamespace": "[steps('workloadIdentity').workloadIdentityNamespaceControl]",
+    "workloadIdentityServiceAccountName": "[steps('workloadIdentity').workloadIdentityServiceAccountControl]",
+    "workerWorkloadIdentityServiceAccountNamespace": "[steps('workloadIdentity').workerWorkloadIdentityNamespaceControl]",
+    "workerWorkloadIdentityServiceAccountName": "[steps('workloadIdentity').workerWorkloadIdentityServiceAccountControl]"
   }
 }

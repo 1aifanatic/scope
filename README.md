@@ -27,7 +27,7 @@ For help or vulnerability reporting, see [Support and security](https://microsof
 
 ## Deploy to Azure
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fmicrosoft%2Fscope%2Fmain%2Fdeploy%2Fazure%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Fmicrosoft%2Fscope%2Fmain%2Fdeploy%2Fazure%2FcreateUiDefinition.json)
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fmicrosoft%2Fscope%2Fmain%2Fdeploy%2Fazure%2Fazuredeploy.json)
 
 Provision the Azure infrastructure for Scope (AKS, Key Vault, Cosmos DB, Redis,
 Storage, ACR) with one click. See [deploy/azure/README.md](./deploy/azure/README.md)
