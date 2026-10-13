@@ -68,7 +68,7 @@ describe("SubmissionStatusCard", () => {
   });
 
   it.each([
-    ["waiting", "Waiting on runs"],
+    ["waiting", "Waiting on dependencies"],
     ["ready", "Ready to generate"],
     ["processing", "Generating report"],
     ["done", "Report ready"],

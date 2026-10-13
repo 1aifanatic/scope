@@ -18,7 +18,7 @@ const readinessVariant: Record<
 };
 
 const readinessLabel: Record<Submission["readiness"], string> = {
-  waiting: "Waiting on runs",
+  waiting: "Waiting on dependencies",
   ready: "Ready to generate",
   blocked: "Generation blocked",
   processing: "Generating report",
