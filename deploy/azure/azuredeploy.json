@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "7215740804873826835"
+      "templateHash": "14826260064967000078"
     }
   },
   "parameters": {
@@ -38003,7 +38003,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "10066990649550132770"
+              "templateHash": "14252661271562117332"
             }
           },
           "parameters": {
@@ -38143,7 +38143,8 @@
                         "osType": "Linux",
                         "vmSize": "[parameters('systemNodeVmSize')]",
                         "count": "[parameters('systemNodeCount')]",
-                        "vnetSubnetResourceId": "[parameters('vnetSubnetResourceId')]"
+                        "vnetSubnetResourceId": "[parameters('vnetSubnetResourceId')]",
+                        "availabilityZones": []
                       }
                     ]
                   },
@@ -38155,7 +38156,8 @@
                         "osType": "Linux",
                         "vmSize": "[parameters('userNodeVmSize')]",
                         "count": "[parameters('userNodeCount')]",
-                        "vnetSubnetResourceId": "[parameters('vnetSubnetResourceId')]"
+                        "vnetSubnetResourceId": "[parameters('vnetSubnetResourceId')]",
+                        "availabilityZones": []
                       }
                     ]
                   }

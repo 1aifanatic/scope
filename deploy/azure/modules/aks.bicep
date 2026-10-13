@@ -81,6 +81,13 @@ module managedCluster 'br/public:avm/res/container-service/managed-cluster:0.14.
     // ESO, Flux, or ASO alongside this.
     enableKeyvaultSecretsProvider: true
     enableSecretRotation: true
+    // availabilityZones is explicitly set to an empty array rather than
+    // relying on the AVM module's default of [1,2,3]: not every region
+    // supports availability zones for AKS node pools (e.g. centralus), and
+    // requesting zones in an unsupported region fails deployment with
+    // AvailabilityZoneNotSupported. This quickstart favors broad regional
+    // compatibility over zone-redundant HA; set this explicitly in regions
+    // that support it for a production environment.
     primaryAgentPoolProfiles: [
       {
         name: 'system'
@@ -89,6 +96,7 @@ module managedCluster 'br/public:avm/res/container-service/managed-cluster:0.14.
         vmSize: systemNodeVmSize
         count: systemNodeCount
         vnetSubnetResourceId: vnetSubnetResourceId
+        availabilityZones: []
       }
     ]
     agentPools: [
@@ -99,6 +107,7 @@ module managedCluster 'br/public:avm/res/container-service/managed-cluster:0.14.
         vmSize: userNodeVmSize
         count: userNodeCount
         vnetSubnetResourceId: vnetSubnetResourceId
+        availabilityZones: []
       }
     ]
   }
