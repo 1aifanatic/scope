@@ -13376,6 +13376,40 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/submissions/{id}/runs/{submissionRunId}/logs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "submissionRunId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-sent event stream of log entries",
+          },
+          "404": {
+            "description": "Submission or submission attempt not found",
+          },
+        },
+        "summary": "Stream logs for a submission attempt (SSE)",
+        "tags": [
+          "Submissions",
+        ],
+      },
+    },
     "/api/v1/task-prompts": {
       "get": {
         "parameters": [
