@@ -215,8 +215,8 @@ describe("readout queue orchestration", () => {
       _id: "request-1",
       projectId: "project-1",
       workerType: "coder-acp-copilot",
-      observations: [],
-      scenario: { task: "Task", criteria: [] },
+      observations: ["observation-criterion"],
+      scenario: { task: "Task", criteria: ["task-criterion"] },
       createdAt: new Date("2026-10-13T12:00:00.000Z"),
       priority: 0,
       run: {
@@ -233,8 +233,17 @@ describe("readout queue orchestration", () => {
       attemptNumber: 1,
       status: "done",
       outcome: "failed",
+      observationResults: [{
+        criterionId: "result-criterion",
+        evaluated: true,
+        passed: false,
+        feedback: "Archived evidence",
+      }],
     } satisfies RunHistoryDocument;
     const historyFindOne = vi.fn().mockResolvedValue(archivedRun);
+    const criteriaFind = vi.fn(() => ({
+      toArray: vi.fn().mockResolvedValue([]),
+    }));
     Object.assign(instance as object, {
       db: {
         collection: vi.fn((name: string) => {
@@ -247,11 +256,7 @@ describe("readout queue orchestration", () => {
           }
           if (name === "runs") return { findOne: historyFindOne };
           if (name === "criteria") {
-            return {
-              find: vi.fn(() => ({
-                toArray: vi.fn().mockResolvedValue([]),
-              })),
-            };
+            return { find: criteriaFind };
           }
           return {};
         }),
@@ -270,5 +275,15 @@ describe("readout queue orchestration", () => {
       projectId: "project-1",
     });
     expect(evidence.runs[0].run?._id).toBe("run-1");
+    expect(criteriaFind).toHaveBeenCalledWith({
+      projectId: "project-1",
+      id: {
+        $in: expect.arrayContaining([
+          "task-criterion",
+          "observation-criterion",
+          "result-criterion",
+        ]),
+      },
+    });
   });
 });

@@ -251,6 +251,7 @@ export class ReadoutQueueProcessor extends BaseQueueProcessor<SubmissionDocument
     const criterionIds = [
       ...new Set(
         exactRuns.flatMap(({ request, run }) => [
+          ...request.scenario.criteria,
           ...(request.observations ?? []),
           ...(run?.observationResults ?? []).map((result) => result.criterionId),
           ...(run?.turns ?? []).flatMap((turn) =>
