@@ -17,13 +17,13 @@
       "value": ""
     },
     "aksSystemNodeVmSize": {
-      "value": "Standard_B2ms"
+      "value": "Standard_D2s_v5"
     },
     "aksSystemNodeCount": {
       "value": 1
     },
     "aksUserNodeVmSize": {
-      "value": "Standard_B2ms"
+      "value": "Standard_D2s_v5"
     },
     "aksUserNodeCount": {
       "value": 1

@@ -33,15 +33,15 @@ param tags object = {}
 @description('Kubernetes version for the AKS cluster. Leave empty to use the AKS default.')
 param kubernetesVersion string = ''
 
-@description('VM size for the AKS System node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production.')
-param aksSystemNodeVmSize string = 'Standard_B2ms'
+@description('VM size for the AKS System node pool. Defaults to a modest, broadly-available general-purpose size; use a larger size (e.g. Standard_D4s_v5) for production.')
+param aksSystemNodeVmSize string = 'Standard_D2s_v5'
 
 @description('Node count for the AKS System node pool. Defaults to 1 for a minimal/dev footprint; use 3+ for production HA.')
 @minValue(1)
 param aksSystemNodeCount int = 1
 
-@description('VM size for the AKS User node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production.')
-param aksUserNodeVmSize string = 'Standard_B2ms'
+@description('VM size for the AKS User node pool. Defaults to a modest, broadly-available general-purpose size; use a larger size (e.g. Standard_D4s_v5) for production.')
+param aksUserNodeVmSize string = 'Standard_D2s_v5'
 
 @description('Node count for the AKS User node pool. Defaults to 1 for a minimal/dev footprint; scale up for production workloads.')
 @minValue(1)

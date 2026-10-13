@@ -19,8 +19,9 @@ below and is also usable standalone via the Azure CLI.
   Overlay with the Cilium network dataplane/policy, an OIDC issuer, Workload Identity,
   and the native **Azure Key Vault Secrets Provider** add-on enabled (this is how
   secrets get into the cluster — via a Helm install, not GitOps/Flux). Defaults to a
-  single `Standard_B2ms` node in each pool (2 vCPU / 8 GB, burstable) to minimize
-  regional vCPU-quota pressure — see
+  single `Standard_D2s_v5` node in each pool (2 vCPU / 8 GB, general-purpose) and no
+  availability-zone placement, to minimize regional vCPU-quota pressure and maximize
+  regional/SKU compatibility — see
   [Sizing and quota](#sizing-and-quota-this-is-a-minimal-dev-footprint) below.
 - **Key Vault**: RBAC-authorized, private endpoint only, with the backend workload
   identity (not the worker identity — see below) granted `Key Vault Secrets Officer`
@@ -90,15 +91,20 @@ The defaults in this template deliberately trade away performance and high
 availability for a smaller footprint that is much more likely to deploy
 successfully on a new, free, or otherwise quota-constrained Azure subscription:
 
-- **AKS node pools** default to one `Standard_B2ms` node each (System + User — 2
-  nodes / 4 vCPUs total) instead of multi-node `Dsv5`-family pools. Many new/free
-  subscriptions start with a **10 vCPU total regional quota**, and separately with
-  very limited (sometimes 0) quota in specific VM families like `Standard DSv5
-  Family vCPUs` — a 5-node `Standard_D4s_v5` footprint (20 vCPUs) can exceed both
-  limits before you even get to the app. `B`-series burstable VMs typically draw
-  from a less-contended quota family. This is a single-node-per-pool, non-HA
-  configuration — raise `aksSystemNodeCount`/`aksUserNodeCount` and switch to a
-  non-burstable VM family (e.g. `Standard_D4s_v5`) for a production environment.
+- **AKS node pools** default to one `Standard_D2s_v5` node each (System + User — 2
+  nodes / 4 vCPUs total) with no availability-zone placement (`availabilityZones: []`
+  on both pools), rather than multi-node, zone-redundant pools. Many new/free
+  subscriptions start with a **10 vCPU total regional quota**, so keeping the total
+  footprint small matters more than which VM family it comes from — a 5-node
+  `Standard_D4s_v5` footprint (20 vCPUs) can exceed that limit before you even get to
+  the app. `Standard_D2s_v5` was chosen over a burstable `B`-series size because SKU
+  availability varies a lot by subscription (e.g. some subscriptions only allow the
+  newer `_v2` B-series, not classic sizes like `Standard_B2ms`) and some regions don't
+  support AKS availability zones at all — `Dsv5` and zone-less placement are broadly
+  available across subscriptions/regions. This is a single-node-per-pool, non-HA
+  configuration — raise `aksSystemNodeCount`/`aksUserNodeCount`, set explicit
+  `availabilityZones` in `modules/aks.bicep`, and consider a larger VM family (e.g.
+  `Standard_D4s_v5`) for a production environment.
 - **Azure Managed Redis** defaults to the smallest SKU (`Balanced_B0`) with
   **high availability disabled** (`redisHighAvailability=Disabled`). Azure Managed
   Redis allocation can fail with `InsufficientCapacity` in a given region

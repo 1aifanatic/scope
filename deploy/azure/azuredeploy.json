@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "14826260064967000078"
+      "templateHash": "16184617517614499056"
     }
   },
   "parameters": {
@@ -41,9 +41,9 @@
     },
     "aksSystemNodeVmSize": {
       "type": "string",
-      "defaultValue": "Standard_B2ms",
+      "defaultValue": "Standard_D2s_v5",
       "metadata": {
-        "description": "VM size for the AKS System node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production."
+        "description": "VM size for the AKS System node pool. Defaults to a modest, broadly-available general-purpose size; use a larger size (e.g. Standard_D4s_v5) for production."
       }
     },
     "aksSystemNodeCount": {
@@ -56,9 +56,9 @@
     },
     "aksUserNodeVmSize": {
       "type": "string",
-      "defaultValue": "Standard_B2ms",
+      "defaultValue": "Standard_D2s_v5",
       "metadata": {
-        "description": "VM size for the AKS User node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production."
+        "description": "VM size for the AKS User node pool. Defaults to a modest, broadly-available general-purpose size; use a larger size (e.g. Standard_D4s_v5) for production."
       }
     },
     "aksUserNodeCount": {
@@ -38003,7 +38003,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "14252661271562117332"
+              "templateHash": "12031242022114676163"
             }
           },
           "parameters": {
@@ -38043,9 +38043,9 @@
             },
             "systemNodeVmSize": {
               "type": "string",
-              "defaultValue": "Standard_B2ms",
+              "defaultValue": "Standard_D2s_v5",
               "metadata": {
-                "description": "VM size for the System node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production."
+                "description": "VM size for the System node pool. Defaults to a modest, broadly-available general-purpose size; use a larger size (e.g. Standard_D4s_v5) for production."
               }
             },
             "systemNodeCount": {
@@ -38057,9 +38057,9 @@
             },
             "userNodeVmSize": {
               "type": "string",
-              "defaultValue": "Standard_B2ms",
+              "defaultValue": "Standard_D2s_v5",
               "metadata": {
-                "description": "VM size for the User node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production."
+                "description": "VM size for the User node pool. Defaults to a modest, broadly-available general-purpose size; use a larger size (e.g. Standard_D4s_v5) for production."
               }
             },
             "userNodeCount": {

@@ -41,12 +41,11 @@
                 "name": "systemNodeVmSizeControl",
                 "type": "Microsoft.Compute.SizeSelector",
                 "label": "System node pool VM size",
-                "toolTip": "VM size used for the AKS System node pool. Defaults favor low-cost, quota-friendly burstable sizes (B-series) since Dsv5/Esv5-family vCPU quota is often very limited on new/free subscriptions; choose a non-burstable size for production.",
+                "toolTip": "VM size used for the AKS System node pool. Defaults to a modest, broadly-available general-purpose size (Dsv5); choose a larger size for production.",
                 "recommendedSizes": [
-                  "Standard_B2ms",
-                  "Standard_B2s",
+                  "Standard_D2s_v5",
                   "Standard_D4s_v5",
-                  "Standard_D2s_v5"
+                  "Standard_B2s_v2"
                 ],
                 "osPlatform": "Linux",
                 "count": 1
@@ -73,12 +72,11 @@
                 "name": "userNodeVmSizeControl",
                 "type": "Microsoft.Compute.SizeSelector",
                 "label": "User node pool VM size",
-                "toolTip": "VM size used for the AKS User node pool. Defaults favor low-cost, quota-friendly burstable sizes (B-series) since Dsv5/Esv5-family vCPU quota is often very limited on new/free subscriptions; choose a non-burstable size for production.",
+                "toolTip": "VM size used for the AKS User node pool. Defaults to a modest, broadly-available general-purpose size (Dsv5); choose a larger size for production.",
                 "recommendedSizes": [
-                  "Standard_B2ms",
-                  "Standard_B2s",
+                  "Standard_D2s_v5",
                   "Standard_D4s_v5",
-                  "Standard_D2s_v5"
+                  "Standard_B2s_v2"
                 ],
                 "osPlatform": "Linux",
                 "count": 1

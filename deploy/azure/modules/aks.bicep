@@ -18,23 +18,24 @@ param kubernetesVersion string = ''
 @description('Resource ID of the subnet to deploy AKS node pools into.')
 param vnetSubnetResourceId string
 
-// Defaults are deliberately small and quota-friendly rather than
-// production-sized: Standard_B-series burstable VMs draw from a vCPU-family
-// quota that is typically much less contended than Dsv5/Esv5 on new/free/dev
-// subscriptions, and 1 node per pool keeps the total footprint to 2 nodes /
-// 4 vCPUs so it fits inside the common 10-vCPU default regional quota many
-// subscriptions start with. This trades away multi-node HA for the System
-// pool - fine for a quickstart/dev deployment, but bump systemNodeCount to 3
-// and consider a non-burstable VM family (e.g. Standard_D-series) for a
-// production environment.
-@description('VM size for the System node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production.')
-param systemNodeVmSize string = 'Standard_B2ms'
+// Defaults are deliberately small rather than production-sized: 1 node per
+// pool keeps the total footprint to 2 nodes / 4 vCPUs so it fits inside the
+// common 10-vCPU default regional quota many subscriptions start with. This
+// trades away multi-node HA for the System pool - fine for a quickstart/dev
+// deployment, but bump systemNodeCount to 3 for a production environment.
+// Standard_D2s_v5 (general-purpose, non-burstable) is used instead of a
+// B-series burstable size because SKU availability for a given vCPU family
+// varies a lot by subscription/region (e.g. some subscriptions only allow
+// the newer "_v2" B-series, not classic B2ms) - Dsv5 is broadly available
+// and matches the 2 vCPU / 8 GiB memory profile this template is sized for.
+@description('VM size for the System node pool. Defaults to a modest, broadly-available general-purpose size; use a larger size (e.g. Standard_D4s_v5) for production.')
+param systemNodeVmSize string = 'Standard_D2s_v5'
 
 @description('Node count for the System node pool. Defaults to 1 for a minimal/dev footprint; use 3+ for production HA.')
 param systemNodeCount int = 1
 
-@description('VM size for the User node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production.')
-param userNodeVmSize string = 'Standard_B2ms'
+@description('VM size for the User node pool. Defaults to a modest, broadly-available general-purpose size; use a larger size (e.g. Standard_D4s_v5) for production.')
+param userNodeVmSize string = 'Standard_D2s_v5'
 
 @description('Node count for the User node pool. Defaults to 1 for a minimal/dev footprint; scale up for production workloads.')
 param userNodeCount int = 1
