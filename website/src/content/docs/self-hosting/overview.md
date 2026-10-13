@@ -1,32 +1,40 @@
 ---
 title: Self-hosting
-description: Provision Scope infrastructure on Azure and deploy the application to AKS with Helm.
+description: Deploy Scope to Kubernetes with Helm, using Azure as one infrastructure option.
 ---
 
-Scope includes a resource-group-scoped Azure deployment and a Helm chart for
-running the platform on Azure Kubernetes Service (AKS). The supported
-self-hosting flow has three phases:
+Scope can be self-hosted on Kubernetes with the
+[`deploy/helm/scope`](https://github.com/microsoft/scope/tree/main/deploy/helm/scope)
+chart. Infrastructure provisioning is separate from application deployment
+and can vary by cloud or Kubernetes provider.
 
-1. Provision Azure infrastructure from
-   [`deploy/azure`](https://github.com/microsoft/scope/tree/main/deploy/azure).
+This documentation currently provides Azure Kubernetes Service (AKS) as one
+infrastructure option. Additional provider-specific provisioning guides can
+be added alongside it in the future. The deployment flow is:
+
+1. Provision a Kubernetes cluster and its required data, secret, identity,
+   and image-registry services. For the Azure option, follow
+   [Provision Azure infrastructure](/self-hosting/provision-aks/).
 2. Install the six core services with the
    [`deploy/helm/scope`](https://github.com/microsoft/scope/tree/main/deploy/helm/scope)
    chart.
-3. Build and enable the two ACP coding-agent workers with
+3. Configure the coding-agent workers. The Azure quickstart builds and
+   enables the two ACP workers with
    [`scripts/bootstrap-workers.sh`](https://github.com/microsoft/scope/blob/main/scripts/bootstrap-workers.sh).
 
 To hand the release to GitOps instead, follow
 [Deploy with Flux](/self-hosting/deploy-flux/): declare a Flux
 `HelmRelease` in Git and let the cluster reconcile it.
 
-The Azure template is an open-source quickstart. It is separate from the
-repository's internal development infrastructure.
+The Azure option uses a resource-group-scoped open-source template from
+[`deploy/azure`](https://github.com/microsoft/scope/tree/main/deploy/azure).
+It is separate from the repository's internal development infrastructure.
 
-## Architecture
+## Azure reference architecture
 
-The infrastructure template creates the network, AKS cluster, managed data
-services, container registry, and workload identities. Helm installs the
-application into the `scope` namespace.
+For the Azure option, the infrastructure template creates the network, AKS
+cluster, managed data services, container registry, and workload identities.
+Helm installs the application into the `scope` namespace.
 
 ```mermaid
 flowchart TD
@@ -77,9 +85,9 @@ are not supported by this deployment.
 The chart also does not install an ingress controller, DNS, TLS,
 cert-manager, autoscaling, or an observability stack.
 
-## Identity boundary
+## Azure identity boundary
 
-The deployment creates two federated user-assigned identities:
+The Azure deployment creates two federated user-assigned identities:
 
 - The backend identity can access Key Vault, Redis, Blob Storage, and queues.
 - The worker identity can access Blob Storage and queues only. It has no Key
@@ -91,11 +99,15 @@ fallback.
 
 ## Prerequisites
 
-- An Azure subscription and permission to create resources and role
-  assignments in a resource group.
-- Azure CLI with Bicep when deploying from the command line.
 - `kubectl`, Helm, `jq`, and access to the repository checkout.
 - Provider credentials for the coding agents and models you enable.
 
-Continue with [Provision Azure infrastructure](/self-hosting/provision-aks/),
-then [Deploy with Helm](/self-hosting/deploy-helm/).
+The Azure infrastructure option also requires:
+
+- An Azure subscription and permission to create resources and role
+  assignments in a resource group.
+- Azure CLI with Bicep when deploying from the command line.
+
+To use the currently documented Azure option, continue with
+[Provision Azure infrastructure](/self-hosting/provision-aks/), then
+[Deploy with Helm](/self-hosting/deploy-helm/).
