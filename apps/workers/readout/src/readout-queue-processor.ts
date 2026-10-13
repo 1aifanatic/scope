@@ -273,6 +273,14 @@ export class ReadoutQueueProcessor extends BaseQueueProcessor<SubmissionDocument
     const runs: ExactRunEvidence[] = [];
     for (const { request, run } of exactRuns) {
       if (!run) continue;
+      const runCriterionIds = new Set([
+        ...request.scenario.criteria,
+        ...(request.observations ?? []),
+        ...(run.observationResults ?? []).map((result) => result.criterionId),
+        ...(run.turns ?? []).flatMap((turn) =>
+          (turn.observationResults ?? []).map((result) => result.criterionId)
+        ),
+      ]);
       const trajectories = await Promise.all(
         (run.turns ?? []).flatMap((turn) =>
           turn.atifUrl
@@ -288,7 +296,7 @@ export class ReadoutQueueProcessor extends BaseQueueProcessor<SubmissionDocument
       runs.push({
         request,
         run,
-        criteria: (request.observations ?? []).flatMap((id) => {
+        criteria: [...runCriterionIds].flatMap((id) => {
           const criterion = criteriaById.get(id);
           return criterion ? [criterion] : [];
         }),

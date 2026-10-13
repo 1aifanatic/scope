@@ -3,7 +3,11 @@
 
 import type { DequeuedMessageItem } from "@azure/storage-queue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SubmissionDocument, VisibilityHeartbeat } from "shared";
+import type {
+  CriteriaDocument,
+  SubmissionDocument,
+  VisibilityHeartbeat,
+} from "shared";
 import type { RequestDocument, RunHistoryDocument } from "shared";
 
 const coordination = vi.hoisted(() => ({
@@ -241,8 +245,28 @@ describe("readout queue orchestration", () => {
       }],
     } satisfies RunHistoryDocument;
     const historyFindOne = vi.fn().mockResolvedValue(archivedRun);
+    const criteria = [
+      {
+        id: "task-criterion",
+        prompt: "Task criterion",
+        projectId: "project-1",
+        createdAt: new Date("2026-10-13T12:00:00.000Z"),
+      },
+      {
+        id: "observation-criterion",
+        prompt: "Configured observation",
+        projectId: "project-1",
+        createdAt: new Date("2026-10-13T12:00:00.000Z"),
+      },
+      {
+        id: "result-criterion",
+        prompt: "Archived observation result",
+        projectId: "project-1",
+        createdAt: new Date("2026-10-13T12:00:00.000Z"),
+      },
+    ] satisfies CriteriaDocument[];
     const criteriaFind = vi.fn(() => ({
-      toArray: vi.fn().mockResolvedValue([]),
+      toArray: vi.fn().mockResolvedValue(criteria),
     }));
     Object.assign(instance as object, {
       db: {
@@ -265,7 +289,10 @@ describe("readout queue orchestration", () => {
 
     const evidence = await (instance as unknown as {
       loadEvidence(value: SubmissionDocument): Promise<{
-        runs: Array<{ run: RunHistoryDocument | RequestDocument["run"] }>;
+        runs: Array<{
+          run: RunHistoryDocument | RequestDocument["run"];
+          criteria: CriteriaDocument[];
+        }>;
       }>;
     }).loadEvidence(submission);
 
@@ -275,6 +302,11 @@ describe("readout queue orchestration", () => {
       projectId: "project-1",
     });
     expect(evidence.runs[0].run?._id).toBe("run-1");
+    expect(evidence.runs[0].criteria.map((criterion) => criterion.id)).toEqual([
+      "task-criterion",
+      "observation-criterion",
+      "result-criterion",
+    ]);
     expect(criteriaFind).toHaveBeenCalledWith({
       projectId: "project-1",
       id: {
