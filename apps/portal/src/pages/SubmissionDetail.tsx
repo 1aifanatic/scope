@@ -57,7 +57,7 @@ import {
 } from "@/components/list-layout";
 import { useLogStream } from "@/hooks/use-log-stream";
 import { api } from "@/lib/api";
-import { cn, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import type {
   Report,
   Submission,
@@ -97,8 +97,44 @@ function deriveAttemptReadiness(
   return "waiting";
 }
 
-function reportId(report: Report): string {
+export function reportId(report: Report): string {
   return report.id || report._id;
+}
+
+export function submissionReportTypeKey(report: Report): string {
+  if (report.templateId) return `template:${report.templateId}`;
+  if (report.reporter?.id) return `reporter:${report.reporter.id}`;
+  return `report:${reportId(report)}`;
+}
+
+export function submissionReportTypeLabel(report: Report): string {
+  if (report.templateId) return submissionHandlerLabel(report.templateId);
+  if (report.reporter?.name.trim()) return report.reporter.name;
+  if (report.reporter?.id) return submissionHandlerLabel(report.reporter.id);
+  return "Report";
+}
+
+export function newestSubmissionReportsByType(
+  reports: Report[],
+): Array<{ key: string; label: string; report: Report }> {
+  const reportsByType = new Map<string, Report>();
+  for (const report of reports) {
+    const key = submissionReportTypeKey(report);
+    const existing = reportsByType.get(key);
+    if (
+      !existing ||
+      report.createdAt > existing.createdAt ||
+      (report.createdAt === existing.createdAt &&
+        reportId(report).localeCompare(reportId(existing)) > 0)
+    ) {
+      reportsByType.set(key, report);
+    }
+  }
+  return Array.from(reportsByType, ([key, report]) => ({
+    key,
+    label: submissionReportTypeLabel(report),
+    report,
+  })).sort((left, right) => left.label.localeCompare(right.label));
 }
 
 function attemptLabel(
@@ -149,11 +185,11 @@ function SubmissionAttemptPicker({
   );
 }
 
-function SubmissionReports({
+export function SubmissionReports({
   reports,
   selectedReport,
   currentReportId,
-  selectedAttempt,
+  isCurrentAttempt,
   readiness,
   onSelect,
   onShowProcessing,
@@ -161,7 +197,7 @@ function SubmissionReports({
   reports: Report[];
   selectedReport?: Report;
   currentReportId?: string;
-  selectedAttempt: SubmissionRunAttempt;
+  isCurrentAttempt: boolean;
   readiness: SubmissionReadiness;
   onSelect: (report: Report) => void;
   onShowProcessing: () => void;
@@ -191,52 +227,34 @@ function SubmissionReports({
     </Card>
   );
   if (reports.length === 0) return unavailable;
+  const reportTypes = newestSubmissionReportsByType(reports);
+  const selectedType =
+    reportTypes.find(
+      (option) =>
+        selectedReport &&
+        submissionReportTypeKey(selectedReport) === option.key,
+    ) ?? reportTypes[0];
+  const selectedTypeReport = selectedType?.report;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[17rem_minmax(0,1fr)]">
-      <Card className="h-fit">
-        <CardHeader>
-          <CardTitle className="text-base">Reports</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {reports.map((report) => {
-            const id = reportId(report);
-            const isCurrent = id === currentReportId;
-            const isSelected = id === (selectedReport && reportId(selectedReport));
-            const isSelectedAttempt =
-              report.submissionRunId === selectedAttempt._id;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => onSelect(report)}
-                className={cn(
-                  "w-full rounded-md border p-3 text-left transition-colors hover:bg-muted/50",
-                  isSelected && "border-primary bg-primary/5",
-                )}
-                aria-pressed={isSelected}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <ShortId id={id} label="report ID" />
-                  {isCurrent ? (
-                    <Badge>Current</Badge>
-                  ) : isSelectedAttempt ? (
-                    <Badge variant="outline">This attempt</Badge>
-                  ) : (
-                    <Badge variant="secondary">Historical</Badge>
-                  )}
-                </div>
-                <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span>{report.status}</span>
-                  <span>{formatDate(report.createdAt)}</span>
-                </div>
-              </button>
-            );
-          })}
-        </CardContent>
-      </Card>
+    <div className="space-y-4">
+      <Tabs
+        value={selectedType?.key}
+        onValueChange={(key) => {
+          const option = reportTypes.find((candidate) => candidate.key === key);
+          if (option) onSelect(option.report);
+        }}
+      >
+        <TabsList aria-label="Report types">
+          {reportTypes.map((option) => (
+            <TabsTrigger key={option.key} value={option.key}>
+              {option.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
-      {selectedReport ? (
+      {selectedTypeReport ? (
         <Card>
           <>
             <CardHeader className="gap-4 border-b">
@@ -246,47 +264,56 @@ function SubmissionReports({
                     <CardTitle className="text-base">Generated report</CardTitle>
                     <Badge
                       variant={
-                        reportId(selectedReport) === currentReportId
+                        reportId(selectedTypeReport) === currentReportId
                           ? "default"
                           : "secondary"
                       }
                     >
-                      {reportId(selectedReport) === currentReportId
+                      {reportId(selectedTypeReport) === currentReportId
                         ? "Current"
-                        : "Historical"}
+                        : isCurrentAttempt
+                          ? "This attempt"
+                          : "Historical"}
                     </Badge>
-                    <Badge variant="outline">{selectedReport.status}</Badge>
+                    <Badge variant="outline">{selectedTypeReport.status}</Badge>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                     <span>
-                      Report <ShortId id={reportId(selectedReport)} label="report ID" />
+                      Report{" "}
+                      <ShortId
+                        id={reportId(selectedTypeReport)}
+                        label="report ID"
+                      />
                     </span>
-                    {selectedReport.submissionRunId && (
+                    {selectedTypeReport.submissionRunId && (
                       <span>
                         Attempt{" "}
                         <ShortId
-                          id={selectedReport.submissionRunId}
+                          id={selectedTypeReport.submissionRunId}
                           label="submission run ID"
                         />
                       </span>
                     )}
-                    <span>Created {formatDate(selectedReport.createdAt)}</span>
-                    {selectedReport.updatedAt && (
-                      <span>Updated {formatDate(selectedReport.updatedAt)}</span>
+                    <span>Created {formatDate(selectedTypeReport.createdAt)}</span>
+                    {selectedTypeReport.updatedAt && (
+                      <span>Updated {formatDate(selectedTypeReport.updatedAt)}</span>
                     )}
                   </div>
-                  {selectedReport.reporter && (
+                  {selectedTypeReport.reporter && (
                     <p className="mt-2 text-xs text-muted-foreground">
-                      {selectedReport.reporter.name} · {selectedReport.reporter.model} ·{" "}
-                      {selectedReport.reporter.agentId}@
-                      {selectedReport.reporter.agentVersion}
+                      {selectedTypeReport.reporter.name} ·{" "}
+                      {selectedTypeReport.reporter.model} ·{" "}
+                      {selectedTypeReport.reporter.agentId}@
+                      {selectedTypeReport.reporter.agentVersion}
                     </p>
                   )}
                 </div>
-                {selectedReport.structuredArtifact && (
+                {selectedTypeReport.structuredArtifact && (
                   <Button variant="outline" size="sm" asChild>
                     <a
-                      href={api.reportStructuredUrl(reportId(selectedReport))}
+                      href={api.reportStructuredUrl(
+                        reportId(selectedTypeReport),
+                      )}
                       download
                     >
                       <Download className="mr-2 h-4 w-4" />
@@ -297,14 +324,16 @@ function SubmissionReports({
               </div>
             </CardHeader>
             <CardContent className="py-6">
-              {selectedReport.content ? (
+              {selectedTypeReport.content ? (
                 <div className="prose max-w-none dark:prose-invert">
                   <MarkdownRenderer githubAlerts>
-                    {selectedReport.content}
+                    {selectedTypeReport.content}
                   </MarkdownRenderer>
                 </div>
-              ) : selectedReport.error ? (
-                <p className="text-sm text-destructive">{selectedReport.error}</p>
+              ) : selectedTypeReport.error ? (
+                <p className="text-sm text-destructive">
+                  {selectedTypeReport.error}
+                </p>
               ) : (
                 <p className="text-sm text-muted-foreground">
                   This report does not have rendered Markdown content.
@@ -393,13 +422,26 @@ export function SubmissionDetail() {
         : deriveAttemptReadiness(selectedAttempt)
       : "waiting";
   const reports = reportsQuery.data ?? [];
+  const selectedAttemptReports = useMemo(
+    () =>
+      selectedAttempt
+        ? reports.filter(
+            (report) => report.submissionRunId === selectedAttempt._id,
+          )
+        : [],
+    [reports, selectedAttempt],
+  );
+  const selectedAttemptReportTypes = useMemo(
+    () => newestSubmissionReportsByType(selectedAttemptReports),
+    [selectedAttemptReports],
+  );
   const requestedTab = searchParams.get("tab");
   const activeTab: SubmissionTab =
     requestedTab === "reports" ||
     requestedTab === "runs" ||
     requestedTab === "processing"
       ? requestedTab
-      : submission?.report?.reportId || reports.length > 0
+      : selectedAttemptReportTypes.length > 0 || readiness !== "waiting"
         ? "reports"
         : "runs";
 
@@ -407,10 +449,21 @@ export function SubmissionDetail() {
   const defaultReportId =
     selectedAttempt?.report?.reportId ??
     (isCurrentAttempt ? submission?.report?.reportId : undefined);
+  const requestedReport = selectedAttemptReports.find(
+    (report) => reportId(report) === requestedReportId,
+  );
+  const defaultReport = selectedAttemptReports.find(
+    (report) => reportId(report) === defaultReportId,
+  );
+  const selectedReportTypeKey = requestedReport
+    ? submissionReportTypeKey(requestedReport)
+    : defaultReport
+      ? submissionReportTypeKey(defaultReport)
+      : undefined;
   const selectedReport =
-    reports.find((report) => reportId(report) === requestedReportId) ??
-    reports.find((report) => reportId(report) === defaultReportId) ??
-    reports.find((report) => report.submissionRunId === selectedAttempt?._id);
+    selectedAttemptReportTypes.find(
+      (option) => option.key === selectedReportTypeKey,
+    )?.report ?? selectedAttemptReportTypes[0]?.report;
 
   const memberRows = useMemo<SubmissionMemberRow[]>(() => {
     if (!submission || !selectedAttempt) return [];
@@ -613,14 +666,6 @@ export function SubmissionDetail() {
     const next = new URLSearchParams(searchParams);
     next.set("tab", "reports");
     next.set("report", reportId(report));
-    if (
-      report.submissionRunId &&
-      report.submissionRunId !== submission.submissionRunId
-    ) {
-      next.set("attempt", report.submissionRunId);
-    } else {
-      next.delete("attempt");
-    }
     setSearchParams(next, { replace: true });
   };
 
@@ -688,7 +733,10 @@ export function SubmissionDetail() {
         <TabsList>
           <TabsTrigger value="reports" className="gap-1.5">
             <FileText className="h-4 w-4" />
-            Reports {reports.length > 0 ? `(${reports.length})` : ""}
+            Reports{" "}
+            {selectedAttemptReportTypes.length > 0
+              ? `(${selectedAttemptReportTypes.length})`
+              : ""}
           </TabsTrigger>
           <TabsTrigger value="runs" className="gap-1.5">
             <ListChecks className="h-4 w-4" />
@@ -702,10 +750,12 @@ export function SubmissionDetail() {
 
         <TabsContent value="reports" className="mt-4">
           <SubmissionReports
-            reports={reports}
+            reports={selectedAttemptReports}
             selectedReport={selectedReport}
-            currentReportId={submission.report?.reportId}
-            selectedAttempt={selectedAttempt}
+            currentReportId={
+              isCurrentAttempt ? submission.report?.reportId : undefined
+            }
+            isCurrentAttempt={isCurrentAttempt}
             readiness={readiness}
             onSelect={selectReport}
             onShowProcessing={() => setTab("processing")}

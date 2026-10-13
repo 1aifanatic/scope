@@ -135,12 +135,47 @@ const reports: Report[] = [
     createdAt: "2026-01-02T00:00:00.000Z",
   },
   {
+    _id: "report-current-older-duplicate",
+    id: "report-current-older-duplicate",
+    submissionId: "submission-1",
+    submissionRunId: "submission-run-2",
+    status: "completed",
+    content: "# Stale duplicate report",
+    reporter: {
+      id: "pp-readout",
+      name: "Submission Readout",
+      gitHash: "abc",
+      model: "gpt-5.4",
+      agentId: "copilot",
+      agentVersion: "1.0.0",
+    },
+    createdAt: "2026-01-01T12:00:00.000Z",
+  },
+  {
+    _id: "report-template-current",
+    id: "report-template-current",
+    submissionId: "submission-1",
+    submissionRunId: "submission-run-2",
+    templateId: "executive-summary",
+    status: "completed",
+    content: "# Executive summary report",
+    createdAt: "2026-01-02T01:00:00.000Z",
+  },
+  {
     _id: "report-historical",
     id: "report-historical",
     submissionId: "submission-1",
     submissionRunId: "submission-run-1",
     status: "completed",
     content: "# Historical generated report",
+    reporter: {
+      id: "pp-readout",
+      name: "Submission Readout",
+      gitHash: "abc",
+      model: "gpt-5.4",
+      agentId: "copilot",
+      agentVersion: "1.0.0",
+    },
     createdAt: "2026-01-01T00:00:00.000Z",
   },
 ];
@@ -198,7 +233,7 @@ function renderDetail(initialEntry = "/submissions/submission-1") {
 }
 
 describe("SubmissionDetail", () => {
-  it("defaults to Reports and supports multiple current and historical reports", async () => {
+  it("defaults to Reports and shows attempt-scoped report types", async () => {
     renderDetail();
 
     expect(
@@ -207,29 +242,35 @@ describe("SubmissionDetail", () => {
     expect(
       screen.getByRole("tab", { name: "Reports (2)" }).getAttribute("data-state"),
     ).toBe("active");
-    expect(screen.getAllByText("Current").length).toBeGreaterThan(0);
-    expect(screen.getByText("Historical")).toBeDefined();
+    expect(
+      screen.getByRole("tab", { name: "Submission Readout" }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("tab", { name: "Executive Summary" }),
+    ).toBeDefined();
+    expect(screen.getByText("Current")).toBeDefined();
     expect(
       screen.getByRole("link", { name: "Structured JSON" }).getAttribute("href"),
     ).toBe("/api/v1/reports/report-current/structured");
 
-    const historicalReportButton = screen
-      .getAllByRole("button")
-      .find(
-        (button) =>
-          button.textContent?.includes("Historical") &&
-          button.textContent?.includes("completed"),
-      );
-    expect(historicalReportButton).toBeDefined();
-    await userEvent.click(historicalReportButton!);
+    await userEvent.click(
+      screen.getByRole("tab", { name: "Executive Summary" }),
+    );
     expect(
-      await screen.findByRole("heading", {
-        name: "Historical generated report",
-      }),
+      await screen.findByRole("heading", { name: "Executive summary report" }),
+    ).toBeDefined();
+    expect(screen.getByText("This attempt")).toBeDefined();
+  });
+
+  it("selects the newest report when one attempt has duplicate report types", async () => {
+    renderDetail();
+
+    expect(
+      await screen.findByRole("heading", { name: "Current generated report" }),
     ).toBeDefined();
     expect(
-      screen.getByText(/Viewing attempt 1 \(historical and read-only\)/),
-    ).toBeDefined();
+      screen.getByRole("link", { name: "Structured JSON" }).getAttribute("href"),
+    ).toBe("/api/v1/reports/report-current/structured");
   });
 
   it("renders the immutable member vector with the shared table and run navigation", async () => {
@@ -282,6 +323,45 @@ describe("SubmissionDetail", () => {
     ).toBeDefined();
   });
 
+  it("scopes report types to the selected historical attempt", async () => {
+    renderDetail();
+    await screen.findByRole("heading", { name: "Current generated report" });
+
+    const picker = screen.getByRole("combobox", { name: "Submission attempt" });
+    await userEvent.click(picker);
+    const listbox = await screen.findByRole("listbox");
+    await userEvent.click(within(listbox).getByText(/Attempt 1 · Superseded/));
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Historical generated report",
+      }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("tab", { name: "Reports (1)" }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("tab", { name: "Submission Readout" }),
+    ).toBeDefined();
+    expect(screen.getByText("Historical")).toBeDefined();
+  });
+
+  it("renders one report-type tab for a single template-less report", async () => {
+    vi.mocked(api.getSubmissionReports).mockResolvedValueOnce([reports[0]!]);
+
+    renderDetail();
+
+    expect(
+      await screen.findByRole("heading", { name: "Current generated report" }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("tab", { name: "Reports (1)" }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("tab", { name: "Submission Readout" }),
+    ).toBeDefined();
+  });
+
   it("shows current attempt progress when only historical reports exist", async () => {
     vi.mocked(api.getSubmission).mockResolvedValueOnce({
       ...submission,
@@ -303,19 +383,16 @@ describe("SubmissionDetail", () => {
         historicalAttempt,
       ],
     });
-    vi.mocked(api.getSubmissionReports).mockResolvedValueOnce([
-      reports[1]!,
-    ]);
+    vi.mocked(api.getSubmissionReports).mockResolvedValueOnce([reports[3]!]);
 
     renderDetail();
 
     expect(
-      await screen.findByRole("tab", { name: "Reports (1)" }),
+      await screen.findByRole("tab", { name: "Reports" }),
     ).toBeDefined();
     expect(screen.getByText("Report not available")).toBeDefined();
     expect(
       screen.getByText("A report is being generated for this attempt."),
     ).toBeDefined();
-    expect(screen.getByText("Historical")).toBeDefined();
   });
 });
