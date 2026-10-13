@@ -166,6 +166,18 @@ describe("named environment commands and isolated storage", () => {
     // Name validation still applies with --force.
     expect(() => store.add("../outside", "https://example.com", undefined, true)).toThrow();
   });
+
+  it("uses --force to repair a malformed profile without parsing other profiles", async () => {
+    const environmentsDir = join(store.directory, "environments");
+    writeFileSync(join(environmentsDir, "broken.env"), "SCOPE_TOKEN=missing-url\n");
+    writeFileSync(join(environmentsDir, "unrelated.env"), "SCOPE_API_URL=not-a-url\n");
+
+    await run("env", "add", "broken", "--url", "https://repaired.example", "--force");
+    expect(store.read("broken")).toEqual({ name: "broken", url: "https://repaired.example" });
+
+    await run("env", "add", "new-profile", "--url", "https://new.example", "--force");
+    expect(store.read("new-profile")).toEqual({ name: "new-profile", url: "https://new.example" });
+  });
 });
 
 describe("integrated environment resolution and precedence", () => {
@@ -180,6 +192,38 @@ describe("integrated environment resolution and precedence", () => {
     expect(store.active()).toBe("local");
     expect(currentEnvironment()).toBeUndefined();
     expect(process.env.SCOPE_API_URL).toBe("https://legacy.example");
+  });
+
+  it("rejects an explicitly empty --env instead of falling back to active or legacy configuration", async () => {
+    store.use("local");
+    await expect(run("--env", "", "run", "list", "-o", "json")).rejects.toThrow(
+      "Environment names must be",
+    );
+    expect(requests).toHaveLength(0);
+  });
+
+  it("uses the named URL for both run upload commands in dry-run and real modes", async () => {
+    vi.stubEnv("SCOPE_API_URL", "");
+    const archive = join(isolated.home, "run.tar.gz");
+    writeFileSync(archive, "archive");
+    reply = (request) => new URL(request.url).pathname.endsWith("/upload-batch")
+      ? json({ imported: [], failed: [] })
+      : json({ id: "run-id", status: "done", iterations: 1 });
+
+    await run("--env", "local", "run", "upload", archive, "--dry-run");
+    await run("--env", "local", "run", "upload-batch", archive, "--dry-run");
+    expect(requests).toHaveLength(0);
+    const dryRunOutput = vi.mocked(console.log).mock.calls.flat().join("\n");
+    expect(dryRunOutput).toContain("http://127.0.0.1:43127/api/v1/runs/upload");
+    expect(dryRunOutput).toContain("http://127.0.0.1:43127/api/v1/runs/upload-batch");
+
+    await run("--env", "local", "run", "upload", archive);
+    await run("--env", "local", "run", "upload-batch", archive);
+    expect(requests.map((request) => request.url)).toEqual([
+      "http://127.0.0.1:43127/api/v1/runs/upload?projectId=local-project",
+      "http://127.0.0.1:43127/api/v1/runs/upload-batch?projectId=local-project",
+    ]);
+    expect(requests.every((request) => request.token === `Bearer ${store.read("local").token}`)).toBe(true);
   });
 
   describe("secret commands with named environments", () => {
@@ -359,16 +403,108 @@ describe("integrated environment resolution and precedence", () => {
   it("routes codebase list and scoped slug resolution through the same named transport", async () => {
     store.use("local");
     await run("codebase", "list", "-o", "json");
-    reply = (request) => request.url.includes("/revisions")
-      ? json([])
-      : json({ _id: "codebase-id", slug: "slug", name: "Codebase" });
+    reply = (request) => {
+      const url = new URL(request.url);
+      if (url.pathname.endsWith("/codebases/slug")) return json({ error: "not found" }, 404);
+      if (url.pathname.endsWith("/codebases")) {
+        return json([{ _id: "codebase-id", slug: "slug", name: "Codebase" }]);
+      }
+      return json([]);
+    };
     await run("codebase", "revisions", "slug", "-o", "json");
-    expect(requests).toHaveLength(3);
+    expect(requests).toHaveLength(4);
     for (const request of requests) {
       expect(new URL(request.url).origin).toBe("http://127.0.0.1:43127");
-      expect(new URL(request.url).searchParams.get("projectId")).toBe("local-project");
       expect(request.token).toBe("Bearer local-token");
     }
+    expect(requests.map((request) => new URL(request.url).searchParams.get("projectId"))).toEqual([
+      "local-project",
+      null,
+      "local-project",
+      null,
+    ]);
+  });
+
+  it("keeps every direct codebase-by-ID operation project-free", async () => {
+    const gitId = "11111111-1111-4111-8111-111111111111";
+    const archiveId = "22222222-2222-4222-8222-222222222222";
+    const archive = join(isolated.home, "codebase.tar.gz");
+    writeFileSync(archive, "archive");
+    store.add("project-free", "https://codebases.example", "codebase-token");
+    vi.stubEnv("SCOPE_PROJECT", "");
+    setSelectedProjectId(undefined);
+
+    reply = (request) => {
+      const url = new URL(request.url);
+      if (request.method === "DELETE") return new Response(null, { status: 204 });
+      if (url.pathname.endsWith(`/${gitId}/revisions`)) {
+        return request.method === "POST"
+          ? json({
+              _id: "git-revision",
+              ref: "main",
+              sourceType: "git",
+              resolvedAt: "2026-01-01",
+              createdAt: "2026-01-01",
+            })
+          : json([]);
+      }
+      if (url.pathname.endsWith(`/${archiveId}/upload`)) {
+        return json({
+          _id: "archive-revision",
+          ref: "upload",
+          sourceType: "archive",
+          resolvedAt: "2026-01-01",
+          createdAt: "2026-01-01",
+        });
+      }
+      if (url.pathname.endsWith(`/${gitId}`)) {
+        return json({
+          _id: gitId,
+          slug: "git-codebase",
+          name: "Git",
+          sourceType: "git",
+          createdAt: "2026-01-01",
+        });
+      }
+      if (url.pathname.endsWith(`/${archiveId}`)) {
+        return json({
+          _id: archiveId,
+          slug: "archive-codebase",
+          name: "Archive",
+          sourceType: "archive",
+          createdAt: "2026-01-01",
+        });
+      }
+      return json({ error: "not found" }, 404);
+    };
+
+    await run("--env", "project-free", "codebase", "revisions", gitId, "-o", "json");
+    await run("--env", "project-free", "codebase", "resolve", gitId, "-o", "json");
+    await run("--env", "project-free", "codebase", "upload", archiveId, archive, "-o", "json");
+    await run("--env", "project-free", "codebase", "delete", archiveId);
+
+    expect(requests).toHaveLength(8);
+    expect(requests.every((request) => new URL(request.url).origin === "https://codebases.example")).toBe(true);
+    expect(requests.every((request) => !new URL(request.url).searchParams.has("projectId"))).toBe(true);
+    expect(requests.every(
+      (request) => request.token === `Bearer ${store.read("project-free").token}`,
+    )).toBe(true);
+  });
+
+  it("requires a project only when codebase resolution falls back from ID to slug", async () => {
+    store.add("project-free", "https://codebases.example");
+    vi.stubEnv("SCOPE_PROJECT", "");
+    setSelectedProjectId(undefined);
+    reply = () => json({ error: "not found" }, 404);
+
+    await expect(
+      run("--env", "project-free", "codebase", "revisions", "missing-slug", "-o", "json"),
+    ).rejects.toThrow("Unexpected process.exit(1)");
+    expect(vi.mocked(console.error).mock.calls.flat().join(" ")).toContain(
+      "No project selected in environment",
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe("https://codebases.example/api/v1/codebases/missing-slug");
   });
 });
 

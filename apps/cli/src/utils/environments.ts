@@ -175,14 +175,16 @@ export class EnvironmentStore {
    * `env add --force`, which replaces the whole entry. Without `force` this
    * refuses rather than silently discarding a saved token or project.
    */
-  add(name: string, url: string, token?: string, force = false): void {
-    if (!force && existsSync(this.file(name))) {
+  add(name: string, url: string, token?: string, force = false): boolean {
+    const exists = existsSync(this.file(name));
+    if (!force && exists) {
       throw new Error(
         `Environment "${name}" already exists. Use \`scope --env ${name} env set\` to edit it, ` +
         `or \`scope env add ${name} --force\` to replace it.`,
       );
     }
     this.save({ name, url: validateUrl(url), token });
+    return exists;
   }
 
   /** Persist an environment as dotenv entries after normalizing URL and optional values. */

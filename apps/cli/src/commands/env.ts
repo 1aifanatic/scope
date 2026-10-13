@@ -45,8 +45,7 @@ export function registerEnvCommands(program: Command): void {
     .option("--force", "Replace an existing environment of the same name")
     .action((name: string, options: { url: string; token?: string; force?: boolean }) => {
       const store = new EnvironmentStore();
-      const replaced = options.force && store.list().some((entry) => entry.name === name);
-      store.add(name, options.url, options.token, options.force ?? false);
+      const replaced = store.add(name, options.url, options.token, options.force ?? false);
       console.log(replaced
         ? `Environment "${name}" replaced. Select it with \`scope env use ${name}\`.`
         : `Environment "${name}" added. Select it with \`scope env use ${name}\`.`);

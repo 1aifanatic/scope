@@ -142,6 +142,8 @@ client does not discover a local server or infer a data-set identity.
 command, including REST, SSE, polling, retries, and downloads. A named
 connection without a token or project does not inherit ambient values or the
 legacy project selection. Explicit `--project` still overrides its project.
+An explicitly supplied empty `--env` value is invalid and never falls back to
+the active environment or legacy configuration.
 For MCP create/update, `--api-url/-u` selects Scope; resource `--url` and the
 MCP process's `--env` remain independent.
 

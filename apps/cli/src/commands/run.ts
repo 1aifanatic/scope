@@ -17,6 +17,7 @@ import { runGetAction } from "../run-get-action.js";
 import { normalizeUrl, printFollowUpCommands, withOutputOption, withProjectOption, getDefaultApiUrl } from "../utils/shared.js";
 import { requireProjectId } from "../utils/config.js";
 import { apiFetch, apiEventSource, getApiBasePath } from "../utils/api-client.js";
+import { resolveApiUrl } from "../utils/connection.js";
 import { parseGatesOption } from "../utils/gates.js";
 import { buildResourceBindingSpecs, collectRepeatable } from "../utils/resources.js";
 
@@ -935,7 +936,7 @@ run
 
       if (dryRun) {
         console.log(warnBanner("Dry run - no data will be uploaded"));
-        console.log(`Would upload to: ${normalizeUrl(url)}${getApiBasePath()}/runs/upload`);
+        console.log(`Would upload to: ${normalizeUrl(resolveApiUrl(url))}${getApiBasePath()}/runs/upload`);
         
         // Cleanup temp dir if created
         if (tempDir) {
@@ -945,7 +946,7 @@ run
       }
 
       // Upload archive
-      console.log(`${label('Uploading to')} ${value(normalizeUrl(url))}...`);
+      console.log(`${label('Uploading to')} ${value(normalizeUrl(resolveApiUrl(url)))}...`);
       
       const formData = new FormData();
       const archiveBuffer = readFileSync(archivePath);
@@ -1019,11 +1020,11 @@ run
 
       if (dryRun) {
         console.log(warnBanner("Dry run - no data will be uploaded"));
-        console.log(`Would upload to: ${normalizeUrl(url)}${getApiBasePath()}/runs/upload-batch`);
+        console.log(`Would upload to: ${normalizeUrl(resolveApiUrl(url))}${getApiBasePath()}/runs/upload-batch`);
         return;
       }
 
-      console.log(`${label('Uploading to')} ${value(normalizeUrl(url))}...`);
+      console.log(`${label('Uploading to')} ${value(normalizeUrl(resolveApiUrl(url)))}...`);
 
       const formData = new FormData();
       const archiveBuffer = readFileSync(resolvedPath);

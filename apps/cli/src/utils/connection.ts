@@ -52,7 +52,7 @@ export function resolveCommandEnvironment(
   );
   if (apiOption && command.getOptionValueSource(apiOption.attributeName()) === "cli") return undefined;
   const name = selectedEnvironmentName(command, store);
-  return name ? store.read(name) : undefined;
+  return name !== undefined ? store.read(name) : undefined;
 }
 
 /**
