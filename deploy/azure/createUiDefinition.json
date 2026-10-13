@@ -41,8 +41,10 @@
                 "name": "systemNodeVmSizeControl",
                 "type": "Microsoft.Compute.SizeSelector",
                 "label": "System node pool VM size",
-                "toolTip": "VM size used for the AKS System node pool.",
+                "toolTip": "VM size used for the AKS System node pool. Defaults favor low-cost, quota-friendly burstable sizes (B-series) since Dsv5/Esv5-family vCPU quota is often very limited on new/free subscriptions; choose a non-burstable size for production.",
                 "recommendedSizes": [
+                  "Standard_B2ms",
+                  "Standard_B2s",
                   "Standard_D4s_v5",
                   "Standard_D2s_v5"
                 ],
@@ -53,11 +55,11 @@
                 "name": "systemNodeCountControl",
                 "type": "Microsoft.Common.Slider",
                 "label": "System node pool count",
-                "defaultValue": 3,
+                "defaultValue": 1,
                 "min": 1,
                 "max": 10,
                 "step": 1,
-                "toolTip": "Number of nodes in the System node pool.",
+                "toolTip": "Number of nodes in the System node pool. Defaults to 1 for a minimal/dev footprint; use 3+ for production HA.",
                 "showStepMarkers": false
               }
             ]
@@ -71,8 +73,10 @@
                 "name": "userNodeVmSizeControl",
                 "type": "Microsoft.Compute.SizeSelector",
                 "label": "User node pool VM size",
-                "toolTip": "VM size used for the AKS User node pool.",
+                "toolTip": "VM size used for the AKS User node pool. Defaults favor low-cost, quota-friendly burstable sizes (B-series) since Dsv5/Esv5-family vCPU quota is often very limited on new/free subscriptions; choose a non-burstable size for production.",
                 "recommendedSizes": [
+                  "Standard_B2ms",
+                  "Standard_B2s",
                   "Standard_D4s_v5",
                   "Standard_D2s_v5"
                 ],
@@ -83,11 +87,11 @@
                 "name": "userNodeCountControl",
                 "type": "Microsoft.Common.Slider",
                 "label": "User node pool count",
-                "defaultValue": 2,
+                "defaultValue": 1,
                 "min": 1,
                 "max": 10,
                 "step": 1,
-                "toolTip": "Number of nodes in the User node pool.",
+                "toolTip": "Number of nodes in the User node pool. Defaults to 1 for a minimal/dev footprint; scale up for production workloads.",
                 "showStepMarkers": false
               }
             ]
@@ -102,8 +106,8 @@
             "name": "acrSkuControl",
             "type": "Microsoft.Common.DropDown",
             "label": "Container registry SKU",
-            "defaultValue": "Standard",
-            "toolTip": "SKU for the Azure Container Registry that hosts the worker image.",
+            "defaultValue": "Basic",
+            "toolTip": "SKU for the Azure Container Registry that hosts the worker image. Basic is sufficient for a single small image and does not consume compute quota.",
             "constraints": {
               "allowedValues": [
                 { "label": "Basic", "value": "Basic" },
@@ -134,8 +138,8 @@
             "name": "redisSkuControl",
             "type": "Microsoft.Common.DropDown",
             "label": "Redis cache SKU",
-            "defaultValue": "Balanced B1",
-            "toolTip": "SKU for Azure Managed Redis (Balanced tier). Capacity is encoded in the SKU name itself.",
+            "defaultValue": "Balanced B0",
+            "toolTip": "SKU for Azure Managed Redis (Balanced tier). Capacity is encoded in the SKU name itself. Defaults to the smallest size to minimize regional capacity/quota pressure.",
             "constraints": {
               "allowedValues": [
                 { "label": "Balanced B0", "value": "Balanced_B0" },
@@ -143,6 +147,20 @@
                 { "label": "Balanced B3", "value": "Balanced_B3" },
                 { "label": "Balanced B5", "value": "Balanced_B5" },
                 { "label": "Balanced B10", "value": "Balanced_B10" }
+              ],
+              "required": true
+            }
+          },
+          {
+            "name": "redisHighAvailabilityControl",
+            "type": "Microsoft.Common.DropDown",
+            "label": "Redis high availability",
+            "defaultValue": "Disabled",
+            "toolTip": "Data replication for high availability on Azure Managed Redis. Disabled roughly halves the underlying allocation and reduces the odds of regional InsufficientCapacity errors - recommended for a quickstart/dev deployment. Enable for production.",
+            "constraints": {
+              "allowedValues": [
+                { "label": "Disabled (recommended for dev/test)", "value": "Disabled" },
+                { "label": "Enabled (recommended for production)", "value": "Enabled" }
               ],
               "required": true
             }
@@ -273,6 +291,7 @@
     "acrSkuName": "[steps('dataServices').acrSkuControl]",
     "cosmosDbConsistencyLevel": "[steps('dataServices').cosmosConsistencyControl]",
     "redisSkuName": "[steps('dataServices').redisSkuControl]",
+    "redisHighAvailability": "[steps('dataServices').redisHighAvailabilityControl]",
     "storageSkuName": "[steps('dataServices').storageSkuControl]",
     "vnetAddressPrefix": "[steps('networking').vnetAddressPrefixControl]",
     "aksSubnetPrefix": "[steps('networking').aksSubnetPrefixControl]",

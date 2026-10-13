@@ -17,25 +17,28 @@
       "value": ""
     },
     "aksSystemNodeVmSize": {
-      "value": "Standard_D4s_v5"
+      "value": "Standard_B2ms"
     },
     "aksSystemNodeCount": {
-      "value": 3
+      "value": 1
     },
     "aksUserNodeVmSize": {
-      "value": "Standard_D4s_v5"
+      "value": "Standard_B2ms"
     },
     "aksUserNodeCount": {
-      "value": 2
+      "value": 1
     },
     "acrSkuName": {
-      "value": "Standard"
+      "value": "Basic"
     },
     "cosmosDbConsistencyLevel": {
       "value": "Session"
     },
     "redisSkuName": {
-      "value": "Balanced_B1"
+      "value": "Balanced_B0"
+    },
+    "redisHighAvailability": {
+      "value": "Disabled"
     },
     "storageSkuName": {
       "value": "Standard_LRS"

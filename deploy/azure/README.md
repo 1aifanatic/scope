@@ -18,19 +18,25 @@ below and is also usable standalone via the Azure CLI.
 - **AKS cluster**: one System node pool and one User node pool (Linux only), Azure CNI
   Overlay with the Cilium network dataplane/policy, an OIDC issuer, Workload Identity,
   and the native **Azure Key Vault Secrets Provider** add-on enabled (this is how
-  secrets get into the cluster — via a Helm install, not GitOps/Flux).
+  secrets get into the cluster — via a Helm install, not GitOps/Flux). Defaults to a
+  single `Standard_B2ms` node in each pool (2 vCPU / 8 GB, burstable) to minimize
+  regional vCPU-quota pressure — see
+  [Sizing and quota](#sizing-and-quota-this-is-a-minimal-dev-footprint) below.
 - **Key Vault**: RBAC-authorized, private endpoint only, with the backend workload
   identity (not the worker identity — see below) granted `Key Vault Secrets Officer`
   access (read/write/delete on secrets, not just read) — the app's Token Manager
   service writes BYO credentials into the vault at runtime via this same identity,
   so read-only access isn't sufficient.
-- **Azure Container Registry**: admin user disabled; the AKS kubelet identity is
-  granted `AcrPull` so nodes can pull the worker image (which cannot be hosted on
-  GHCR for private use).
-- **Cosmos DB**: MongoDB API only, private endpoint only.
-- **Azure Managed Redis**: private endpoint only, with Microsoft Entra ID
+- **Azure Container Registry**: `Basic` SKU by default (sufficient for a single small
+  worker image), admin user disabled; the AKS kubelet identity is granted `AcrPull`
+  so nodes can pull the worker image (which cannot be hosted on GHCR for private
+  use).
+- **Cosmos DB**: MongoDB API only, private endpoint only, serverless throughput.
+- **Azure Managed Redis**: private endpoint only, `Balanced_B0` SKU (the smallest
+  available) with high availability **disabled** by default, with Microsoft Entra ID
   (Azure AD) authentication enabled; an access key is also provisioned as a
-  compatibility fallback for clients that don't yet support Entra ID auth.
+  compatibility fallback for clients that don't yet support Entra ID auth. See
+  [Sizing and quota](#sizing-and-quota-this-is-a-minimal-dev-footprint) below for why.
 - **Storage account**: blob and queue services only, private endpoints only, with
   **both** workload identities (backend and worker — see below) granted
   `Storage Blob Data Owner` (not just Contributor — the app sets Blob Index Tags on
@@ -77,6 +83,38 @@ below and is also usable standalone via the Azure CLI.
   portal button.
 - `kubectl` and `helm`, for the application install step that follows infrastructure
   provisioning.
+
+## Sizing and quota (this is a minimal dev footprint)
+
+The defaults in this template deliberately trade away performance and high
+availability for a smaller footprint that is much more likely to deploy
+successfully on a new, free, or otherwise quota-constrained Azure subscription:
+
+- **AKS node pools** default to one `Standard_B2ms` node each (System + User — 2
+  nodes / 4 vCPUs total) instead of multi-node `Dsv5`-family pools. Many new/free
+  subscriptions start with a **10 vCPU total regional quota**, and separately with
+  very limited (sometimes 0) quota in specific VM families like `Standard DSv5
+  Family vCPUs` — a 5-node `Standard_D4s_v5` footprint (20 vCPUs) can exceed both
+  limits before you even get to the app. `B`-series burstable VMs typically draw
+  from a less-contended quota family. This is a single-node-per-pool, non-HA
+  configuration — raise `aksSystemNodeCount`/`aksUserNodeCount` and switch to a
+  non-burstable VM family (e.g. `Standard_D4s_v5`) for a production environment.
+- **Azure Managed Redis** defaults to the smallest SKU (`Balanced_B0`) with
+  **high availability disabled** (`redisHighAvailability=Disabled`). Azure Managed
+  Redis allocation can fail with `InsufficientCapacity` in a given region
+  independent of your subscription's vCPU quota — this is a known constraint on
+  this still-rolling-out SKU family, and it gets worse with larger SKUs and with
+  HA enabled (which roughly doubles the underlying node allocation). If you still
+  hit `InsufficientCapacity` with these defaults, retry in a different region
+  before filing a support request. Enable HA (and size up) for production.
+- **Azure Container Registry** defaults to `Basic` (down from `Standard`) — plenty
+  for a single worker image and consumes no compute quota, just lower
+  storage/throughput ceilings.
+
+If you still hit a quota error after these defaults, the fastest fixes are
+(1) request a quota increase for the affected VM family/region at
+[aka.ms/myquotas](https://portal.azure.com/#view/Microsoft_Azure_Capacity/QuotaMenuBlade/~/myQuotas),
+or (2) deploy to a different, less-contended region.
 
 ## Deploy via the Azure CLI
 
@@ -138,8 +176,10 @@ the build if `azuredeploy.json` doesn't match — commit the regenerated file if
   box.
 - Redis is deployed as Azure Managed Redis (`Microsoft.Cache/redisEnterprise`,
   `Balanced_*` SKU tier) rather than classic Azure Cache for Redis — the classic
-  service is being retired for new deployments. The default SKU is `Balanced_B1`;
-  the workload identity is granted Entra ID data-plane access via an access policy
+  service is being retired for new deployments. The default SKU is `Balanced_B0`
+  with high availability disabled (see
+  [Sizing and quota](#sizing-and-quota-this-is-a-minimal-dev-footprint) above); the
+  workload identity is granted Entra ID data-plane access via an access policy
   assignment on the default database, with access-key auth left enabled as a
   compatibility fallback.
 - Cosmos DB uses serverless throughput by default to minimize idle cost for a

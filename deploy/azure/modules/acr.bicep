@@ -12,13 +12,13 @@ param tags object = {}
 @maxLength(50)
 param acrName string
 
-@description('SKU for the container registry.')
+@description('SKU for the container registry. Defaults to Basic - sufficient for a single small worker image and avoids unnecessary cost; use Standard/Premium if you need more storage/throughput or geo-replication.')
 @allowed([
   'Basic'
   'Standard'
   'Premium'
 ])
-param skuName string = 'Standard'
+param skuName string = 'Basic'
 
 // AcrPull role assignment to the AKS kubelet identity is granted by the
 // orchestrating main.bicep to avoid a circular dependency between the ACR

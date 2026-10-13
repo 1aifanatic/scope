@@ -24,7 +24,7 @@ param vnetResourceId string
 @description('Resource ID of the subnet to deploy the Redis private endpoint into.')
 param privateEndpointSubnetResourceId string
 
-@description('Azure Managed Redis SKU name (Balanced tier; see https://aka.ms/redis/overview for the full SKU catalog).')
+@description('Azure Managed Redis SKU name (Balanced tier; see https://aka.ms/redis/overview for the full SKU catalog). Defaults to the smallest available size to minimize regional capacity/quota pressure - Azure Managed Redis allocation can fail with InsufficientCapacity independent of subscription quota in constrained regions, and the smallest SKU plus disabled HA (see highAvailability below) is the least likely combination to hit that.')
 @allowed([
   'Balanced_B0'
   'Balanced_B1'
@@ -32,7 +32,14 @@ param privateEndpointSubnetResourceId string
   'Balanced_B5'
   'Balanced_B10'
 ])
-param skuName string = 'Balanced_B1'
+param skuName string = 'Balanced_B0'
+
+@description('Whether to enable data replication for high availability. Defaults to Disabled - this roughly halves the underlying node allocation needed, reducing the odds of regional InsufficientCapacity errors and quota pressure for a quickstart/dev deployment. Set to Enabled for production (HA is recommended outside of dev/test).')
+@allowed([
+  'Enabled'
+  'Disabled'
+])
+param highAvailability string = 'Disabled'
 
 @description('Principal (object) ID of the workload identity to grant Microsoft Entra ID (Azure AD) data-plane access to the default Redis database, via an access policy assignment. Leave empty to skip the assignment.')
 param workloadIdentityPrincipalId string = ''
@@ -74,6 +81,7 @@ module redis 'br/public:avm/res/cache/redis-enterprise:0.5.0' = {
     tags: tags
     skuName: skuName
     publicNetworkAccess: 'Disabled'
+    highAvailability: highAvailability
     database: {
       accessKeysAuthentication: 'Enabled'
       // NOTE: `name` is documented as optional on this type, but the AVM module's nested access

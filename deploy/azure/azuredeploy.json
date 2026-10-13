@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "2216822959330778497"
+      "templateHash": "7215740804873826835"
     }
   },
   "parameters": {
@@ -41,44 +41,44 @@
     },
     "aksSystemNodeVmSize": {
       "type": "string",
-      "defaultValue": "Standard_D4s_v5",
+      "defaultValue": "Standard_B2ms",
       "metadata": {
-        "description": "VM size for the AKS System node pool."
+        "description": "VM size for the AKS System node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production."
       }
     },
     "aksSystemNodeCount": {
       "type": "int",
-      "defaultValue": 3,
+      "defaultValue": 1,
       "minValue": 1,
       "metadata": {
-        "description": "Node count for the AKS System node pool."
+        "description": "Node count for the AKS System node pool. Defaults to 1 for a minimal/dev footprint; use 3+ for production HA."
       }
     },
     "aksUserNodeVmSize": {
       "type": "string",
-      "defaultValue": "Standard_D4s_v5",
+      "defaultValue": "Standard_B2ms",
       "metadata": {
-        "description": "VM size for the AKS User node pool."
+        "description": "VM size for the AKS User node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production."
       }
     },
     "aksUserNodeCount": {
       "type": "int",
-      "defaultValue": 2,
+      "defaultValue": 1,
       "minValue": 1,
       "metadata": {
-        "description": "Node count for the AKS User node pool."
+        "description": "Node count for the AKS User node pool. Defaults to 1 for a minimal/dev footprint; scale up for production workloads."
       }
     },
     "acrSkuName": {
       "type": "string",
-      "defaultValue": "Standard",
+      "defaultValue": "Basic",
       "allowedValues": [
         "Basic",
         "Standard",
         "Premium"
       ],
       "metadata": {
-        "description": "SKU for the Azure Container Registry."
+        "description": "SKU for the Azure Container Registry. Defaults to Basic - sufficient for a single small worker image."
       }
     },
     "cosmosDbConsistencyLevel": {
@@ -97,7 +97,7 @@
     },
     "redisSkuName": {
       "type": "string",
-      "defaultValue": "Balanced_B1",
+      "defaultValue": "Balanced_B0",
       "allowedValues": [
         "Balanced_B0",
         "Balanced_B1",
@@ -106,7 +106,18 @@
         "Balanced_B10"
       ],
       "metadata": {
-        "description": "SKU name for Azure Managed Redis (Balanced tier; see https://aka.ms/redis/overview for the full SKU catalog)."
+        "description": "SKU name for Azure Managed Redis (Balanced tier; see https://aka.ms/redis/overview for the full SKU catalog). Defaults to the smallest size to minimize regional capacity/quota pressure."
+      }
+    },
+    "redisHighAvailability": {
+      "type": "string",
+      "defaultValue": "Disabled",
+      "allowedValues": [
+        "Enabled",
+        "Disabled"
+      ],
+      "metadata": {
+        "description": "Whether to enable data replication for high availability on Azure Managed Redis. Defaults to Disabled to reduce regional capacity/quota pressure for a quickstart/dev deployment; set to Enabled for production."
       }
     },
     "storageSkuName": {
@@ -10597,7 +10608,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "10302588495934954270"
+              "templateHash": "6823413139260557744"
             }
           },
           "parameters": {
@@ -10624,14 +10635,14 @@
             },
             "skuName": {
               "type": "string",
-              "defaultValue": "Standard",
+              "defaultValue": "Basic",
               "allowedValues": [
                 "Basic",
                 "Standard",
                 "Premium"
               ],
               "metadata": {
-                "description": "SKU for the container registry."
+                "description": "SKU for the container registry. Defaults to Basic - sufficient for a single small worker image and avoids unnecessary cost; use Standard/Premium if you need more storage/throughput or geo-replication."
               }
             }
           },
@@ -20320,6 +20331,9 @@
           "skuName": {
             "value": "[parameters('redisSkuName')]"
           },
+          "highAvailability": {
+            "value": "[parameters('redisHighAvailability')]"
+          },
           "workloadIdentityPrincipalId": {
             "value": "[reference('workloadIdentity').outputs.principalId.value]"
           }
@@ -20332,7 +20346,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "6761583715004502794"
+              "templateHash": "8027127782938364998"
             }
           },
           "parameters": {
@@ -20371,7 +20385,7 @@
             },
             "skuName": {
               "type": "string",
-              "defaultValue": "Balanced_B1",
+              "defaultValue": "Balanced_B0",
               "allowedValues": [
                 "Balanced_B0",
                 "Balanced_B1",
@@ -20380,7 +20394,18 @@
                 "Balanced_B10"
               ],
               "metadata": {
-                "description": "Azure Managed Redis SKU name (Balanced tier; see https://aka.ms/redis/overview for the full SKU catalog)."
+                "description": "Azure Managed Redis SKU name (Balanced tier; see https://aka.ms/redis/overview for the full SKU catalog). Defaults to the smallest available size to minimize regional capacity/quota pressure - Azure Managed Redis allocation can fail with InsufficientCapacity independent of subscription quota in constrained regions, and the smallest SKU plus disabled HA (see highAvailability below) is the least likely combination to hit that."
+              }
+            },
+            "highAvailability": {
+              "type": "string",
+              "defaultValue": "Disabled",
+              "allowedValues": [
+                "Enabled",
+                "Disabled"
+              ],
+              "metadata": {
+                "description": "Whether to enable data replication for high availability. Defaults to Disabled - this roughly halves the underlying node allocation needed, reducing the odds of regional InsufficientCapacity errors and quota pressure for a quickstart/dev deployment. Set to Enabled for production (HA is recommended outside of dev/test)."
               }
             },
             "workloadIdentityPrincipalId": {
@@ -23462,6 +23487,9 @@
                   },
                   "publicNetworkAccess": {
                     "value": "Disabled"
+                  },
+                  "highAvailability": {
+                    "value": "[parameters('highAvailability')]"
                   },
                   "database": {
                     "value": {
@@ -37975,7 +38003,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "10433921589816073080"
+              "templateHash": "10066990649550132770"
             }
           },
           "parameters": {
@@ -38015,30 +38043,30 @@
             },
             "systemNodeVmSize": {
               "type": "string",
-              "defaultValue": "Standard_D4s_v5",
+              "defaultValue": "Standard_B2ms",
               "metadata": {
-                "description": "VM size for the System node pool."
+                "description": "VM size for the System node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production."
               }
             },
             "systemNodeCount": {
               "type": "int",
-              "defaultValue": 3,
+              "defaultValue": 1,
               "metadata": {
-                "description": "Node count for the System node pool."
+                "description": "Node count for the System node pool. Defaults to 1 for a minimal/dev footprint; use 3+ for production HA."
               }
             },
             "userNodeVmSize": {
               "type": "string",
-              "defaultValue": "Standard_D4s_v5",
+              "defaultValue": "Standard_B2ms",
               "metadata": {
-                "description": "VM size for the User node pool."
+                "description": "VM size for the User node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production."
               }
             },
             "userNodeCount": {
               "type": "int",
-              "defaultValue": 2,
+              "defaultValue": 1,
               "metadata": {
-                "description": "Node count for the User node pool."
+                "description": "Node count for the User node pool. Defaults to 1 for a minimal/dev footprint; scale up for production workloads."
               }
             }
           },

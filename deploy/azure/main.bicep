@@ -33,27 +33,27 @@ param tags object = {}
 @description('Kubernetes version for the AKS cluster. Leave empty to use the AKS default.')
 param kubernetesVersion string = ''
 
-@description('VM size for the AKS System node pool.')
-param aksSystemNodeVmSize string = 'Standard_D4s_v5'
+@description('VM size for the AKS System node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production.')
+param aksSystemNodeVmSize string = 'Standard_B2ms'
 
-@description('Node count for the AKS System node pool.')
+@description('Node count for the AKS System node pool. Defaults to 1 for a minimal/dev footprint; use 3+ for production HA.')
 @minValue(1)
-param aksSystemNodeCount int = 3
+param aksSystemNodeCount int = 1
 
-@description('VM size for the AKS User node pool.')
-param aksUserNodeVmSize string = 'Standard_D4s_v5'
+@description('VM size for the AKS User node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production.')
+param aksUserNodeVmSize string = 'Standard_B2ms'
 
-@description('Node count for the AKS User node pool.')
+@description('Node count for the AKS User node pool. Defaults to 1 for a minimal/dev footprint; scale up for production workloads.')
 @minValue(1)
-param aksUserNodeCount int = 2
+param aksUserNodeCount int = 1
 
-@description('SKU for the Azure Container Registry.')
+@description('SKU for the Azure Container Registry. Defaults to Basic - sufficient for a single small worker image.')
 @allowed([
   'Basic'
   'Standard'
   'Premium'
 ])
-param acrSkuName string = 'Standard'
+param acrSkuName string = 'Basic'
 
 @description('Default consistency level for the Cosmos DB account.')
 @allowed([
@@ -65,7 +65,7 @@ param acrSkuName string = 'Standard'
 ])
 param cosmosDbConsistencyLevel string = 'Session'
 
-@description('SKU name for Azure Managed Redis (Balanced tier; see https://aka.ms/redis/overview for the full SKU catalog).')
+@description('SKU name for Azure Managed Redis (Balanced tier; see https://aka.ms/redis/overview for the full SKU catalog). Defaults to the smallest size to minimize regional capacity/quota pressure.')
 @allowed([
   'Balanced_B0'
   'Balanced_B1'
@@ -73,7 +73,14 @@ param cosmosDbConsistencyLevel string = 'Session'
   'Balanced_B5'
   'Balanced_B10'
 ])
-param redisSkuName string = 'Balanced_B1'
+param redisSkuName string = 'Balanced_B0'
+
+@description('Whether to enable data replication for high availability on Azure Managed Redis. Defaults to Disabled to reduce regional capacity/quota pressure for a quickstart/dev deployment; set to Enabled for production.')
+@allowed([
+  'Enabled'
+  'Disabled'
+])
+param redisHighAvailability string = 'Disabled'
 
 @description('SKU for the storage account.')
 param storageSkuName string = 'Standard_LRS'
@@ -247,6 +254,7 @@ module redis 'modules/redis.bicep' = {
     vnetResourceId: networking.outputs.vnetResourceId
     privateEndpointSubnetResourceId: networking.outputs.privateEndpointSubnetResourceId
     skuName: redisSkuName
+    highAvailability: redisHighAvailability
     workloadIdentityPrincipalId: workloadIdentity.outputs.principalId
   }
 }

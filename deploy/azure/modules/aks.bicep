@@ -18,17 +18,26 @@ param kubernetesVersion string = ''
 @description('Resource ID of the subnet to deploy AKS node pools into.')
 param vnetSubnetResourceId string
 
-@description('VM size for the System node pool.')
-param systemNodeVmSize string = 'Standard_D4s_v5'
+// Defaults are deliberately small and quota-friendly rather than
+// production-sized: Standard_B-series burstable VMs draw from a vCPU-family
+// quota that is typically much less contended than Dsv5/Esv5 on new/free/dev
+// subscriptions, and 1 node per pool keeps the total footprint to 2 nodes /
+// 4 vCPUs so it fits inside the common 10-vCPU default regional quota many
+// subscriptions start with. This trades away multi-node HA for the System
+// pool - fine for a quickstart/dev deployment, but bump systemNodeCount to 3
+// and consider a non-burstable VM family (e.g. Standard_D-series) for a
+// production environment.
+@description('VM size for the System node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production.')
+param systemNodeVmSize string = 'Standard_B2ms'
 
-@description('Node count for the System node pool.')
-param systemNodeCount int = 3
+@description('Node count for the System node pool. Defaults to 1 for a minimal/dev footprint; use 3+ for production HA.')
+param systemNodeCount int = 1
 
-@description('VM size for the User node pool.')
-param userNodeVmSize string = 'Standard_D4s_v5'
+@description('VM size for the User node pool. Defaults to a low-cost, quota-friendly burstable size; use a non-burstable size (e.g. Standard_D4s_v5) for production.')
+param userNodeVmSize string = 'Standard_B2ms'
 
-@description('Node count for the User node pool.')
-param userNodeCount int = 2
+@description('Node count for the User node pool. Defaults to 1 for a minimal/dev footprint; scale up for production workloads.')
+param userNodeCount int = 1
 
 // publicNetworkAccess is explicitly set to 'Enabled' (overriding the module's
 // 'Disabled' default) rather than enabling enablePrivateCluster, because this
