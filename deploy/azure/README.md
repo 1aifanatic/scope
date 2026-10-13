@@ -113,14 +113,26 @@ successfully on a new, free, or otherwise quota-constrained Azure subscription:
   `aksSystemNodeCount`/`aksUserNodeCount` further, set explicit `availabilityZones`
   in `modules/aks.bicep`, and consider a larger VM family (e.g. `Standard_D4s_v5`)
   for a production environment.
+- **Cosmos DB** defaults to a single, non-zone-redundant region
+  (`isZoneRedundant: false` in `modules/cosmosdb.bicep`), rather than the AVM
+  module's implicit zone-redundant fallback. Some regions (e.g. `centralus`)
+  intermittently run out of zonal capacity for Cosmos DB and fail deployment
+  with `ServiceUnavailable`/"high demand ... for the zonal redundant
+  (Availability Zones) accounts" — this is independent of subscription quota
+  and can happen even when it didn't on a previous deploy. Add zone redundancy
+  (and a multi-region `locations` array) back for a production environment.
 - **Azure Managed Redis** defaults to the smallest SKU (`Balanced_B0`) with
   **high availability disabled** (`redisHighAvailability=Disabled`). Azure Managed
-  Redis allocation can fail with `InsufficientCapacity` in a given region
-  independent of your subscription's vCPU quota — this is a known constraint on
-  this still-rolling-out SKU family, and it gets worse with larger SKUs and with
-  HA enabled (which roughly doubles the underlying node allocation). If you still
-  hit `InsufficientCapacity` with these defaults, retry in a different region
-  before filing a support request. Enable HA (and size up) for production.
+  Redis allocation can fail with `InsufficientCapacity` — or, less commonly, with
+  a generic transient `ComputeProvisioningFailed` infrastructure error — in a
+  given region independent of your subscription's vCPU quota. This is a known
+  constraint on this still-rolling-out SKU family, and it gets worse with larger
+  SKUs and with HA enabled (which roughly doubles the underlying node
+  allocation); it is **not** related to availability zones — zone placement
+  only applies to the Enterprise/EnterpriseFlash SKU tiers, not the
+  `Balanced`/AMR tier used here. If you hit either error with these defaults,
+  wait a few minutes and retry, or try a different region, before filing a
+  support request. Enable HA (and size up) for production.
 - **Azure Container Registry** defaults to `Basic` (down from `Standard`) — plenty
   for a single worker image and consumes no compute quota, just lower
   storage/throughput ceilings.

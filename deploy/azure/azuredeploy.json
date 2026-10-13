@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "27922245146307351"
+      "templateHash": "2128294139070301350"
     }
   },
   "parameters": {
@@ -13354,7 +13354,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "17869098716336833704"
+              "templateHash": "8069633928625422183"
             }
           },
           "parameters": {
@@ -16496,6 +16496,15 @@
                   },
                   "defaultConsistencyLevel": {
                     "value": "[parameters('consistencyLevel')]"
+                  },
+                  "locations": {
+                    "value": [
+                      {
+                        "failoverPriority": 0,
+                        "locationName": "[parameters('location')]",
+                        "isZoneRedundant": false
+                      }
+                    ]
                   },
                   "mongodbDatabases": {
                     "value": [

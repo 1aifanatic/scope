@@ -76,6 +76,23 @@ module cosmosDbAccount 'br/public:avm/res/document-db/database-account:0.10.0' =
       'EnableServerless'
     ]
     defaultConsistencyLevel: consistencyLevel
+    // Explicitly opt out of zone redundancy. The AVM module's internal
+    // fallback (used whenever `locations` is left empty) hardcodes
+    // isZoneRedundant: true, which silently requests a zone-redundant
+    // account - and some regions (e.g. centralus) intermittently run out
+    // of zonal capacity for Cosmos DB, failing deployment with
+    // "ServiceUnavailable ... high demand ... for the zonal redundant
+    // (Availability Zones) accounts". A single non-zone-redundant region
+    // matches this template's "minimal dev footprint, broad compatibility"
+    // design (same rationale as the AKS availabilityZones: [] fix) - add
+    // zone redundancy back here for a production environment.
+    locations: [
+      {
+        failoverPriority: 0
+        locationName: location
+        isZoneRedundant: false
+      }
+    ]
     // The AVM module derives the account's `kind` (GlobalDocumentDB vs
     // MongoDB) from whether mongodbDatabases is non-empty — an empty array
     // leaves the account at kind=GlobalDocumentDB (SQL API) even with
