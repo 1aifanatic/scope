@@ -13202,7 +13202,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
-    "/api/v1/submissions/{id}/readout": {
+    "/api/v1/submissions/{id}/reports": {
       "get": {
         "parameters": [
           {
@@ -13219,19 +13219,22 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReportResponse",
+                  "items": {
+                    "$ref": "#/components/schemas/ReportResponse",
+                  },
+                  "type": "array",
                 },
               },
             },
             "description": "Success",
           },
           "404": {
-            "description": "Current readout not found",
+            "description": "Submission not found",
           },
         },
-        "summary": "Get the current submission readout report",
+        "summary": "Get reports for submission",
         "tags": [
-          "Submissions",
+          "Reports",
         ],
       },
     },
