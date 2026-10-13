@@ -4,7 +4,7 @@ This folder contains a sanitized, resource-group-scoped Bicep template that prov
 the Azure infrastructure needed to run Scope. It powers the **Deploy to Azure** button
 below and is also usable standalone via the Azure CLI.
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fmicrosoft%2Fscope%2Fmain%2Fdeploy%2Fazure%2Fazuredeploy.json)
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fmicrosoft%2Fscope%2Fmain%2Fdeploy%2Fazure%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Fmicrosoft%2Fscope%2Fmain%2Fdeploy%2Fazure%2FcreateUiDefinition.json)
 
 > This is a separate, from-scratch template built for open-source consumers. It is
 > unrelated to the `infra/` folder and root `azure.yaml` at the repository root, which
