@@ -91,7 +91,9 @@ export function ReportPreviewPanel() {
                   {report.templateId}
                 </Badge>
               ) : (
-                <Badge variant="secondary" className="text-xs">default template</Badge>
+                <Badge variant="secondary" className="text-xs">
+                  {report.submissionId ? "template-less" : "default template"}
+                </Badge>
               )}
             </div>
           </CardContent>
