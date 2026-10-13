@@ -50,7 +50,6 @@ const submission: Submission = {
     "pp-readout": { status: "processing", version: 1 },
   },
 };
-
 const meta = {
   title: "Submissions/SubmissionStatusCard",
   component: SubmissionStatusCard,
@@ -78,4 +77,3 @@ export const Blocked: Story = {
     },
   },
 };
-
