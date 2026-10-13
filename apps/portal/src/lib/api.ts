@@ -260,9 +260,6 @@ export const api = {
     }>;
   }> => request(`/submissions/${id}/runs`),
 
-  getSubmissionReadout: (id: string): Promise<Report> =>
-    request(`/submissions/${id}/readout`),
-
   retrySubmission: (
     id: string,
     submissionRunId: string,

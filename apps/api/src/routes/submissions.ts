@@ -126,29 +126,29 @@ export function registerSubmissionsRoutes(ctx: RouteContext): void {
 
   apiRoute(ctx.app, ctx.registry, {
     method: "get",
-    path: "/api/v1/submissions/:id/readout",
-    tags: ["Submissions"],
-    summary: "Get the current submission readout report",
+    path: "/api/v1/submissions/:id/reports",
+    tags: ["Reports"],
+    summary: "Get reports for submission",
     params: z.object({ id: z.string() }),
-    response: ReportResponseSchema,
-    errorResponses: { 404: { description: "Current readout not found" } },
-    handler: async (req, res) => {
-      const submission = await ctx.submissionCollection.findOne({ _id: req.params.id });
-      const reportId = submission?.run.report?.reportId;
-      if (!submission || !reportId) {
-        res.status(404).json({ error: "Current readout not found" });
-        return;
+    response: z.array(ReportResponseSchema),
+    errorResponses: { 404: { description: "Submission not found" } },
+    handler: async (req, res, next) => {
+      try {
+        const submission = await ctx.submissionCollection.findOne({
+          _id: req.params.id,
+        });
+        if (!submission) {
+          res.status(404).json({ error: "Submission not found" });
+          return;
+        }
+        const reports = await ctx.reportCollection.find({
+          projectId: submission.projectId,
+          submissionId: submission._id,
+        }).sort({ createdAt: -1 }).toArray();
+        res.json(reports.map((report) => ({ ...report, id: report._id })));
+      } catch (error) {
+        next(error);
       }
-      const report = await ctx.reportCollection.findOne({
-        _id: reportId,
-        submissionId: submission._id,
-        submissionRunId: submission.run._id,
-      });
-      if (!report) {
-        res.status(404).json({ error: "Current readout not found" });
-        return;
-      }
-      res.json({ ...report, id: report._id });
     },
   });
 

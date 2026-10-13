@@ -47,10 +47,11 @@ export function SubmissionDetail() {
     queryFn: () => api.getSubmissionRuns(id!),
     enabled: Boolean(id),
   });
+  const currentReportId = submissionQuery.data?.report?.reportId;
   const reportQuery = useQuery({
-    queryKey: ["submission-readout", id, submissionQuery.data?.submissionRunId],
-    queryFn: () => api.getSubmissionReadout(id!),
-    enabled: Boolean(id && submissionQuery.data?.report?.reportId),
+    queryKey: ["report", currentReportId],
+    queryFn: () => api.getReport(currentReportId!),
+    enabled: Boolean(currentReportId),
   });
 
   if (submissionQuery.isLoading) {

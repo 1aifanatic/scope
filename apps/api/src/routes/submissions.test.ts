@@ -93,6 +93,13 @@ function buildApp(input: {
       find: vi.fn(() => queryResult(input.requests)),
     } as unknown as Collection<RequestDocument>,
     reportCollection: {
+      find: vi.fn((filter: Record<string, unknown>) =>
+        queryResult((input.reports ?? []).filter((report) =>
+          Object.entries(filter).every(([key, value]) =>
+            report[key as keyof ReportDocument] === value
+          )
+        )),
+      ),
       findOne: vi.fn(async (filter: Record<string, unknown>) =>
         (input.reports ?? []).find((report) =>
           Object.entries(filter).every(([key, value]) =>
@@ -262,7 +269,7 @@ describe("submission routes", () => {
     ]);
   });
 
-  it("selects only the current submission run readout", async () => {
+  it("lists current and historical reports for the submission", async () => {
     const currentReport: ReportDocument = {
       _id: "report-current",
       projectId: "project-1",
@@ -270,7 +277,14 @@ describe("submission routes", () => {
       submissionRunId: "submission-run-1",
       status: "completed",
       content: "# Current",
-      createdAt: new Date(),
+      createdAt: new Date("2026-01-02T00:00:00.000Z"),
+    };
+    const historicalReport: ReportDocument = {
+      ...currentReport,
+      _id: "report-historical",
+      submissionRunId: "submission-run-0",
+      content: "# Historical",
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
     };
     const response = await request(
       buildApp({
@@ -282,21 +296,20 @@ describe("submission routes", () => {
             report: { reportId: "report-current" },
           },
         },
-        reports: [
-          {
-            ...currentReport,
-            _id: "report-historical",
-            submissionRunId: "submission-run-0",
-          },
-          currentReport,
-        ],
+        reports: [currentReport, historicalReport],
       }),
-    ).get("/api/v1/submissions/submission-1/readout");
+    ).get("/api/v1/submissions/submission-1/reports");
 
     expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({
-      _id: "report-current",
-      submissionRunId: "submission-run-1",
-    });
+    expect(response.body).toMatchObject([
+      {
+        _id: "report-current",
+        submissionRunId: "submission-run-1",
+      },
+      {
+        _id: "report-historical",
+        submissionRunId: "submission-run-0",
+      },
+    ]);
   });
 });

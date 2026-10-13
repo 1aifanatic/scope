@@ -536,12 +536,14 @@ artifact reference identifies `scope.submission-readout@1.0`,
 `application/json`, and the blob URL. The Markdown `content` is rendered from
 that validated object. Each successful regeneration uses a new report id, while
 the current embedded submission run points only to its latest successful
-report.
+report. The internal `pp-readout` handler and `scope.submission-readout` schema
+names do not define the public submission API resource name.
 
 The API exposes:
 
 - `GET /api/v1/submissions?projectId=...`
 - `GET /api/v1/submissions/:id`
+- `GET /api/v1/submissions/:id/reports`
 - `GET /api/v1/submissions/:id/runs`
 - `GET /api/v1/submissions/:id/runs/:submissionRunId`
 - `POST /api/v1/submissions/:id/retry`

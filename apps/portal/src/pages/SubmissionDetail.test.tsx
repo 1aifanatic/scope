@@ -70,7 +70,7 @@ vi.mock("@/lib/api", () => ({
   api: {
     getSubmission: vi.fn(async () => submission),
     getSubmissionRuns: vi.fn(async () => history),
-    getSubmissionReadout: vi.fn(async () => report),
+    getReport: vi.fn(async () => report),
     retrySubmission: vi.fn(),
     reportStructuredUrl: vi.fn(() => "/api/v1/reports/report-1/structured"),
   },
@@ -103,6 +103,6 @@ describe("SubmissionDetail report terminology", () => {
     expect(screen.getByText("Report ready")).toBeDefined();
     expect(screen.getByRole("button", { name: "Retry report generation" })).toBeDefined();
     expect(await screen.findByRole("link", { name: "View report" })).toBeDefined();
-    expect(screen.queryByText(/readout/i)).toBeNull();
+    expect(await screen.findByRole("heading", { name: "Generated report" })).toBeDefined();
   });
 });

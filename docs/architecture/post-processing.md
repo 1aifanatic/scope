@@ -248,6 +248,15 @@ report kind. The JSON artifact is uploaded to
 current attempt. Reports from previous generations and superseded attempts
 remain append-only history.
 
+The public submission resource is generic:
+`GET /api/v1/submissions/:id/reports` returns current and historical reports in
+newest-first order, matching the run-level reports collection convention. The
+embedded current attempt's `reportId` is resolved through
+`GET /api/v1/reports/:reportId`; Structured JSON is downloaded through the
+report artifact proxy. Internal handler, queue, and schema identifiers retain
+`readout` because they identify this specific synthesis implementation rather
+than the public resource.
+
 To **add or change a handler**, edit its `handler.yaml` (bump `version`, adjust `dependsOn`, etc.) — no code or migration changes are needed for registration.
 
 ## Report Triggering on DAG Drain
