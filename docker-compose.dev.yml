@@ -237,6 +237,10 @@ services:
     build:
       target: dev
 
+  register-handler-taxonomy:
+    build:
+      target: dev
+
   register-handler-readout:
     build:
       target: dev

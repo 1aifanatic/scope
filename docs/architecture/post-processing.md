@@ -198,6 +198,14 @@ flowchart LR
 - **Docker Compose:** one `register-handler-<worker>` init service per handler (e.g. `pp-atif`) runs the generic script via `tsx`, gated on the scheduler being up. The worker waits for its registration service to complete.
 - **Kubernetes:** a `register-handler-post-processor` Job runs the compiled script (`node packages/shared/dist/scripts/register-handler.js`) on each deploy. `pp-atif` and `pp-observations` are registered in K8s via their respective registration Jobs (`register-handler-taxonomy` points its `HANDLER_YAML_PATH` at `handler.taxonomy.yaml`). The scheduler exposes a `Service` (`scheduler.scoped.svc.cluster.local:8080`) so Jobs and workers can reach `/handlers/register` and the notify endpoints.
 
+Compose registration jobs that execute TypeScript source must use the worker's
+`dev` image target so their working directory and source tree match the generic
+registration entrypoint. Image builds also forward the configured npm registry
+through `x-npm-build-args`. Workers that invoke the Copilot SDK, including
+`pp-readout`, install the operating-system CA bundle in both development and
+production stages because the bundled Copilot CLI validates credentials against
+the system trust store.
+
 ## Submission handlers
 
 Submission handlers use the same `services` registration endpoint but declare
