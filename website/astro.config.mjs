@@ -75,6 +75,7 @@ export default defineConfig({
 			},
 			customCss: ['./src/styles/landing.css'],
 			components: {
+				Head: './src/components/Head.astro',
 				SiteTitle: './src/components/SiteTitle.astro',
 				Header: './src/components/Header.astro',
 				PageTitle: './src/components/PageTitle.astro',

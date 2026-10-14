@@ -41,7 +41,9 @@ development, contribution, and support guidance live under
 │   ├── plugins/
 │   │   ├── remark-base-path.mjs    # applies the deployment base to internal links
 │   │   └── remark-http-snippets.mjs # turns ```http blocks into multi-language tabs
-│   ├── scripts/flow-demo.ts         # progressive-enhancement example controller
+│   ├── scripts/
+│   │   ├── analytics.ts            # consent-gated website-only 1DS analytics
+│   │   └── flow-demo.ts            # progressive-enhancement example controller
 │   ├── styles/landing.css           # shared brand tokens + scoped landing styles
 │   └── content.config.ts
 ├── astro.config.mjs                 # sidebar, plugins, starlight-openapi config
@@ -219,10 +221,60 @@ and generated API pages. Privacy choices are always visible; the static
 site does not infer a visitor's location.
 
 Community videos use labeled **Watch on YouTube** links instead of
-embedded players. No YouTube player, thumbnail, or third-party script
+embedded players. No YouTube player, thumbnail, or YouTube script
 loads on page visit. Opening a video is an explicit navigation to
 YouTube, with a new-tab hint for screen readers. Inline event links
 remain underlined so they are not identified by color alone.
+
+#### Website analytics and consent
+
+[Head.astro](src/components/Head.astro) preserves Starlight's default
+metadata and loads [analytics.ts](src/scripts/analytics.ts) on every page,
+including generated API reference pages. The integration runs only in
+production on `https://microsoft.github.io` within the configured
+`BASE_URL`. By default, development, local production previews, and other
+hosts make no consent or analytics requests.
+
+To review the real WCP banner locally, run from `website/`:
+
+```sh
+PUBLIC_CONSENT_PREVIEW=true pnpm dev --host 127.0.0.1
+```
+
+This development-only option enables the banner and **Manage cookies**
+control, but never loads or initializes 1DS, even after accepting
+Analytics. Production builds ignore the preview option. WCP uses your
+local browser's consent choices; use **Manage cookies** to review them
+again after dismissing the banner.
+
+Microsoft WCP provides worldwide opt-in consent and a **Manage cookies**
+footer control. The consent placeholder is appended to the body so the
+existing skip link remains first. The banner follows Starlight's theme.
+The 1DS CDN script is requested only after explicit Analytics consent;
+implicit/non-required consent, Global Privacy Control, and Do Not Track
+do not enable analytics. Script or initialization failures log an error
+and leave documentation usable with analytics disabled.
+
+The configuration follows the supplied MarTech 1DS getting-started guide:
+the `ms.analytics-web-3.min.js` CDN, the `scope` tenant's public
+browser-ingestion identifier, a 50-event in-memory limit, `PROD`
+environment, and automatic page, load, unload, click, scroll, resize, and
+JavaScript-error capture. The tenant token is not an authentication
+credential. The SDK's cookie manager is disabled, and page-URL query
+strings and fragments are excluded. Changing consent while the SDK loads
+cannot initialize it after withdrawal. Withdrawal pauses transmission
+channels before unloading, and telemetry initializers reject events
+without current consent. The SDK owns ingestion retries; the site does
+not add another retry layer.
+
+This is not Scope application telemetry and does not modify the Portal,
+CLI, API, or workers. The
+[data-collection notice](src/content/docs/resources/data-collection.md)
+describes website analytics separately from deployment data and links
+GDPR, UK GDPR/PECR, CCPA/CPRA, LGPD, PIPEDA, Australian, and Japanese
+privacy-law resources. These controls do not certify legal compliance;
+retain the appropriate review of data handling, retention, transfers,
+and applicable regional obligations.
 
 Install the test browser once, then run the regression suite:
 
@@ -238,7 +290,10 @@ and runs axe checks in light/dark themes at 1280px and 320px widths.
 It covers the landing page, expanded demo disclosures and results,
 representative documentation, community and API pages, privacy links,
 landmarks, horizontal reflow, keyboard navigation, reduced motion,
-and absence of automatic third-party requests. CI runs the same
+and absence of third-party requests on local previews. Published-origin
+analytics checks mock the Microsoft scripts to cover opt-in, withdrawal,
+stored consent, blocked scripts, privacy signals, and loading races without
+sending real analytics. CI runs the same
 browser suite against its existing production build before deployment.
 
 Automated checks do not certify full accessibility or policy
