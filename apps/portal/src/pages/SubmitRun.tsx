@@ -1153,13 +1153,13 @@ export function SubmitRun() {
             <div className="space-y-2">
               <div className="flex items-center gap-1.5">
                 <Label htmlFor="experimentId">Experiment ID</Label>
-                <HelpTooltip text="Optional correlation key used to group all runs from one optimizer experiment." />
+                <HelpTooltip text="Optional correlation key used to group related runs in one experiment." />
               </div>
               <Input
                 id="experimentId"
                 value={experimentId}
                 onChange={(e) => setExperimentId(e.target.value)}
-                placeholder="gepa-2026-10-14"
+                placeholder="experiment-2026-10-14"
                 className="font-mono"
               />
             </div>

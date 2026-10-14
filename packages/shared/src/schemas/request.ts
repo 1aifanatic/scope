@@ -142,7 +142,7 @@ export const CreateRequestInputSchema = z
     profileId: z.string().optional(),
     profileVariations: z.array(z.string()).optional(),
     priority: z.number().int().optional(),
-    // Correlates all candidate runs belonging to one optimizer experiment.
+    // Correlates related runs belonging to one experiment.
     experimentId: z.string().min(1).optional(),
     // Raw AGENTS.md body to deliver to the worker workspace. When present, the
     // API findOrCreates an `agents.md`-typed prompt and stores its id on the

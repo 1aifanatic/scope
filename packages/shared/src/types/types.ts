@@ -324,7 +324,7 @@ export interface RequestDocument {
   profileId?: string;             // FK → ProfileDocument._id (the profile lineage)
   profileVersionId?: string;      // FK → ProfileVersionDocument._id (exact version used)
   submissionId?: string;           // FK → SubmissionDocument._id
-  experimentId?: string;          // Correlates candidate runs from one optimizer experiment
+  experimentId?: string;          // Correlates related runs from one experiment
   /** Scheduling priority. Higher = processed first. Default: 0. */
   priority: number;
   /**

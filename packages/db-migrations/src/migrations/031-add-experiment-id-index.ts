@@ -2,11 +2,11 @@
 // Licensed under the MIT License.
 
 /**
- * Create a sparse single-field index for GEPA experiment correlation.
+ * Create a sparse single-field index for experiment correlation.
  *
  * Cosmos DB can intersect this equality index with the existing project and
  * deletion filters used by the Runs API. Keeping it sparse avoids write RU
- * overhead for the normal runs that do not belong to an optimizer experiment.
+ * overhead for ordinary runs that do not belong to an experiment.
  */
 
 import type { Db } from "mongodb";

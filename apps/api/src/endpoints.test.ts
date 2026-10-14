@@ -737,6 +737,34 @@ describe("API Endpoints", () => {
       expect(res.body.data[0]).toHaveProperty("key", "exp-1");
     });
 
+    it("fetches members with missing experiment ids for the no-experiment group", async () => {
+      (mocks.collection.aggregate as any)
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ _id: "no-experiment" }]) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) });
+
+      const res = await request(testServer()).get(
+        `/api/v1/requests?groupBy=experiment&projectId=${TEST_PROJECT_ID}`,
+      );
+
+      expect(res.status).toBe(200);
+      const phase2Pipeline = (mocks.collection.aggregate as any).mock.calls[1][0];
+      expect(phase2Pipeline[0]).toEqual({
+        $match: {
+          $and: [
+            expect.any(Object),
+            {
+              $or: [
+                { experimentId: { $exists: false } },
+                { experimentId: null },
+              ],
+            },
+          ],
+        },
+      });
+    });
+
     it("calls aggregate pipeline when groupBy is provided", async () => {
       (mocks.collection.aggregate as any)
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }); // keys (empty)
@@ -2369,7 +2397,7 @@ describe("API Endpoints", () => {
   // ===================================================================
 
   describe("POST /api/v1/requests/bulk-resubmit", () => {
-    it("preserves agentVersion and taskPromptId from original run", async () => {
+    it("preserves agentVersion, taskPromptId, and experimentId from original run", async () => {
       const originalRun = {
         _id: "run-original",
         scenario: { task: "Build a form", criteria: ["has_react"] },
@@ -2378,6 +2406,7 @@ describe("API Endpoints", () => {
         model: "gpt-4o",
         agentVersion: "copilot-0.0.415",
         taskPromptId: "tp-123",
+        experimentId: "exp-42",
         personaInstructions: "Be helpful",
         createdAt: new Date(),
         maxIterations: 5,
@@ -2413,6 +2442,7 @@ describe("API Endpoints", () => {
       expect(insertCall).toHaveLength(1);
       expect(insertCall[0]).toHaveProperty("agentVersion", "copilot-0.0.420");
       expect(insertCall[0]).toHaveProperty("taskPromptId", "tp-123");
+      expect(insertCall[0]).toHaveProperty("experimentId", "exp-42");
       expect(insertCall[0]).toHaveProperty("model", "gpt-4o");
       expect(insertCall[0]).toHaveProperty("maxIterations", 5);
     });

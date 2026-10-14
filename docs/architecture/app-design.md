@@ -321,26 +321,33 @@ pre-asserts no composite duplicates, reuses 025's Cosmos-safe helpers (composite
 non-unique on Cosmos, unique on real MongoDB), and its `down()` unsets `slug`/`ref` (index changes
 log-only). The dead `prompt-feature-extractions` drop is guarded against a missing namespace.
 
-### GEPA experiment grouping
+### Experiment correlation and grouping
 
-The GEPA optimizer in `apps/gepa-optimizer` builds on the existing AGENTS.md
-prompt delivery flow. Each candidate request carries
-`RequestDocument.experimentId?: string`, which correlates the seed request and
-all mutated candidates in one optimization run. The Runs API supports exact
-filtering with `?experimentId=` and server-side grouping with
-`groupBy=experiment`; a sparse single-field index on `requests.experimentId`
-keeps those project-scoped queries efficient without adding write RU cost to
-ordinary runs.
+Requests may carry an optional `experimentId` to correlate related runs without
+changing their submission or profile identity. The Runs API supports exact
+filtering with `?experimentId=` (including the standard `__empty__` sentinel for
+missing values) and server-side grouping with `groupBy=experiment`. Grouped
+pagination uses the same two-phase aggregation as the other group dimensions,
+including a stable `no-experiment` bucket whose member fetch matches both absent
+and explicit `null` values.
 
-Callers that know candidate parentage may continue to populate
-`RequestDocument.agentsMdParentIds`. The optimizer reconstructs its lineage
+Bulk resubmission preserves `experimentId`. The CLI and Portal expose the field
+at submission time and support filtering/grouping existing runs by it. Migration
+031 adds a sparse single-field index on `requests.experimentId`; Cosmos DB can
+intersect it with the existing project and deletion filters, while runs without
+an experiment avoid the additional index entry.
+
+The GEPA optimizer in `apps/gepa-optimizer` uses this correlation field to group
+the seed request and all mutated candidates from one optimization run. Callers
+that know candidate parentage may continue to populate
+`RequestDocument.agentsMdParentIds`; the optimizer reconstructs its own lineage
 post-hoc from GEPA's public parent indices and stores it in the optimizer result
 artifact rather than mutating Scope run documents.
 
-**Scoring is not persisted.** The GEPA metric (fraction of criteria passed,
-aggregated across turns) is derived by the optimizer from `run.turns[].criteriaResults`
-and never stored in Scope — it is algorithm-specific. If ever persisted it would be
-named (e.g. `metrics.gepaCriteriaPassRateMeanTurns`) and live on `RunState`.
+**GEPA scoring is not persisted.** Its metric (fraction of criteria passed,
+aggregated across turns) is derived from `run.turns[].criteriaResults` and
+remains algorithm-specific. If ever persisted it would be named (for example,
+`metrics.gepaCriteriaPassRateMeanTurns`) and live on `RunState`.
 
 ## Judge Pipeline
 
