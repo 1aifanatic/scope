@@ -24,7 +24,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { PromptFeatureDocument, TaskPromptType } from "@/types";
+import { HelpTooltip } from "@/components/HelpTooltip";
+import type { PromptFeatureDocument, PromptType } from "@/types";
 
 const FILTER_KEYS = ["type"] as const;
 
@@ -35,7 +36,7 @@ export function PromptFeatureList() {
   const { id: activeId } = useParams<{ id?: string }>();
 
   const state = useListUrlState({ defaultPageSize: 25, filterKeys: FILTER_KEYS });
-  const typeFilter = (state.getFilter("type") as TaskPromptType | null) ?? undefined;
+  const typeFilter = (state.getFilter("type") as PromptType | null) ?? undefined;
 
   const { data: allFeatures = [], isLoading, isRefetching } = useQuery({
     queryKey: ["prompt-features", state.search, typeFilter],
@@ -93,7 +94,7 @@ export function PromptFeatureList() {
       width: "120px",
       cell: (f) => (
         <Badge variant={f.type === "agents.md" ? "secondary" : "outline"} className="font-mono text-xs">
-          {f.type ?? "task"}
+          {f.type ?? "select"}
         </Badge>
       ),
     },
@@ -138,7 +139,16 @@ export function PromptFeatureList() {
 
   return (
     <ListLayout
-      title="Prompt Features"
+      title={
+        <span className="inline-flex items-center gap-1.5">
+          Prompt Features
+          <HelpTooltip
+            text="Detection rules that flag whether the agent's prompt or output uses specific capabilities (tools, agents, plans). Used for capability tracking and analytics."
+            docs="promptFeatures"
+            size="md"
+          />
+        </span>
+      }
       description="Manage prompt feature detection"
       railStorageKey="prompt-features"
       actions={
@@ -172,7 +182,7 @@ export function PromptFeatureList() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All types</SelectItem>
-                <SelectItem value="task">Task</SelectItem>
+                <SelectItem value="select">Task</SelectItem>
                 <SelectItem value="agents.md">AGENTS.md</SelectItem>
               </SelectContent>
             </Select>

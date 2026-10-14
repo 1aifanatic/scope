@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Pure, side-effect-free scoring of a finished Scope run.
 
 The GEPA metric is **derived, never persisted in Scope**: Scope stores the raw

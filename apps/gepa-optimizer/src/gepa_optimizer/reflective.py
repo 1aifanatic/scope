@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Build GEPA reflective-dataset records from a Scope run trajectory.
 
 Kept as a pure function (no GEPA / network imports) so it is trivially testable.

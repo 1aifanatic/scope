@@ -27,14 +27,23 @@ describe("buildGroupingPipeline", () => {
   it("groups by taskPromptId for task grouping", () => {
     const pipeline = buildGroupingPipeline("task");
     const addFields = pipeline[0].$addFields as Record<string, unknown>;
-    // _groupKey should reference $taskPromptId with fallback to scenario.task
-    expect(addFields._groupKey).toBeDefined();
+    // `task` groups purely by the always-present taskPromptId — no raw-text
+    // fallback, so the server key always matches the client member-fetch filter.
+    expect(addFields._groupKey).toBe("$taskPromptId");
   });
 
   it("groups by submissionId for submissionId grouping", () => {
     const pipeline = buildGroupingPipeline("submissionId");
     const addFields = pipeline[0].$addFields as Record<string, unknown>;
     expect(addFields._groupKey).toBeDefined();
+  });
+
+  it("groups missing experiment ids under a stable sentinel", () => {
+    const pipeline = buildGroupingPipeline("experiment");
+    const addFields = pipeline[0].$addFields as Record<string, unknown>;
+    expect(addFields._groupKey).toEqual({
+      $ifNull: ["$experimentId", { $literal: "no-experiment" }],
+    });
   });
 
   it("$group stage uses _groupKey as _id", () => {

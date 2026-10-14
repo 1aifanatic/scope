@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """``ScopeAdapter`` — a GEPA adapter that scores AGENTS.md candidates with Scope.
 
 Each GEPA candidate is ``{"AGENTS.md": "<text>"}``. ``evaluate`` submits one

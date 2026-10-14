@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 import httpx
 import pytest
 
@@ -12,7 +15,12 @@ from gepa_optimizer.scope_client import (
 def make_client_and_http(handler):
     transport = httpx.MockTransport(handler)
     http = httpx.AsyncClient(transport=transport, base_url="http://test")
-    client = ScopeClient("http://test", worker="coder-acp-copilot", max_get_retries=2)
+    client = ScopeClient(
+        "http://test",
+        project_id="project-1",
+        worker="coder-acp-copilot",
+        max_get_retries=2,
+    )
     return client, http
 
 
@@ -38,6 +46,7 @@ async def test_submit_request_builds_body_and_url():
         )
     assert doc["_id"] == "req-1"
     assert "worker=coder-acp-copilot" in captured["url"]
+    assert "projectId=project-1" in captured["url"]
     import json
 
     body = json.loads(captured["body"])
@@ -139,3 +148,18 @@ async def test_get_criterion_returns_none_on_404():
     client, http = make_client_and_http(handler)
     async with http:
         assert await client.get_criterion(http, "missing") is None
+
+
+async def test_get_criterion_is_project_scoped():
+    captured_url = ""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal captured_url
+        captured_url = str(request.url)
+        return httpx.Response(200, json={"id": "criterion-1"})
+
+    client, http = make_client_and_http(handler)
+    async with http:
+        await client.get_criterion(http, "criterion-1")
+
+    assert "projectId=project-1" in captured_url

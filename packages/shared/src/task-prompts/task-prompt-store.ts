@@ -2,8 +2,9 @@
 // Licensed under the MIT License.
 
 import { Collection } from 'mongodb';
-import { TaskPromptDocument, PromptFeatureResult, TaskPromptType } from '../types/types.js';
-import { computeTaskPromptId } from './task-prompt-id.js';
+import { randomUUID } from 'crypto';
+import { TaskPromptDocument, PromptFeatureResult, PromptType } from '../types/types.js';
+import { computePromptId } from './task-prompt-id.js';
 import type { BlobStorage } from '../storage/blob-storage.js';
 
 /** Default inline-vs-blob threshold (UTF-8 bytes). Bodies larger than this are
@@ -22,14 +23,22 @@ export function promptBlobName(id: string): string {
 /**
  * MongoDB-backed store for task prompt entities.
  *
- * Task prompts are **immutable and content-addressed**: the `_id` is a UUIDv5
- * derived from the trimmed prompt text (and, for non-`task` types, the type).
- * The same text+type always resolves to the same document — `findOrCreate` is
- * idempotent.
+ * Task prompts are **immutable and per-project**: the content hash
+ * (`computePromptId(type, text)`) is stored as `keyId`, and the `_id` is a
+ * fresh UUID. The same `(projectId, type, text)` always resolves to the same
+ * document — `findOrCreate` is idempotent **within a project**. Two projects
+ * that share identical prompt text get **two distinct documents** (same
+ * `keyId`, distinct `_id`, distinct `projectId`). Per-project uniqueness is
+ * backed by a `{ projectId, keyId }` index — **unique** on real MongoDB, and (on
+ * Azure Cosmos DB for MongoDB, which cannot build a unique index on a populated
+ * collection) **non-unique**, with uniqueness enforced by `findOrCreate`.
+ * `type` defaults to `"select"` so existing task-prompt call sites are
+ * unaffected.
  *
  * The body is stored **inline** (`text`) when small, or in **blob storage**
  * (`contentBlobUrl`) when it exceeds the configured inline threshold. Storage
- * location is decided purely by size, independent of the prompt `type`.
+ * location is decided purely by size, independent of the prompt `type`. The
+ * blob path is always `prompts/{_id}.txt`.
  *
  * Documents are soft-deleted (deletedAt) rather than removed.
  */
@@ -48,14 +57,23 @@ export class TaskPromptStore {
         : DEFAULT_PROMPT_INLINE_MAX_BYTES);
   }
 
-  /** Get a single task prompt by ID (non-deleted) */
+  /** Get a single task prompt by ID (non-deleted). Point reads are global. */
   async get(id: string): Promise<TaskPromptDocument | null> {
     return this.collection.findOne({ _id: id, deletedAt: { $exists: false } });
   }
 
-  /** Get a task prompt by its text content (and type) (non-deleted) */
-  async getByText(text: string, type?: TaskPromptType): Promise<TaskPromptDocument | null> {
-    return this.get(computeTaskPromptId(text, type));
+  /** Get a task prompt by its text content and type within a project (non-deleted) */
+  async getByText(
+    projectId: string,
+    text: string,
+    type: PromptType = 'select',
+  ): Promise<TaskPromptDocument | null> {
+    const keyId = computePromptId(type, text.trim());
+    return this.collection.findOne({
+      projectId,
+      keyId,
+      deletedAt: { $exists: false },
+    });
   }
 
   /**
@@ -79,31 +97,42 @@ export class TaskPromptStore {
   }
 
   /**
-   * Find an existing task prompt by text (and type), or create a new one.
-   * Idempotent — same text+type always returns the same document.
+   * Find an existing task prompt by `(projectId, type, text)`, or create a new
+   * one. Idempotent **within a project** — the same `(projectId, type, text)`
+   * always returns the same document. `type` defaults to `"select"` (the
+   * request task prompt). Distinct projects get distinct documents even for
+   * identical text.
    *
    * Bodies over the inline threshold are uploaded to blob storage on a create
    * **miss** (and the doc stores only a `contentBlobUrl`); smaller bodies are
-   * stored inline. The dedup/lookup is by content hash and never touches blob.
+   * stored inline. The dedup/lookup is by `{ projectId, keyId }` and never
+   * touches blob.
    */
   async findOrCreate(
+    projectId: string,
     text: string,
-    opts?: { type?: TaskPromptType },
+    type: PromptType = 'select',
   ): Promise<TaskPromptDocument> {
     const trimmed = text.trim();
-    const type = opts?.type;
-    const id = computeTaskPromptId(trimmed, type);
+    const keyId = computePromptId(type, trimmed);
 
-    // Try to find existing (including soft-deleted — revive if needed)
-    const existing = await this.collection.findOne({ _id: id });
+    // Try to find existing within this project (including soft-deleted — revive if needed)
+    const existing = await this.collection.findOne({ projectId, keyId });
     if (existing) {
-      // If soft-deleted, revive it
-      if (existing.deletedAt) {
+      // Backfill type on legacy documents lacking it, and revive if soft-deleted.
+      const patch: Record<string, unknown> = {};
+      const unset: Record<string, unknown> = {};
+      if (existing.type === undefined) patch.type = type;
+      if (existing.deletedAt) unset.deletedAt = '';
+      if (Object.keys(patch).length > 0 || Object.keys(unset).length > 0) {
         await this.collection.updateOne(
-          { _id: id },
-          { $unset: { deletedAt: '' } }
+          { _id: existing._id },
+          {
+            ...(Object.keys(patch).length > 0 ? { $set: patch } : {}),
+            ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}),
+          } as any,
         );
-        return { ...existing, deletedAt: undefined };
+        return { ...existing, ...patch, deletedAt: undefined };
       }
       return existing;
     }
@@ -116,11 +145,14 @@ export class TaskPromptStore {
       );
     }
 
+    const id = randomUUID();
     const doc: TaskPromptDocument = {
       _id: id,
+      projectId,
+      keyId,
+      type,
       createdAt: new Date(),
     };
-    if (type) doc.type = type;
 
     // Size-based storage: large bodies go to blob, small bodies stay inline.
     if (byteLength > this.inlineMaxBytes) {
@@ -144,28 +176,28 @@ export class TaskPromptStore {
 
   /**
    * List active (non-deleted) task prompts.
-   * Supports pagination, optional substring search on text, and type scoping.
-   *
-   * `type` defaults to `task`: when omitted or `'task'`, both explicitly-typed
-   * task prompts and legacy docs without a `type` field are returned (so absent
-   * type behaves as `task`). Pass `'agents.md'` to list AGENTS.md prompts.
+   * Supports pagination, optional substring search on text, and an optional
+   * `type` filter. Pass a `type` (e.g. `'select'` or `'agents.md'`) to scope the
+   * list to a single type. With no `type`, all prompt types are returned — gate
+   * prompts, non-gate types such as `agents.md`, and legacy untyped docs.
    */
   async getAll(opts?: {
+    projectId?: string;
     limit?: number;
     offset?: number;
     search?: string;
-    type?: TaskPromptType;
+    type?: PromptType;
   }): Promise<{ items: TaskPromptDocument[]; total: number }> {
     const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
 
-    if (!opts?.type || opts.type === 'task') {
-      filter.$or = [{ type: 'task' }, { type: { $exists: false } }];
-    } else {
-      filter.type = opts.type;
+    if (opts?.projectId) {
+      filter.projectId = opts.projectId;
     }
-
     if (opts?.search) {
       filter.text = { $regex: opts.search, $options: 'i' };
+    }
+    if (opts?.type) {
+      filter.type = opts.type;
     }
 
     const total = await this.collection.countDocuments(filter);

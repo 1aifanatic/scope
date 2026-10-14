@@ -7,15 +7,50 @@ import {
   CriteriaGraphSchema,
   CriteriaResponseSchema,
   UpdateCriteriaInputSchema,
+  CriteriaStore,
+  CriteriaStoreError,
+  CriteriaHasDependentsError,
+  DependencyGraph,
+  type GateId,
 } from "shared";
 import { apiRoute } from "../openapi/api-route.js";
-import type { CriteriaDocument, RouteContext } from "../route-context.js";
+import type { RouteContext } from "../route-context.js";
 import { computeMdp } from "../criteria-mdp.js";
 import type { MdpAnalyzableRun } from "../criteria-mdp.js";
 import { generateCriteriaPrompt, isLlmAvailable } from "../llm.js";
 import { isInferenceError } from "../llm-token.js";
+import { ProjectIdQuerySchema, OptionalProjectIdQuerySchema, getQueryProjectId, getOptionalQueryProjectId } from "../utils/project-scope.js";
+
+/**
+ * Map a thrown {@link CriteriaStoreError} to an HTTP response. Returns true when
+ * the error was handled; callers should rethrow anything that wasn't.
+ */
+function sendStoreError(
+  res: { status: (code: number) => { json: (body: unknown) => void } },
+  err: unknown,
+): boolean {
+  if (err instanceof CriteriaHasDependentsError) {
+    res.status(err.status).json({ error: err.message, dependents: err.dependents });
+    return true;
+  }
+  if (err instanceof CriteriaStoreError) {
+    res.status(err.status).json({ error: err.message });
+    return true;
+  }
+  return false;
+}
 
 export function registerCriteriaRoutes(ctx: RouteContext): void {
+
+  // Single source of truth for criteria writes (create/update/delete/seed).
+  // Built from the live ctx per call so dependency injection (and tests that
+  // swap ctx.criteriaCollection) keep working. Pass the resolved project so all
+  // reads/writes/DAG traversals are confined to it (same id may exist per-project).
+  const getCriteriaStore = (projectId?: string): CriteriaStore =>
+    new CriteriaStore(
+      ctx.criteriaCollection as unknown as ConstructorParameters<typeof CriteriaStore>[0],
+      projectId,
+    );
 
 // --- Criteria seed & CRUD (apiRoute) ---
 
@@ -25,17 +60,24 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/criteria/generate-prompt",
   tags: ["Criteria"],
   summary: "Generate criterion prompt from behavior",
+  query: OptionalProjectIdQuerySchema,
   body: z.object({
     behavior: z.string(),
     currentId: z.string().optional(),
+    gates: z.array(z.string()).optional(),
   }),
-  response: z.object({ prompt: z.string() }),
+  response: z.object({
+    prompt: z.string(),
+    suggestedId: z.string(),
+    suggestedParents: z.array(z.string()),
+    suggestedChildren: z.array(z.string()),
+  }),
   errorResponses: {
     400: { description: "Empty behavior string" },
     503: { description: "LLM not configured" },
   },
   handler: async (req, res, next) => {
-    const { behavior, currentId } = req.body;
+    const { behavior, currentId, gates } = req.body;
     if (!behavior.trim()) {
       res.status(400).json({ error: "Body must contain a non-empty 'behavior' string" });
       return;
@@ -46,9 +88,10 @@ apiRoute(ctx.app, ctx.registry, {
       return;
     }
 
+    const generateProjectId = getOptionalQueryProjectId(req);
     const allCriteria = await ctx.criteriaCollection
-      .find({ deletedAt: { $exists: false } })
-      .project({ id: 1, prompt: 1, dependsOn: 1, _id: 0 })
+      .find({ ...(generateProjectId ? { projectId: generateProjectId } : {}), deletedAt: { $exists: false } })
+      .project({ id: 1, prompt: 1, dependsOn: 1, gates: 1, _id: 0 })
       .toArray();
 
     const existingCriteria = currentId
@@ -58,7 +101,8 @@ apiRoute(ctx.app, ctx.registry, {
     try {
       const result = await generateCriteriaPrompt(
         behavior.trim(),
-        existingCriteria as { id: string; prompt: string; dependsOn?: string[] }[],
+        existingCriteria as { id: string; prompt: string; dependsOn?: string[]; gates?: GateId[] }[],
+        gates as GateId[] | undefined,
       );
       console.log("[generate-prompt] LLM result:", JSON.stringify(result));
       res.json(result);
@@ -78,6 +122,7 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/criteria/seed",
   tags: ["Criteria"],
   summary: "Seed criteria in bulk",
+  query: ProjectIdQuerySchema,
   body: z.object({
     criteria: z.array(CreateCriteriaInputSchema),
   }),
@@ -85,10 +130,55 @@ apiRoute(ctx.app, ctx.registry, {
     seeded: z.number(),
     errors: z.array(z.string()),
   }),
+  errorResponses: {
+    400: { description: "Seed batch would introduce a dependency cycle" },
+  },
   handler: async (req, res) => {
+    const projectId = getQueryProjectId(req);
     const { criteria } = req.body;
     let seeded = 0;
     const errors: string[] = [];
+
+    // Batch cycle guard (D1): validate the set that would result from this seed
+    // (existing active criteria + newly inserted ones; existing ids win) has no
+    // dependency cycle. Edges to ids absent from the set are filtered out so the
+    // seed stays permissive about partial/forward references — only cycles among
+    // present nodes reject the whole batch.
+    const existingDocs = await ctx.criteriaCollection
+      .find({ projectId, deletedAt: { $exists: false } })
+      .toArray();
+    const merged = new Map<string, { id: string; prompt: string; dependsOn: string[] }>();
+    for (const d of existingDocs) {
+      merged.set(d.id, { id: d.id, prompt: d.prompt, dependsOn: d.dependsOn ?? [] });
+    }
+    for (const config of criteria) {
+      const id = String(config.id ?? "").trim();
+      if (!id || merged.has(id)) continue;
+      merged.set(id, {
+        id,
+        prompt: String(config.prompt ?? "").trim(),
+        dependsOn: Array.isArray(config.dependsOn)
+          ? config.dependsOn.map((d: unknown) => String(d).trim())
+          : [],
+      });
+    }
+    const known = new Set(merged.keys());
+    const nodes = Array.from(merged.values()).map((n) => ({
+      ...n,
+      dependsOn: n.dependsOn.filter((d) => known.has(d)),
+    }));
+    try {
+      new DependencyGraph(nodes);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("ycle")) {
+        res.status(400).json({
+          error: `Seed rejected: the resulting criteria set would contain a dependency cycle (${err.message})`,
+        });
+        return;
+      }
+      // Other graph errors (e.g. unknown-node refs) are tolerated — seed is
+      // intentionally permissive about references that aren't present yet.
+    }
 
     for (const config of criteria) {
       if (!config.id || !config.prompt) {
@@ -97,16 +187,19 @@ apiRoute(ctx.app, ctx.registry, {
       }
       try {
         await ctx.criteriaCollection.updateOne(
-          { id: config.id.trim() },
+          { projectId, id: config.id.trim() },
           {
             $setOnInsert: {
+              projectId,
               id: config.id.trim(),
               prompt: config.prompt.trim(),
               dependsOn: Array.isArray(config.dependsOn)
                 ? config.dependsOn.map((d: any) => String(d).trim())
                 : [],
+              ...(Array.isArray(config.gates) ? { gates: config.gates } : {}),
               createdAt: new Date(),
             },
+            $unset: { deletedAt: "" },
           },
           { upsert: true },
         );
@@ -120,25 +213,72 @@ apiRoute(ctx.app, ctx.registry, {
   },
 });
 
-// GET /api/v1/criteria — list all criteria (with optional ?q= search)
+// GET /api/v1/criteria — list all criteria (with optional ?q= search, ?ids= filter with ancestor resolution)
 apiRoute(ctx.app, ctx.registry, {
   method: "get",
   path: "/api/v1/criteria",
   tags: ["Criteria"],
   summary: "List criteria",
-  query: z.object({ q: z.string().optional() }),
+  query: z.object({
+    q: z.string().optional(),
+    ids: z.string().optional().describe("Comma-separated criterion IDs to include"),
+    ancestors: z.enum(["true", "false"]).optional().describe("When true and ids is set, also include dependency ancestors"),
+  }).merge(ProjectIdQuerySchema),
   response: z.array(CriteriaResponseSchema),
   handler: async (req, res) => {
     const q = req.query.q;
-    const filter: Record<string, unknown> = { deletedAt: { $exists: false } };
+    const idsParam = req.query.ids;
+
+    // `q` (regex search) and `ids` (exact set + optional ancestor resolution)
+    // are mutually exclusive: applying the regex filter first would silently
+    // drop ancestors that don't match `q`, yielding an incomplete dependency tree.
+    if (q && idsParam) {
+      res.status(400).json({ error: "Query params 'q' and 'ids' are mutually exclusive" });
+      return;
+    }
+
+    const filter: Record<string, unknown> = {
+      projectId: getQueryProjectId(req),
+      deletedAt: { $exists: false },
+    };
     if (q) {
       filter.$or = [
         { id: { $regex: q, $options: "i" } },
         { prompt: { $regex: q, $options: "i" } },
       ];
     }
-    const criteria = await ctx.criteriaCollection.find(filter).toArray();
+    let criteria = await ctx.criteriaCollection.find(filter).toArray();
     criteria.sort((a, b) => a.id.localeCompare(b.id));
+
+    // Filter by IDs with optional ancestor resolution
+    if (idsParam) {
+      const requestedIds = idsParam.split(",").map(s => s.trim()).filter(Boolean);
+      const includeAncestors = req.query.ancestors === "true";
+
+      if (includeAncestors) {
+        const byId = new Map(criteria.map(c => [c.id, c]));
+        const included = new Set<string>();
+
+        const resolve = (id: string) => {
+          if (included.has(id)) return;
+          const criterion = byId.get(id);
+          if (!criterion) return;
+          included.add(id);
+          for (const dep of criterion.dependsOn ?? []) {
+            resolve(dep);
+          }
+        };
+
+        for (const id of requestedIds) {
+          resolve(id);
+        }
+        criteria = criteria.filter(c => included.has(c.id));
+      } else {
+        const idSet = new Set(requestedIds);
+        criteria = criteria.filter(c => idSet.has(c.id));
+      }
+    }
+
     res.json(criteria);
   },
 });
@@ -155,7 +295,7 @@ apiRoute(ctx.app, ctx.registry, {
     since: z.string().optional(),
     worker: z.string().optional(),
     taskPromptId: z.string().optional(),
-  }),
+  }).merge(ProjectIdQuerySchema),
   response: z.object({}).passthrough(),
   handler: async (req, res) => {
     const selectedCriteria = req.query.criteria
@@ -167,6 +307,7 @@ apiRoute(ctx.app, ctx.registry, {
     const sinceDate = req.query.since ? new Date(req.query.since) : undefined;
 
     const mdpFilter: Record<string, unknown> = {
+      projectId: getQueryProjectId(req),
       "run.status": "done",
       deletedAt: { $exists: false },
     };
@@ -229,16 +370,18 @@ apiRoute(ctx.app, ctx.registry, {
   path: "/api/v1/criteria/graph",
   tags: ["Criteria"],
   summary: "Get criteria DAG",
+  query: ProjectIdQuerySchema,
   response: CriteriaGraphSchema,
-  handler: async (_req, res) => {
+  handler: async (req, res) => {
     const all = await ctx.criteriaCollection
-      .find({ deletedAt: { $exists: false } })
+      .find({ projectId: getQueryProjectId(req), deletedAt: { $exists: false } })
       .toArray();
     all.sort((a, b) => a.id.localeCompare(b.id));
     const nodes = all.map((c) => ({
       id: c.id,
       prompt: c.prompt,
       dependsOn: c.dependsOn || [],
+      ...(c.gates !== undefined ? { gates: c.gates } : {}),
     }));
     const edges: { source: string; target: string }[] = [];
     for (const c of all) {
@@ -259,13 +402,17 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Criteria"],
   summary: "Get criterion",
   params: z.object({ id: z.string() }),
+  query: ProjectIdQuerySchema,
   response: CriteriaResponseSchema,
   errorResponses: {
     404: { description: "Criterion not found" },
   },
   handler: async (req, res) => {
     const { id } = req.params;
+    const projectId = getQueryProjectId(req);
+    const scope = { projectId };
     const criterion = await ctx.criteriaCollection.findOne({
+      ...scope,
       id,
       deletedAt: { $exists: false },
     });
@@ -275,7 +422,7 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     const dependents = await ctx.criteriaCollection
-      .find({ dependsOn: id, deletedAt: { $exists: false } })
+      .find({ ...scope, dependsOn: id, deletedAt: { $exists: false } })
       .toArray();
 
     res.json({ ...criterion, dependents: dependents.map((d) => d.id) });
@@ -289,44 +436,20 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Criteria"],
   summary: "Create criterion",
   body: CreateCriteriaInputSchema,
+  query: ProjectIdQuerySchema,
   response: CriteriaResponseSchema,
   errorResponses: {
     409: { description: "Criterion already exists" },
   },
   handler: async (req, res) => {
-    const { id, prompt, dependsOn = [] } = req.body;
-
-    // Check for duplicates
-    const existing = await ctx.criteriaCollection.findOne({
-      id,
-      deletedAt: { $exists: false },
-    });
-    if (existing) {
-      res.status(409).json({ error: `Criteria '${id}' already exists` });
-      return;
+    const projectId = getQueryProjectId(req);
+    const { id, prompt, dependsOn = [], gates } = req.body;
+    try {
+      const doc = await getCriteriaStore(projectId).create({ projectId, id, prompt, dependsOn, gates });
+      res.status(201).json(doc);
+    } catch (err) {
+      if (!sendStoreError(res, err)) throw err;
     }
-
-    // Validate dependency references
-    for (const depId of dependsOn) {
-      const dep = await ctx.criteriaCollection.findOne({
-        id: depId,
-        deletedAt: { $exists: false },
-      });
-      if (!dep) {
-        res.status(400).json({ error: `Dependency '${depId}' does not exist` });
-        return;
-      }
-    }
-
-    const doc: CriteriaDocument = {
-      id,
-      prompt: prompt.trim(),
-      dependsOn,
-      createdAt: new Date(),
-    };
-
-    await ctx.criteriaCollection.insertOne(doc as any);
-    res.status(201).json(doc);
   },
 });
 
@@ -337,6 +460,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Criteria"],
   summary: "Update criterion",
   params: z.object({ id: z.string() }),
+  query: ProjectIdQuerySchema,
   body: UpdateCriteriaInputSchema,
   response: CriteriaResponseSchema,
   errorResponses: {
@@ -345,51 +469,13 @@ apiRoute(ctx.app, ctx.registry, {
   },
   handler: async (req, res) => {
     const { id } = req.params;
-    const { prompt, dependsOn } = req.body;
-
-    const existing = await ctx.criteriaCollection.findOne({
-      id,
-      deletedAt: { $exists: false },
-    });
-    if (!existing) {
-      res.status(404).json({ error: `Criteria '${id}' not found` });
-      return;
+    const { prompt, dependsOn, gates } = req.body;
+    try {
+      const updated = await getCriteriaStore(getQueryProjectId(req)).update(id, { prompt, dependsOn, gates });
+      res.json(updated);
+    } catch (err) {
+      if (!sendStoreError(res, err)) throw err;
     }
-
-    const update: Record<string, unknown> = { updatedAt: new Date() };
-    if (prompt !== undefined) {
-      update.prompt = prompt.trim();
-    }
-    if (dependsOn !== undefined) {
-      // Validate dependency references
-      for (const depId of dependsOn) {
-        const dep = await ctx.criteriaCollection.findOne({
-          id: depId,
-          deletedAt: { $exists: false },
-        });
-        if (!dep) {
-          res.status(400).json({ error: `Dependency '${depId}' does not exist` });
-          return;
-        }
-      }
-      // Self-reference check
-      if (dependsOn.includes(id)) {
-        res.status(400).json({ error: "A criterion cannot depend on itself" });
-        return;
-      }
-      update.dependsOn = dependsOn;
-    }
-
-    await ctx.criteriaCollection.updateOne(
-      { id, deletedAt: { $exists: false } },
-      { $set: update },
-    );
-
-    const updated = await ctx.criteriaCollection.findOne({
-      id,
-      deletedAt: { $exists: false },
-    });
-    res.json(updated);
   },
 });
 
@@ -400,6 +486,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Criteria"],
   summary: "Soft-delete criterion",
   params: z.object({ id: z.string() }),
+  query: ProjectIdQuerySchema,
   response: z.object({ id: z.string(), deleted: z.boolean() }),
   errorResponses: {
     404: { description: "Criterion not found" },
@@ -407,35 +494,12 @@ apiRoute(ctx.app, ctx.registry, {
   },
   handler: async (req, res) => {
     const { id } = req.params;
-
-    const existing = await ctx.criteriaCollection.findOne({
-      id,
-      deletedAt: { $exists: false },
-    });
-    if (!existing) {
-      res.status(404).json({ error: `Criteria '${id}' not found` });
-      return;
+    try {
+      await getCriteriaStore(getQueryProjectId(req)).delete(id);
+      res.json({ id, deleted: true });
+    } catch (err) {
+      if (!sendStoreError(res, err)) throw err;
     }
-
-    // Check for dependents
-    const dependents = await ctx.criteriaCollection
-      .find({ dependsOn: id, deletedAt: { $exists: false } })
-      .toArray();
-
-    if (dependents.length > 0) {
-      res.status(409).json({
-        error: `Cannot delete '${id}': other criteria depend on it`,
-        dependents: dependents.map((d) => d.id),
-      });
-      return;
-    }
-
-    await ctx.criteriaCollection.updateOne(
-      { id, deletedAt: { $exists: false } },
-      { $set: { deletedAt: new Date() } },
-    );
-
-    res.json({ id, deleted: true });
   },
 });
 

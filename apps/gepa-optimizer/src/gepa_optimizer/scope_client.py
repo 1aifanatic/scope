@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Async REST client for the Scope API used by the GEPA adapter.
 
 Only the handful of endpoints the optimizer needs are implemented:
@@ -53,11 +56,13 @@ class ScopeClient:
         self,
         base_url: str,
         *,
+        project_id: str,
         worker: str = "coder-acp-copilot",
         timeout_seconds: float = 30.0,
         max_get_retries: int = 4,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self.project_id = project_id
         self.worker = worker
         self.timeout_seconds = timeout_seconds
         self.max_get_retries = max_get_retries
@@ -110,9 +115,13 @@ class ScopeClient:
         if agents_md_parent_ids:
             body["agentsMdParentIds"] = list(agents_md_parent_ids)
 
-        url = f"{self.base_url}/api/v1/requests?worker={self.worker}"
+        url = f"{self.base_url}/api/v1/requests"
         try:
-            resp = await client.post(url, json=body)
+            resp = await client.post(
+                url,
+                params={"worker": self.worker, "projectId": self.project_id},
+                json=body,
+            )
         except (httpx.TransportError, httpx.TimeoutException) as exc:
             # No response was produced, so no run could have started — safe to
             # treat as a per-example failure rather than aborting everything.
@@ -137,7 +146,10 @@ class ScopeClient:
     ) -> Mapping[str, Any] | None:
         """Return the criterion doc, or ``None`` if it does not exist (404)."""
         try:
-            resp = await client.get(f"{self.base_url}/api/v1/criteria/{criterion_id}")
+            resp = await client.get(
+                f"{self.base_url}/api/v1/criteria/{criterion_id}",
+                params={"projectId": self.project_id},
+            )
         except (httpx.TransportError, httpx.TimeoutException) as exc:
             raise SystemicScopeError(f"GET /criteria error: {exc}") from exc
         if resp.status_code == 404:

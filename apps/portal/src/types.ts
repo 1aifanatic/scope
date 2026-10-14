@@ -29,6 +29,7 @@ export interface ToolCall {
 
 export interface ConversationTurn {
   iteration: number;
+  gate?: GateId;
   codingAgentResponse?: string;
   judgeFeedback: string;
   snapshotUrl: string;
@@ -101,6 +102,8 @@ export interface RunState {
   harUrl?: string;
   videoUrls?: string[];
   setupVideoUrls?: string[];
+  resources?: ResourceRunOutcome[];
+  mcpRegistered?: boolean;
   tokenUsage?: TokenUsage;
   aiCallCount?: number;
   rawChatUrl?: string;
@@ -131,41 +134,57 @@ export interface Run {
   updatedAt?: string;
   deletedAt?: string;
   taskPromptId?: string;
-  /** @deprecated — use taskPromptId instead */
-  promptFeatureExtractionId?: string;
   mcpServers?: string[];
   skills?: string[];
   skillRevisions?: string[];
+  codebaseRevisionId?: string;
+  resources?: ResourceBinding[];
   extensions?: string[];
   priority?: number;
   submissionId?: string;
+  experimentId?: string;
   profileId?: string;
   profileVersionId?: string;
-  /** GEPA experiment grouping — links a seed request and its follow-ups. */
-  experimentId?: string;
   /** Resolved AGENTS.md prompt id when an AGENTS.md was supplied. */
   agentsMdPromptId?: string;
-  /** Parent AGENTS.md prompt ids forming GEPA lineage (mutation/merge edges). */
+  /** Parent AGENTS.md prompt ids forming the AGENTS.md lineage (mutation/merge edges). */
   agentsMdParentIds?: string[];
+  gates?: GateConfig[];
+  gateSummaries?: GateRunSummary[];
 }
 
 export interface CursorPaginatedResponse<T> {
   data: T[];
   limit: number;
-  estimatedTotal: number;
+  /**
+   * Run-count total for the flat list pager / "~N runs total" banner. Omitted
+   * in grouped mode, which is measured in groups (not runs) and paginated purely
+   * by cursors — so the client drives Next/Prev off `cursors` without a total.
+   */
+  estimatedTotal?: number;
   cursors: {
     next: string | null;
     prev: string | null;
   };
 }
 
-export const WORKER_TYPES = [
-  "coder-acp-claude-code",
-  "coder-acp-copilot",
-  "coder-acp-copilot-windows"
-] as const;
+export type GateId = "select" | "build" | "test" | "run" | "deploy";
+export type PromptType = GateId | "agents.md";
 
-export type WorkerType = (typeof WORKER_TYPES)[number];
+export interface GateConfig {
+  gate: GateId;
+  promptId?: string;
+  /** Input-only free-text gate prompt; materialized server-side into a typed prompt. */
+  promptText?: string;
+  criteria: string[];
+  maxIterations?: number;
+}
+
+export interface GateRunSummary {
+  gate: GateId;
+  status: "passed" | "failed" | "skipped";
+  iterations: number;
+}
 
 export const STATUS_LIST: RunStatus[] = [
   "pending",
@@ -189,6 +208,7 @@ export interface CriteriaConfig {
   id: string;
   prompt: string;
   dependsOn?: string[];
+  gates?: GateId[];
 }
 
 export interface CriteriaDocument extends CriteriaConfig {
@@ -198,7 +218,7 @@ export interface CriteriaDocument extends CriteriaConfig {
 }
 
 export interface CriteriaGraphData {
-  nodes: Array<{ id: string; prompt: string; dependsOn: string[] }>;
+  nodes: Array<{ id: string; prompt: string; dependsOn: string[]; gates?: GateId[] }>;
   edges: Array<{ source: string; target: string }>;
 }
 
@@ -210,13 +230,11 @@ export interface GeneratePromptResponse {
 }
 
 // Prompt Feature types
-export type TaskPromptType = "task" | "agents.md";
-
 export interface PromptFeatureConfig {
   id: string;
   prompt: string;
-  /** Prompt type this feature applies to (absent ⇒ "task"). */
-  type?: TaskPromptType;
+  /** Prompt type this feature applies to (absent ⇒ "select"). */
+  type?: PromptType;
 }
 
 export interface PromptFeatureDocument extends PromptFeatureConfig {
@@ -237,23 +255,11 @@ export interface SuggestedPromptFeature {
   prompt: string;
 }
 
-export interface PromptFeatureExtraction {
-  _id?: string;
-  taskText: string;
-  taskTextHash?: string;
-  promptFeatureResults: PromptFeatureResult[];
-  suggestedFeatures?: SuggestedPromptFeature[];
-  extractedAt: string;
-  model?: string;
-  cached?: boolean;
-}
-
-// Task Prompt types (first-class entity for benchmark task texts)
 export interface TaskPrompt {
   _id: string;                          // UUIDv5 content-addressed ID
   text?: string;                        // Full task prompt text (absent when blob-backed)
-  type?: TaskPromptType;                // "task" (default) | "agents.md"
-  contentBlobUrl?: string;              // Blob reference when body is over the inline threshold
+  type?: PromptType;                    // Gate id or "agents.md"; absent ⇒ legacy "select"
+  contentBlobUrl?: string;              // Blob reference when body exceeds the inline threshold
   features?: PromptFeatureResult[];     // Detected prompt features
   featuresExtractedAt?: string;         // When features were last extracted
   createdAt: string;
@@ -309,6 +315,17 @@ export interface AnalysisResponse {
   availableCriteria: string[];
   /** Criteria IDs that were used to define success (empty = use turn.passed) */
   selectedCriteria: string[];
+  /** Union of all detected task-prompt feature IDs across all runs (before filtering) */
+  availableFeatures: string[];
+  /** Task-prompt feature IDs used to filter runs (empty = no feature filter) */
+  selectedFeatures: string[];
+  /**
+   * True when the analyzed run set was capped to a most-recent-N window to bound
+   * server memory. Older runs are excluded from the metrics; the UI shows a banner.
+   */
+  truncated?: boolean;
+  /** The configured run cap (max runs analyzed) — only meaningful when `truncated`. */
+  runLimit?: number;
 }
 
 // MDP state-transition graph types
@@ -653,7 +670,7 @@ export interface AgentVersion {
   gitCommit: string;
   buildTime: string;
   imageTag: string;
-  queueName: string;
+  queueName?: string;
   status: "active" | "retired";
   createdAt: string;
 }
@@ -661,6 +678,9 @@ export interface AgentVersion {
 // Agent capabilities declared at the worker level
 export interface AgentCapabilities {
   supportsReasoningEffort?: boolean;
+  supportsMcpServers?: boolean;
+  supportsSkills?: boolean;
+  supportsExtensions?: boolean;
 }
 
 // Coding Agent types
@@ -677,6 +697,30 @@ export interface CodingAgent {
   createdAt: string;
   updatedAt?: string;
   deletedAt?: string;
+}
+
+export function getActiveAgentVersions(agent: CodingAgent): AgentVersion[] {
+  return (agent.versions ?? []).filter(
+    (version) => version.status === "active" && (version.queueName?.trim().length ?? 0) > 0,
+  );
+}
+
+export function isAgentAvailable(agent: CodingAgent): boolean {
+  return agent.available === true
+    && !agent.deletedAt
+    && getActiveAgentVersions(agent).length > 0;
+}
+
+export function isAgentVersionAvailable(
+  agent: CodingAgent | undefined,
+  agentVersion?: string,
+): boolean {
+  return !!agent
+    && isAgentAvailable(agent)
+    && (!agentVersion
+      || getActiveAgentVersions(agent).some(
+        (version) => version.agentVersion === agentVersion,
+      ));
 }
 
 // MCP Server types
@@ -860,6 +904,155 @@ export interface SkillDiscoveryResult {
 }
 
 // =============================================================================
+// Codebase types
+// =============================================================================
+
+/** The source a codebase revision is captured from. */
+export type CodebaseSourceType = "git" | "archive";
+
+/** A first-class codebase entity (mutable pointer/metadata). */
+export interface CodebaseDocument {
+  _id: string;
+  slug: string;
+  name: string;
+  description?: string;
+  sourceType: CodebaseSourceType;
+  source?: string;
+  defaultBranch?: string;
+  revisionCounter: number;
+  latestRevisionId?: string;
+  creator?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+/** An immutable, incremental codebase revision (snapshot). */
+export interface CodebaseRevisionDocument {
+  _id: string;
+  codebaseId: string;
+  slug: string;
+  revisionNumber: number;
+  ref: string;
+  sourceType: CodebaseSourceType;
+  source?: string;
+  requestedRef?: string;
+  resolvedCommitSha?: string;
+  commitTimestamp?: string;
+  originalFilename?: string;
+  contentSha256?: string;
+  archiveUrl: string;
+  sizeBytes?: number;
+  fileCount?: number;
+  creator?: string;
+  resolvedAt: string;
+  createdAt: string;
+  /**
+   * Present only on resolve/upload responses: true when the revision was reused
+   * (deduplicated) because nothing changed, false when newly created.
+   */
+  deduplicated?: boolean;
+}
+
+// =============================================================================
+// Resource types
+// =============================================================================
+
+export type ResourceInterpreter = "sh";
+
+export type ResourceScript = Partial<Record<ResourceInterpreter, string>>;
+
+/** One input a resource revision's lifecycle scripts read from the environment. */
+export interface ResourceParameter {
+  name: string;
+  description?: string;
+  required: boolean;
+  default?: string;
+  example?: string;
+}
+
+/** A resource reference before submit-time revision and parameter resolution. */
+export interface ResourceBindingSpec {
+  ref: string;
+  params?: Record<string, string>;
+}
+
+/** Resolved, pinned resource binding persisted on a request. */
+export interface ResourceBinding {
+  ref: string;
+  revisionId: string;
+  params: Record<string, string>;
+}
+
+/** A first-class resource entity (mutable pointer/metadata). */
+export interface ResourceDocument {
+  _id: string;
+  projectId: string;
+  slug: string;
+  name: string;
+  description?: string;
+  revisionCounter: number;
+  latestRevisionId?: string;
+  latestRevisionNumber?: number;
+  creator?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+/** An immutable lifecycle revision for a resource. */
+export interface ResourceRevisionDocument {
+  _id: string;
+  resourceId: string;
+  projectId: string;
+  slug: string;
+  revisionNumber: number;
+  ref: string;
+  setup: ResourceScript;
+  teardown?: ResourceScript;
+  exports: string[];
+  parameters?: ResourceParameter[];
+  contentSha256: string;
+  creator?: string;
+  createdAt: string;
+  deletedAt?: string;
+  /**
+   * Present only on create responses: true when the latest revision was reused
+   * because the submitted lifecycle content was identical.
+   */
+  deduplicated?: boolean;
+}
+
+export interface CreateResourceBody {
+  name: string;
+  slug?: string;
+  description?: string;
+  setup: ResourceScript;
+  teardown?: ResourceScript;
+  exports: string[];
+  parameters?: ResourceParameter[];
+}
+
+export interface CreateResourceRevisionBody {
+  setup: ResourceScript;
+  teardown?: ResourceScript;
+  exports: string[];
+  parameters?: ResourceParameter[];
+}
+
+export interface ResourceRunOutcome {
+  ref: string;
+  slug: string;
+  revisionId: string;
+  setupSucceeded: boolean;
+  published: string[];
+  params?: Record<string, string>;
+  setupDurationMs?: number;
+  error?: string;
+  teardownRan?: boolean;
+}
+
+// =============================================================================
 // VS Code extension types
 // =============================================================================
 
@@ -929,6 +1122,7 @@ export interface ProfileVersionDocument {
   agentVersion?: string;
   mcpServers?: string[];
   skillRevisions?: string[];
+  resources?: ResourceBindingSpec[];
   extensions?: string[];
   createdAt: string;
 }
@@ -960,7 +1154,6 @@ export interface GroupUniformValues {
   extensions?: string[];
   status?: RunStatus;
   submissionId?: string;
-  experimentId?: string;
   task?: string;
 }
 
@@ -981,4 +1174,75 @@ export interface RunGroup {
   runIds: string[];
   aggregates: GroupAggregates;
   uniform: GroupUniformValues;
+}
+
+/** One selectable value + full-dataset count for a Runs-list filter dimension. */
+export interface RunFacetBucket {
+  value: string;
+  count: number;
+}
+
+/** Server-computed facet counts for the Runs list filter rail (issue #1138). */
+export interface RunFacetsResponse {
+  total: number;
+  facets: {
+    workerType: RunFacetBucket[];
+    status: RunFacetBucket[];
+    outcome: RunFacetBucket[];
+    model: RunFacetBucket[];
+    os: RunFacetBucket[];
+    priority: RunFacetBucket[];
+    agentVersion: RunFacetBucket[];
+    profileId: RunFacetBucket[];
+  };
+}
+
+/** The categorical dimensions exposed by the facets endpoint. */
+export type RunFacetDimension = keyof RunFacetsResponse["facets"];
+
+/** Sentinel value matching rows that are missing a categorical field ("(Unknown)"). */
+export const EMPTY_FILTER_VALUE = "__empty__";
+
+/** Server-side sort fields for the Runs list. */
+export type RunSortField =
+  | "created"
+  | "updated"
+  | "priority"
+  | "worker"
+  | "status"
+  | "id"
+  | "duration";
+export type RunSortDir = "asc" | "desc";
+
+// --- Projects ---
+
+/**
+ * A project as returned by the API (`GET /projects`). A project is the
+ * top-level, unscoped container that every scoped entity carries a `projectId`
+ * for. There is no "default" project. Dates arrive as ISO strings over JSON;
+ * `id` mirrors `_id`.
+ */
+export interface Project {
+  _id: string;
+  /** Mirror of `_id` added by the API response. */
+  id?: string;
+  name: string;
+  description?: string;
+  creator?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string;
+}
+
+/** Body for creating a project (`POST /projects`). */
+export interface CreateProjectRequest {
+  name: string;
+  description?: string;
+  creator?: string;
+}
+
+/** Body for updating a project (`PATCH /projects/:id`). */
+export interface UpdateProjectRequest {
+  name?: string;
+  description?: string;
 }

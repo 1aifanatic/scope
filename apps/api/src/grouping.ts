@@ -15,15 +15,33 @@ export function buildGroupingPipeline(
   groupBy: "task" | "submissionId" | "profile" | "experiment",
 ): Document[] {
   const groupField =
-    groupBy === "task" ? "$taskPromptId" : groupBy === "profile" ? "$profileId" : groupBy === "experiment" ? "$experimentId" : "$submissionId";
+    groupBy === "task"
+      ? "$taskPromptId"
+      : groupBy === "profile"
+        ? "$profileId"
+        : groupBy === "experiment"
+          ? "$experimentId"
+          : "$submissionId";
   const fallbackGroupField =
-    groupBy === "task" ? "$scenario.task" : groupBy === "profile" ? { $literal: "no-profile" } : groupBy === "experiment" ? { $literal: "no-experiment" } : { $literal: "no-submission" };
+    groupBy === "profile"
+      ? { $literal: "no-profile" }
+      : groupBy === "experiment"
+        ? { $literal: "no-experiment" }
+        : { $literal: "no-submission" };
+  // `task` groups purely by the always-present `taskPromptId` — it is
+  // materialized on every run-creation path (findOrCreate → taskPrompt._id) and
+  // backfilled onto legacy docs by migration 001, so the group key is always a
+  // real id the member-fetch filter (`{ taskPromptId: key }`) can match. Only
+  // `profile`/`experiment`/`submission` fall back to a fixed literal sentinel
+  // for runs that genuinely lack the field.
+  const groupKeyExpr =
+    groupBy === "task" ? groupField : { $ifNull: [groupField, fallbackGroupField] };
 
   return [
     // 1. Compute per-run derived values
     {
       $addFields: {
-        _groupKey: { $ifNull: [groupField, fallbackGroupField] },
+        _groupKey: groupKeyExpr,
         _turnCount: { $cond: { if: { $isArray: "$run.turns" }, then: { $size: "$run.turns" }, else: null } },
         _duration: {
           $cond: {
@@ -154,6 +172,7 @@ export function buildGroupingPipeline(
             branches: [
               { case: { $eq: ["$_id", "no-submission"] }, then: "No submission ID" },
               { case: { $eq: ["$_id", "no-profile"] }, then: "No profile" },
+              { case: { $eq: ["$_id", "no-experiment"] }, then: "No experiment ID" },
             ],
             default: { $ifNull: ["$_firstTask", "$_id"] },
           },

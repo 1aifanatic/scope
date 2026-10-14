@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { McpTransportType, McpServerHeader, McpSessionMode } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { ArrowLeft, Plus, Trash2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { SecretInput } from "@/components/ui/secret-input";
 
 const SLUG_REGEX = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
@@ -39,6 +40,13 @@ function slugToName(slug: string): string {
 
 export function CreateMcpServer() {
   const navigate = useNavigate();
+
+  // Load the active project's servers so we can flag a duplicate slug before submit.
+  // (The list is project-scoped; the API is the source of truth and also 409s.)
+  const { data: existingServers = [] } = useQuery({
+    queryKey: ["mcp-servers"],
+    queryFn: () => api.listMcpServers(),
+  });
 
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
@@ -84,7 +92,11 @@ export function CreateMcpServer() {
     },
   });
 
-  const isValid = slug && SLUG_REGEX.test(slug) && name && (isStdio ? !!command : !!url);
+  // A server's slug must be unique within the project. The list only holds active
+  // servers, so this catches active collisions instantly; soft-deleted collisions are
+  // caught by the API's 409 (surfaced via the mutation's onError toast).
+  const slugExists = existingServers.some((s) => s._id === slug);
+  const isValid = slug && SLUG_REGEX.test(slug) && !slugExists && name && (isStdio ? !!command : !!url);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -172,6 +184,11 @@ export function CreateMcpServer() {
                 {slug && !SLUG_REGEX.test(slug) && (
                   <p className="text-xs text-destructive">
                     Invalid slug format
+                  </p>
+                )}
+                {slug && SLUG_REGEX.test(slug) && slugExists && (
+                  <p className="text-xs text-destructive">
+                    An MCP server with this slug already exists in this project. Use the edit flow to change it.
                   </p>
                 )}
               </div>
@@ -302,13 +319,13 @@ export function CreateMcpServer() {
                     placeholder="Header name"
                     value={header.name}
                     onChange={(e) => updateHeader(idx, "name", e.target.value)}
-                    className="font-mono text-sm"
+                    className="font-mono text-sm w-1/3 shrink-0"
                   />
-                  <Input
+                  <SecretInput
                     placeholder="Header value"
-                    type="password"
                     value={header.value}
                     onChange={(e) => updateHeader(idx, "value", e.target.value)}
+                    containerClassName="flex-1"
                     className="font-mono text-sm"
                   />
                   <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-destructive" onClick={() => removeHeader(idx)}>
@@ -343,13 +360,13 @@ export function CreateMcpServer() {
                     placeholder="KEY"
                     value={pair.name}
                     onChange={(e) => updateEnvPair(idx, "name", e.target.value)}
-                    className="font-mono text-sm"
+                    className="font-mono text-sm w-1/3 shrink-0"
                   />
-                  <Input
+                  <SecretInput
                     placeholder="value"
-                    type="password"
                     value={pair.value}
                     onChange={(e) => updateEnvPair(idx, "value", e.target.value)}
+                    containerClassName="flex-1"
                     className="font-mono text-sm"
                   />
                   <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-destructive" onClick={() => removeEnvPair(idx)}>

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Dataset + preflight helpers for the optimizer.
 
 The dataset is intentionally tiny: every example is one full (minutes-long)

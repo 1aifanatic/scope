@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -14,19 +14,26 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import {
   Send, Loader2, Server, Info, BookOpen, Sparkles, Puzzle, SlidersHorizontal,
-  X, Save, Plus, ChevronDown, FilePlus2, History, ArrowLeft, Check,
+  X, Save, Plus, ChevronDown, FilePlus2, History, ArrowLeft, Check, FolderGit2, FileText, Boxes,
 } from "lucide-react";
 import {
-  WORKER_TYPES, type CodingAgent, type McpServerDocument,
-  type ProfileWithVersion, type ProfileVersionDocument, type Run,
+  getActiveAgentVersions, isAgentAvailable, isAgentVersionAvailable, type CodingAgent, type McpServerDocument,
+  type ProfileWithVersion, type ProfileVersionDocument, type ResourceBindingSpec, type Run,
 } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { CreateCriterionDialog } from "@/components/CreateCriterionDialog";
 import { SkillPicker } from "@/components/SkillPicker";
+import { CodebasePicker } from "@/components/CodebasePicker";
+import { ResourcePicker } from "@/components/ResourcePicker";
 import { ExtensionPicker } from "@/components/ExtensionPicker";
 import { ProfileCreateForm } from "@/components/ProfileCreateForm";
 import { ProfilePicker } from "@/components/ProfilePicker";
+import { AgentBadge } from "@/components/AgentBadge";
+import { HelpTooltip } from "@/components/HelpTooltip";
+import { AdvancedSection } from "@/components/AdvancedSection";
+import { AdvancedModeToggle } from "@/components/AdvancedModeToggle";
+import { useAdvancedMode } from "@/hooks/useAdvancedMode";
 import {
   ModelSelectItems,
   ReasoningEffortSelect,
@@ -35,7 +42,16 @@ import {
 } from "@/components/ReasoningEffortSelect";
 import { TaskPromptPicker } from "@/components/TaskPromptPicker";
 import { useCommandEnter } from "@/hooks/useCommandEnter";
+import { useVisibleGates } from "@/hooks/useVisibleGates";
+import { useStrictAgentCapabilities } from "@/hooks/useStrictAgentCapabilities";
 import { KbdBadge } from "@/components/KbdBadge";
+import {
+  GATE_METADATA,
+  orderGates,
+  validateGateConfigs,
+  type GateConfig,
+  type GateId,
+} from "@/lib/gates";
 import { toast } from "sonner";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
@@ -58,6 +74,22 @@ type VariationDraft = {
 
 type GraphSelection = { kind: "base" } | { kind: "variation"; index: number };
 
+type GateDraft = {
+  enabled: boolean;
+  promptText: string;
+  criteria: string[];
+  maxIterations: number;
+};
+
+function createGateDraft(maxIterations: number): GateDraft {
+  return {
+    enabled: false,
+    promptText: "",
+    criteria: [],
+    maxIterations,
+  };
+}
+
 const VARIATION_COLORS = [
   "#3b82f6",
   "#10b981",
@@ -76,7 +108,7 @@ function randomVariationColor(): string {
 interface GalleryCardProps {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
-  description?: string;
+  description?: React.ReactNode;
   onClick: () => void;
 }
 
@@ -105,12 +137,13 @@ interface CollapsibleCardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   disabled?: boolean;
+  help?: React.ReactNode;
   children: React.ReactNode;
 }
 
-function CollapsibleCard({ icon: Icon, title, summary, open, onOpenChange, disabled, children }: CollapsibleCardProps) {
+function CollapsibleCard({ icon: Icon, title, summary, open, onOpenChange, disabled, help, children }: CollapsibleCardProps) {
   return (
-    <Card>
+    <Card className="relative">
       <button
         type="button"
         onClick={() => onOpenChange(!open)}
@@ -133,6 +166,11 @@ function CollapsibleCard({ icon: Icon, title, summary, open, onOpenChange, disab
           className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
         />
       </button>
+      {help && (
+        <div className="absolute right-12 top-6 z-10" onClick={(e) => e.stopPropagation()}>
+          {help}
+        </div>
+      )}
       {open && (
         <CardContent className="pt-0">
           {children}
@@ -149,22 +187,40 @@ function CollapsibleCard({ icon: Icon, title, summary, open, onOpenChange, disab
 export function SubmitRun() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const strictAgentCapabilities = useStrictAgentCapabilities();
+
+  // Non-select gates visible in the authoring UI. Run/Deploy are hidden behind
+  // feature flags until ready; gateDrafts still holds all gates so its shape is
+  // stable, but hidden gates are never rendered, counted, validated, or submitted.
+  const visibleGates = useVisibleGates();
+  const visibleNonSelectGates = useMemo(
+    () => visibleGates.filter((gate): gate is Exclude<GateId, "select"> => gate !== "select"),
+    [visibleGates],
+  );
 
   // Form state
   const [task, setTask] = useState("");
   const [pickedCriteria, setPickedCriteria] = useState<string[]>([]);
-  const [worker, setWorker] = useState<string>("coder-acp-copilot");
+  const [worker, setWorker] = useState<string>("");
   const [model, setModel] = useState<string>("");
   const [reasoningEffort, setReasoningEffort] = useState<string>("");
   const [maxIterations, setMaxIterations] = useState<number>(10);
+  const [gateDrafts, setGateDrafts] = useState<Record<Exclude<GateId, "select">, GateDraft>>(() => ({
+    build: createGateDraft(10),
+    test: createGateDraft(10),
+    run: createGateDraft(10),
+    deploy: createGateDraft(10),
+  }));
   const [occurrences, setOccurrences] = useState<number>(5);
   const [priority, setPriority] = useState<number>(0);
-  const [agentsMd, setAgentsMd] = useState<string>("");
   const [experimentId, setExperimentId] = useState<string>("");
+  const [agentsMd, setAgentsMd] = useState<string>("");
 
   // Optional add-ons
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  const [selectedCodebaseSpec, setSelectedCodebaseSpec] = useState<string | null>(null);
+  const [selectedResourceSpecs, setSelectedResourceSpecs] = useState<ResourceBindingSpec[]>([]);
   const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
 
   // Profile
@@ -179,6 +235,7 @@ export function SubmitRun() {
 
   // Inline criteria creation dialog
   const [createCriterionOpen, setCreateCriterionOpen] = useState(false);
+  const [gateCriterionDialog, setGateCriterionDialog] = useState<Exclude<GateId, "select"> | null>(null);
   const [createProfileOpen, setCreateProfileOpen] = useState(false);
 
   // Save as Profile
@@ -186,9 +243,13 @@ export function SubmitRun() {
   const [saveProfileOpen, setSaveProfileOpen] = useState(false);
 
   // UI state
+  const [advanced, setAdvanced] = useAdvancedMode();
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [codebaseOpen, setCodebaseOpen] = useState(false);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
+  const [agentsMdOpen, setAgentsMdOpen] = useState(false);
   const [extensionsOpen, setExtensionsOpen] = useState(false);
   const [graphSelection, setGraphSelection] = useState<GraphSelection>({ kind: "base" });
 
@@ -197,9 +258,9 @@ export function SubmitRun() {
   const [generateDescription, setGenerateDescription] = useState("");
 
   // ─── Queries ────────────────────────────────────────────────────────────
-  const { data: agents = [] } = useQuery({
-    queryKey: ["agents"],
-    queryFn: () => api.listAgents(),
+  const { data: agents = [], isSuccess: agentsLoaded } = useQuery({
+    queryKey: ["agents", "include-deleted"],
+    queryFn: () => api.listAgents({ includeDeleted: true }),
   });
 
   const { data: mcpServers = [] } = useQuery({
@@ -227,55 +288,102 @@ export function SubmitRun() {
   // ─── Derived ────────────────────────────────────────────────────────────
   const activeMcpServers = mcpServers.filter((s: McpServerDocument) => !s.deletedAt);
   const activeAgents = agents.filter((a: CodingAgent) => !a.deletedAt);
-  const availableAgents = activeAgents.filter((a: CodingAgent) => a.available !== false);
+  const availableAgents = agents.filter(isAgentAvailable);
+  const agentNameById = new Map(agents.map((agent) => [agent._id, agent.name]));
   const selectedAgent = activeAgents.find((a: CodingAgent) => a._id === worker);
-  const isVscodeWorker = worker.includes("vscode");
+  const supportsMcpServers = !strictAgentCapabilities || selectedAgent?.capabilities?.supportsMcpServers === true;
+  const supportsSkills = !strictAgentCapabilities || selectedAgent?.capabilities?.supportsSkills === true;
+  const supportsExtensions = !strictAgentCapabilities || selectedAgent?.capabilities?.supportsExtensions === true;
+  const showMcpServers = supportsMcpServers || (profileLocked && selectedMcpServers.length > 0);
+  const showSkills = supportsSkills || (profileLocked && selectedSkills.length > 0);
+  const showExtensions = supportsExtensions || (profileLocked && selectedExtensions.length > 0);
   const profileList = profiles as ProfileWithVersion[];
+  const profileVersionIsAvailable = (version: ProfileVersionDocument) =>
+    isAgentVersionAvailable(
+      agents.find((agent) => agent._id === version.workerType),
+      version.agentVersion,
+    );
+  const selectableProfileList = profileList.filter((profile) => profileVersionIsAvailable(profile.version));
   const selectedBaseProfile = profileList.find((profile) => profile._id === selectedProfileId);
-  const topProfiles = profileList.slice(0, 3);
+  const selectedBaseProfileVersion = selectedProfileId
+    ? profileVersions.find((version) => version.version === selectedProfileVersion) ?? selectedBaseProfile?.version
+    : undefined;
+  const topProfiles = selectableProfileList.slice(0, 3);
 
   // ─── Effects ────────────────────────────────────────────────────────────
-  // When agent changes, reset model + clear extensions for non-vscode workers
   useEffect(() => {
-    if (selectedProfileId) return;
+    if (!agentsLoaded || profileLocked) return;
+    if (!availableAgents.some((agent) => agent._id === worker)) {
+      setWorker(availableAgents[0]?._id ?? "");
+    }
+  }, [agentsLoaded, availableAgents, profileLocked, worker]);
+
+  // When the agent changes, reset dependent values and unsupported add-ons.
+  useEffect(() => {
+    if (selectedProfileId || !agentsLoaded) return;
     if (selectedAgent) {
       setModel(selectedAgent.defaultModel ?? "");
     } else {
       setModel("");
     }
-    if (!worker.includes("vscode")) {
+    if (strictAgentCapabilities && selectedAgent?.capabilities?.supportsReasoningEffort !== true) {
+      setReasoningEffort("");
+    }
+    if (!supportsMcpServers) {
+      setSelectedMcpServers([]);
+    }
+    if (!supportsSkills) {
+      setSelectedSkills([]);
+    }
+    if (!supportsExtensions) {
       setSelectedExtensions([]);
     }
-  }, [worker, selectedAgent?.defaultModel]);
+  }, [
+    worker,
+    agentsLoaded,
+    selectedAgent?.defaultModel,
+    selectedAgent?.capabilities?.supportsReasoningEffort,
+    strictAgentCapabilities,
+    supportsMcpServers,
+    supportsSkills,
+    supportsExtensions,
+    selectedProfileId,
+  ]);
 
-  // Auto-open Extensions section when switching to a VS Code worker that has selected extensions
+  // Auto-open Extensions when the selected worker supports them.
   useEffect(() => {
-    if (isVscodeWorker && selectedExtensions.length > 0) {
+    if (showExtensions && selectedExtensions.length > 0) {
       setExtensionsOpen(true);
     }
-  }, [isVscodeWorker, selectedExtensions.length]);
+  }, [showExtensions, selectedExtensions.length]);
 
-  // Fetch active versions for selected agent
-  const { data: agentVersions = [] } = useQuery({
-    queryKey: ["agent-versions", worker],
-    queryFn: () => api.listAgentVersions(worker, "active"),
-    enabled: !!worker,
-  });
-
-  const sortedVersions = [...agentVersions].sort(
+  const sortedVersions = selectedAgent ? getActiveAgentVersions(selectedAgent).sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+  ) : [];
+  const selectedVersionIsHistorical = !!selectedAgentVersion
+    && !sortedVersions.some((version) => version.agentVersion === selectedAgentVersion);
 
   // Model capabilities and reasoning-effort management
-  const { capabilitiesMap: modelCapabilitiesMap } = useModelCapabilities(worker || undefined);
+  const {
+    capabilitiesMap: modelCapabilitiesMap,
+    activeModelIds,
+    capabilitiesLoaded,
+  } = useModelCapabilities(worker || undefined);
+  const modelIsHistorical = !!model && !activeModelIds.includes(model);
   const onEffortChange = useCallback((v: string) => setReasoningEffort(v), []);
   const { supportedEfforts, workerEffortWarning } = useReasoningEffort({
     model,
     capabilitiesMap: modelCapabilitiesMap,
     value: reasoningEffort,
     onChange: onEffortChange,
-    agentSupportsEffort: selectedAgent?.capabilities?.supportsReasoningEffort,
+    agentSupportsEffort: strictAgentCapabilities
+      ? selectedAgent?.capabilities?.supportsReasoningEffort
+      : true,
+    capabilitiesLoaded,
   });
+  const displayedSupportedEfforts = supportedEfforts.length > 0
+    ? supportedEfforts
+    : profileLocked && reasoningEffort ? [reasoningEffort] : [];
 
   useEffect(() => {
     if (selectedProfileId) return;
@@ -284,7 +392,7 @@ export function SubmitRun() {
     } else {
       setSelectedAgentVersion("");
     }
-  }, [worker, agentVersions.length]);
+  }, [worker, sortedVersions.length, selectedProfileId]);
 
   // ─── Handlers ───────────────────────────────────────────────────────────
   const applyVersionConfig = (v: ProfileVersionDocument) => {
@@ -294,9 +402,11 @@ export function SubmitRun() {
     setSelectedAgentVersion(v.agentVersion ?? "");
     setSelectedMcpServers(v.mcpServers ?? []);
     setSelectedSkills(v.skillRevisions ?? []);
+    setSelectedResourceSpecs(v.resources ?? []);
     setSelectedExtensions(v.extensions ?? []);
     if ((v.mcpServers ?? []).length > 0) setMcpOpen(true);
     if ((v.skillRevisions ?? []).length > 0) setSkillsOpen(true);
+    if ((v.resources ?? []).length > 0) setResourcesOpen(true);
     if ((v.extensions ?? []).length > 0) setExtensionsOpen(true);
   };
 
@@ -323,6 +433,13 @@ export function SubmitRun() {
     setVariationDrafts([]);
   };
 
+  const updateGateDraft = (gate: Exclude<GateId, "select">, patch: Partial<GateDraft>) => {
+    setGateDrafts((prev) => ({
+      ...prev,
+      [gate]: { ...prev[gate], ...patch },
+    }));
+  };
+
   const handleProfileCreated = (profile: ProfileWithVersion) => {
     queryClient.setQueryData<ProfileWithVersion[]>(["profiles"], (previous) => {
       const existing = previous ?? [];
@@ -342,7 +459,7 @@ export function SubmitRun() {
   const addVariationDraft = () => {
     setVariationDrafts((prev) => {
       const used = new Set(prev.map((v) => v.profileId).filter(Boolean));
-      const nextProfile = profileList.find((p) => p._id !== selectedProfileId && !used.has(p._id));
+      const nextProfile = selectableProfileList.find((p) => p._id !== selectedProfileId && !used.has(p._id));
       if (!nextProfile) {
         toast.info("All available profiles are already used in variations.");
         return prev;
@@ -374,7 +491,7 @@ export function SubmitRun() {
 
   const getAvailableVariationProfiles = (excludeIndex?: number) => {
     const used = getUsedVariationProfileIds(excludeIndex);
-    return profileList.filter((p) => p._id !== selectedProfileId && !used.has(p._id));
+    return selectableProfileList.filter((p) => p._id !== selectedProfileId && !used.has(p._id));
   };
 
   useEffect(() => {
@@ -404,6 +521,34 @@ export function SubmitRun() {
     if (run.model) setModel(run.model);
     if (run.agentVersion) setSelectedAgentVersion(run.agentVersion);
     if (run.maxIterations) setMaxIterations(run.maxIterations);
+    setGateDrafts(() => {
+      const next = {
+        build: createGateDraft(run.maxIterations ?? maxIterations),
+        test: createGateDraft(run.maxIterations ?? maxIterations),
+        run: createGateDraft(run.maxIterations ?? maxIterations),
+        deploy: createGateDraft(run.maxIterations ?? maxIterations),
+      };
+      for (const gateConfig of run.gates ?? []) {
+        if (gateConfig.gate === "select") continue;
+        next[gateConfig.gate] = {
+          enabled: true,
+          promptText: "",
+          criteria: gateConfig.criteria,
+          maxIterations: gateConfig.maxIterations ?? run.maxIterations ?? maxIterations,
+        };
+      }
+      return next;
+    });
+    // Gate configs only store a resolved promptId; resolve each back to its text
+    // so the editable textarea is prefilled when loading a recent run.
+    for (const gateConfig of run.gates ?? []) {
+      if (gateConfig.gate === "select" || !gateConfig.promptId) continue;
+      const gate = gateConfig.gate;
+      const promptId = gateConfig.promptId;
+      api.getTaskPrompt(promptId)
+        .then((prompt) => updateGateDraft(gate, { promptText: prompt.text }))
+        .catch(() => undefined);
+    }
     if (run.mcpServers && run.mcpServers.length > 0) {
       setSelectedMcpServers(run.mcpServers);
       setMcpOpen(true);
@@ -413,6 +558,25 @@ export function SubmitRun() {
       setSelectedSkills(skills);
       setSkillsOpen(true);
     }
+    if (run.codebaseRevisionId) {
+      setSelectedCodebaseSpec(run.codebaseRevisionId);
+      setCodebaseOpen(true);
+    }
+    const resources = run.resources ?? (run.run?.resources ?? []).map((resource) => ({
+      ref: resource.ref,
+      ...(resource.params ? { params: resource.params } : {}),
+    }));
+    if (resources.length > 0) {
+      setSelectedResourceSpecs(resources);
+      setResourcesOpen(true);
+    }
+    if (run.agentsMdPromptId) {
+      setAgentsMdOpen(true);
+      api.getTaskPromptContent(run.agentsMdPromptId)
+        .then((content) => setAgentsMd(content.text))
+        .catch(() => undefined);
+    }
+    setExperimentId(run.experimentId ?? "");
     if (run.extensions && run.extensions.length > 0) {
       setSelectedExtensions(run.extensions);
       setExtensionsOpen(true);
@@ -431,6 +595,7 @@ export function SubmitRun() {
         ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}),
         ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}),
         ...(selectedSkills.length > 0 ? { skillRevisions: selectedSkills } : {}),
+        ...(selectedResourceSpecs.length > 0 ? { resources: selectedResourceSpecs } : {}),
         ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}),
       }),
     onSuccess: (data) => {
@@ -448,7 +613,7 @@ export function SubmitRun() {
     mutationFn: (opts: { description?: string; existingPrompt?: string }) =>
       api.generateTaskPrompt(opts),
     onSuccess: (data) => {
-      setTask(data.taskPrompt);
+      setTask(data.taskPrompt ?? data.tasks?.[0] ?? "");
       setShowGenerate(false);
       setGenerateDescription("");
     },
@@ -466,6 +631,37 @@ export function SubmitRun() {
       });
     }
   };
+
+  const configuredGateCount = visibleNonSelectGates.filter((gate) => gateDrafts[gate].enabled).length;
+  const gatesEnabled = configuredGateCount > 0;
+  const gateConfigs: GateConfig[] = gatesEnabled
+    ? orderGates([
+        {
+          gate: "select",
+          promptId: "",
+          criteria: pickedCriteria,
+          maxIterations,
+        },
+        ...visibleNonSelectGates
+          .filter((gate) => gateDrafts[gate].enabled)
+          .map((gate): GateConfig => ({
+            gate,
+            promptText: gateDrafts[gate].promptText.trim(),
+            criteria: gateDrafts[gate].criteria,
+            maxIterations: gateDrafts[gate].maxIterations,
+          })),
+      ])
+    : [];
+  const gateValidationErrors = gatesEnabled ? validateGateConfigs(gateConfigs, maxIterations) : [];
+  const promptValidationErrors = gatesEnabled
+    ? visibleNonSelectGates.flatMap((gate) => {
+        const draft = gateDrafts[gate];
+        return draft.enabled && !draft.promptText.trim()
+          ? [`${GATE_METADATA[gate].label} gate needs a ${GATE_METADATA[gate].label} prompt.`]
+          : [];
+      })
+    : [];
+  const gateErrors = [...gateValidationErrors, ...promptValidationErrors];
 
   const submitMutation = useMutation({
     mutationFn: api.submitRun,
@@ -497,13 +693,16 @@ export function SubmitRun() {
       ...(inVariationMode ? {} : { ...(model ? { model } : {}) }),
       ...(inVariationMode ? {} : { ...(reasoningEffort ? { reasoningEffort } : {}) }),
       maxIterations,
+      ...(gatesEnabled ? { gates: gateConfigs } : {}),
       ...(priority !== 0 ? { priority } : {}),
       ...(occurrences > 1 ? { count: occurrences } : {}),
-      ...(agentsMd.trim() ? { agentsMd: agentsMd } : {}),
       ...(experimentId.trim() ? { experimentId: experimentId.trim() } : {}),
+      ...(agentsMd.trim() ? { agentsMd: agentsMd } : {}),
       ...(inVariationMode ? {} : { ...(selectedMcpServers.length > 0 ? { mcpServers: selectedMcpServers } : {}) }),
       ...(inVariationMode ? {} : { ...(selectedSkills.length > 0 ? { skills: selectedSkills } : {}) }),
       ...(inVariationMode ? {} : { ...(selectedExtensions.length > 0 ? { extensions: selectedExtensions } : {}) }),
+      ...(selectedCodebaseSpec ? { codebase: selectedCodebaseSpec } : {}),
+      ...(selectedResourceSpecs.length > 0 ? { resources: selectedResourceSpecs } : {}),
       ...(inVariationMode ? {} : { ...(selectedAgentVersion ? { agentVersion: selectedAgentVersion } : {}) }),
       ...(inVariationMode
         ? {
@@ -521,11 +720,28 @@ export function SubmitRun() {
     doSubmit();
   };
 
+  const selectedVariationTargetsAvailable = variationDrafts.every((draft) => {
+    if (!draft.profileId) return true;
+    const profile = profileList.find((candidate) => candidate._id === draft.profileId);
+    if (!profile) return false;
+    const version = draft.profileVersion === profile.latestVersion
+      ? profile.version
+      : (variationProfileVersions[draft.profileId] ?? []).find(
+          (candidate) => candidate.version === draft.profileVersion,
+        );
+    return !!version && profileVersionIsAvailable(version);
+  });
+
   const canSubmit =
     !!task.trim() &&
+    !!selectedAgent &&
+    isAgentAvailable(selectedAgent) &&
+    !selectedVersionIsHistorical &&
+    selectedVariationTargetsAvailable &&
     !submitMutation.isPending &&
-    !(selectedAgent && selectedAgent.supportedModels.length > 0 && !model) &&
-    !(maxIterations !== 1 && pickedCriteria.length === 0);
+    !(selectedAgent && activeModelIds.length > 0 && !model) &&
+    !(maxIterations !== 1 && pickedCriteria.length === 0) &&
+    gateErrors.length === 0;
 
   const selectedVariationCount = variationDrafts.filter((v) => v.profileId.trim().length > 0).length;
   const compositionProfileCount = selectedProfileId ? 1 + selectedVariationCount : 0;
@@ -589,13 +805,21 @@ export function SubmitRun() {
   // ─── Render helpers ─────────────────────────────────────────────────────
   const summaryChips: string[] = [
     `${maxIterations} iteration${maxIterations === 1 ? "" : "s"}`,
-    `${pickedCriteria.length} criteri${pickedCriteria.length === 1 ? "on" : "a"}`,
+    `${pickedCriteria.length} requirements criteri${pickedCriteria.length === 1 ? "on" : "a"}`,
+    gatesEnabled ? `${gateConfigs.length} configured gates` : "single-pass Requirements",
     occurrences > 1 ? `×${occurrences} runs` : "",
     worker,
     model || "",
-    selectedAgentVersion ? `v${selectedAgentVersion}` : "",
+    advanced && selectedAgentVersion && selectedAgentVersion !== sortedVersions[0]?.agentVersion
+      ? `v${selectedAgentVersion}`
+      : "",
+    advanced && priority !== 0 ? `priority ${priority}` : "",
     selectedMcpServers.length > 0 ? `${selectedMcpServers.length} MCP` : "",
     selectedSkills.length > 0 ? `${selectedSkills.length} skill${selectedSkills.length === 1 ? "" : "s"}` : "",
+    selectedCodebaseSpec ? `codebase ${selectedCodebaseSpec}` : "",
+    selectedResourceSpecs.length > 0 ? `${selectedResourceSpecs.length} resource${selectedResourceSpecs.length === 1 ? "" : "s"}` : "",
+    experimentId.trim() ? `experiment ${experimentId.trim()}` : "",
+    agentsMd.trim() ? "AGENTS.md" : "",
     selectedExtensions.length > 0 ? `${selectedExtensions.length} ext` : "",
   ].filter(Boolean);
 
@@ -616,6 +840,11 @@ export function SubmitRun() {
           <h1 className="text-3xl font-bold tracking-tight">New Run</h1>
           <p className="text-muted-foreground">Submit a benchmark run to a coding agent worker</p>
         </div>
+        <AdvancedModeToggle
+          checked={advanced}
+          onCheckedChange={setAdvanced}
+          className="ml-auto"
+        />
       </div>
 
       {/* Quick Start gallery (collapsible, default closed) */}
@@ -639,7 +868,12 @@ export function SubmitRun() {
                 key={p._id}
                 icon={SlidersHorizontal}
                 title={p.name}
-                description={`Profile · v${p.latestVersion} · ${p.version?.workerType ?? "—"}`}
+                description={
+                  <span className="inline-flex items-center gap-1">
+                    <span>Profile · v{p.latestVersion} ·</span>
+                    <AgentBadge agentId={p.version.workerType} triggerLink={false} />
+                  </span>
+                }
                 onClick={() => applyProfile(p._id)}
               />
             ))}
@@ -648,20 +882,25 @@ export function SubmitRun() {
                 key={r._id}
                 icon={History}
                 title={truncate(r.scenario?.task ?? "Untitled run", 60)}
-                description={`Recent · ${r.workerType}${r.model ? ` · ${r.model}` : ""}`}
+                description={
+                  <span className="inline-flex items-center gap-1">
+                    <span>Recent ·</span>
+                    <AgentBadge agentId={r.workerType} triggerLink={false} />
+                    {r.model && <span>· {r.model}</span>}
+                  </span>
+                }
                 onClick={() => applyRecentRun(r)}
               />
             ))}
           </div>
-          {profileList.length > 3 && (
+          {selectableProfileList.length > 3 && (
             <p className="mt-3 text-xs text-muted-foreground">
-              {profileList.length - 3} more profile{profileList.length - 3 === 1 ? "" : "s"} available — use the Profile field below.
+              {selectableProfileList.length - 3} more profile{selectableProfileList.length - 3 === 1 ? "" : "s"} available — use the Profile field below.
             </p>
           )}
         </CollapsibleCard>
       )}
 
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
       <div className="space-y-6">
 
       {/* ─── Scenario ──────────────────────────────────────────────────── */}
@@ -672,7 +911,13 @@ export function SubmitRun() {
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="task">Task *</Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="task">Task *</Label>
+              <HelpTooltip
+                text="The natural-language instruction sent to the coding agent. Saved to the task prompt library so you can reuse it across runs."
+                docs="taskPrompts"
+              />
+            </div>
             <TaskPromptPicker onSelect={(text) => setTask(text)} />
             <Textarea
               id="task"
@@ -745,15 +990,106 @@ export function SubmitRun() {
             )}
           </div>
 
+          {/* ─── Codebase (optional, discreet) ───────────────────────────── */}
+          {!(codebaseOpen || selectedCodebaseSpec) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-xs text-muted-foreground"
+              onClick={() => setCodebaseOpen(true)}
+            >
+              <FolderGit2 className="h-3.5 w-3.5" />
+              Add codebase
+            </Button>
+          ) : (
+            <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-xs">
+                    Codebase{" "}
+                    <span className="font-normal text-muted-foreground">(optional)</span>
+                  </Label>
+                  <HelpTooltip text="Optional workspace seed. Pick a git codebase to resolve at submit time or a specific archive/git revision." />
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                  onClick={() => {
+                    setSelectedCodebaseSpec(null);
+                    setCodebaseOpen(false);
+                  }}
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Remove
+                </Button>
+              </div>
+              <CodebasePicker selected={selectedCodebaseSpec} onChange={setSelectedCodebaseSpec} />
+            </div>
+          )}
+
+          {/* ─── Resources (optional, discreet) ───────────────────────────── */}
+          {!(resourcesOpen || selectedResourceSpecs.length > 0) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-xs text-muted-foreground"
+              onClick={() => setResourcesOpen(true)}
+            >
+              <Boxes className="h-3.5 w-3.5" />
+              Add resources
+            </Button>
+          ) : (
+            <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-xs">
+                    Resources{" "}
+                    <span className="font-normal text-muted-foreground">(optional)</span>
+                  </Label>
+                  <HelpTooltip text="Optional lifecycle dependencies. Pick bare resources to pin their latest revision at submit time, or choose a specific immutable revision." />
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                  onClick={() => {
+                    setSelectedResourceSpecs([]);
+                    setResourcesOpen(false);
+                  }}
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Remove
+                </Button>
+              </div>
+              <ResourcePicker
+                selected={selectedResourceSpecs}
+                onChange={setSelectedResourceSpecs}
+                profileBindings={selectedBaseProfileVersion?.resources ?? []}
+              />
+            </div>
+          )}
+
           <div className="space-y-2">
-            <Label htmlFor="criteria">
-              Criteria {maxIterations !== 1 && "* "}
-              <span className="text-muted-foreground font-normal">(select from registry)</span>
-            </Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="criteria">
+                Criteria {maxIterations !== 1 && "* "}
+                <span className="text-muted-foreground font-normal">(select from registry)</span>
+              </Label>
+              <HelpTooltip
+                text="Reusable evaluation rules the judge applies to agent output. List only direct criteria — the judge automatically evaluates all transitive ancestors, skipping descendants when a parent fails."
+                docs="criteria"
+              />
+            </div>
             <CriteriaPicker
               selected={pickedCriteria}
               onChange={setPickedCriteria}
               inputId="criteria"
+              gate="select"
               trailingAction={(
                 <Button
                   type="button"
@@ -769,6 +1105,8 @@ export function SubmitRun() {
             <CreateCriterionDialog
               open={createCriterionOpen}
               onOpenChange={setCreateCriterionOpen}
+              defaultGates={["select"]}
+              lockedGates={["select"]}
               onCreated={(id) => setPickedCriteria((prev) => [...prev, id])}
             />
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -777,9 +1115,15 @@ export function SubmitRun() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="maxIterations">Max iterations</Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="maxIterations">Max iterations</Label>
+                <HelpTooltip
+                  text="How many judge feedback loops the agent gets. With 1, the agent runs once and the judge does not evaluate. Higher values let the agent iterate on feedback."
+                  docs="submitRunPortal"
+                />
+              </div>
               <Input
                 id="maxIterations"
                 type="number"
@@ -790,18 +1134,13 @@ export function SubmitRun() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="priority">Priority</Label>
-              <Input
-                id="priority"
-                type="number"
-                min={-100}
-                max={100}
-                value={priority}
-                onChange={(e) => setPriority(Math.max(-100, Math.min(100, parseInt(e.target.value) || 0)))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="occurrences">Occurrences</Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="occurrences">Occurrences</Label>
+                <HelpTooltip
+                  text="How many times to repeat this exact run. Useful for measuring variance across identical inputs."
+                  docs="submitRunPortal"
+                />
+              </div>
               <Input
                 id="occurrences"
                 type="number"
@@ -811,204 +1150,261 @@ export function SubmitRun() {
                 onChange={(e) => setOccurrences(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
               />
             </div>
+            <div className="space-y-2">
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="experimentId">Experiment ID</Label>
+                <HelpTooltip text="Optional correlation key used to group all runs from one optimizer experiment." />
+              </div>
+              <Input
+                id="experimentId"
+                value={experimentId}
+                onChange={(e) => setExperimentId(e.target.value)}
+                placeholder="gepa-2026-10-14"
+                className="font-mono"
+              />
+            </div>
           </div>
 
-          {/* ─── Advanced: AGENTS.md + experiment grouping ──────────────── */}
-          <div className="space-y-2">
-            <Label htmlFor="agentsMd">AGENTS.md (optional)</Label>
-            <Textarea
-              id="agentsMd"
-              rows={6}
-              placeholder="# AGENTS.md&#10;Project-level instructions written to the workspace root before the run."
-              value={agentsMd}
-              onChange={(e) => setAgentsMd(e.target.value)}
-              className="font-mono text-sm"
-            />
-            <p className="text-xs text-muted-foreground">
-              Stored as an <code>agents.md</code> prompt and written to <code>&lt;workspace&gt;/AGENTS.md</code> before the run. Leave empty to omit.
-            </p>
+          {/* ─── AGENTS.md (optional, discreet) ──────────────────────────── */}
+          {!(agentsMdOpen || agentsMd.trim()) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-xs text-muted-foreground"
+              onClick={() => setAgentsMdOpen(true)}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              Add AGENTS.md
+            </Button>
+          ) : (
+            <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="agentsMd" className="text-xs">
+                    AGENTS.md{" "}
+                    <span className="font-normal text-muted-foreground">(optional)</span>
+                  </Label>
+                  <HelpTooltip text="Project-level instructions written to <workspace>/AGENTS.md before the run. Search the prompt library for an existing agents.md prompt or type a new one." />
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+                  onClick={() => {
+                    setAgentsMd("");
+                    setAgentsMdOpen(false);
+                  }}
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Remove
+                </Button>
+              </div>
+              <TaskPromptPicker
+                type="agents.md"
+                placeholder="Search existing AGENTS.md prompts or type a new one below…"
+                onSelect={(text) => setAgentsMd(text)}
+              />
+              <Textarea
+                id="agentsMd"
+                rows={6}
+                placeholder="# AGENTS.md&#10;Project-level instructions written to the workspace root before the run."
+                value={agentsMd}
+                onChange={(e) => setAgentsMd(e.target.value)}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Stored as an <code>agents.md</code> prompt and written to <code>&lt;workspace&gt;/AGENTS.md</code> before the run. Leave empty to omit.
+              </p>
+            </div>
+          )}
+
+          <AdvancedSection show={advanced}>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="priority">Priority</Label>
+                  <HelpTooltip
+                    text="Scheduling priority for the run queue (-100 to 100). Higher runs are picked up first. Leave at 0 unless you need to jump the queue."
+                    docs="submitRunPortal"
+                  />
+                </div>
+                <Input
+                  id="priority"
+                  type="number"
+                  min={-100}
+                  max={100}
+                  value={priority}
+                  onChange={(e) => setPriority(Math.max(-100, Math.min(100, parseInt(e.target.value) || 0)))}
+                />
+              </div>
+            </div>
+          </AdvancedSection>
+        </CardContent>
+      </Card>
+
+      {/* ─── Gates ─────────────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Gate pipeline</CardTitle>
+          <CardDescription>
+            Optional phase gates after Requirements. Leave all disabled for the existing single-pass flow.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-md border bg-muted/30 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary">Base</Badge>
+                  <p className="font-medium">{GATE_METADATA.select.label}</p>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Uses the task prompt above with {pickedCriteria.length} {pickedCriteria.length === 1 ? "criterion" : "criteria"} and {maxIterations} iteration{maxIterations === 1 ? "" : "s"}.
+                </p>
+              </div>
+              <Badge variant="outline">Always configured</Badge>
+            </div>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="experimentId">Experiment ID (optional)</Label>
-            <Input
-              id="experimentId"
-              placeholder="Group related requests (e.g. a GEPA run)"
-              value={experimentId}
-              onChange={(e) => setExperimentId(e.target.value)}
-            />
-          </div>
+
+          {visibleNonSelectGates.map((gate, index) => {
+            const meta = GATE_METADATA[gate];
+            const draft = gateDrafts[gate];
+            return (
+              <div key={gate} className={`rounded-md border p-4 ${draft.enabled ? "border-primary/40 bg-primary/5" : "bg-card"}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <label className="flex items-start gap-3">
+                    <Checkbox
+                      checked={draft.enabled}
+                      onCheckedChange={(checked) => updateGateDraft(gate, { enabled: Boolean(checked) })}
+                    />
+                    <span>
+                      <span className="flex items-center gap-2 font-medium">
+                        <Badge variant="outline">Gate {index + 2}</Badge>
+                        {meta.label}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">{meta.description}</span>
+                    </span>
+                  </label>
+                  <Badge variant={draft.enabled ? "default" : "secondary"}>
+                    {draft.enabled ? "Configured" : "Skipped"}
+                  </Badge>
+                </div>
+
+                {draft.enabled && (
+                  <div className="mt-4 space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor={`${gate}-prompt`}>{meta.label} prompt *</Label>
+                      <TaskPromptPicker
+                        type={gate}
+                        placeholder={`Search ${meta.label} prompts or type a new one below…`}
+                        onSelect={(text) => updateGateDraft(gate, { promptText: text })}
+                      />
+                      <Textarea
+                        id={`${gate}-prompt`}
+                        placeholder={`e.g., ${meta.description}`}
+                        value={draft.promptText}
+                        onChange={(e) => updateGateDraft(gate, { promptText: e.target.value })}
+                        rows={3}
+                      />
+                      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Info className="h-3.5 w-3.5 shrink-0" />
+                        New {meta.label} prompts are automatically added to the prompt library.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{meta.label} criteria</Label>
+                      <CriteriaPicker
+                        gate={gate}
+                        selected={draft.criteria}
+                        onChange={(criteria) => updateGateDraft(gate, { criteria })}
+                        trailingAction={(
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-9 gap-1.5 px-3"
+                            onClick={() => setGateCriterionDialog(gate)}
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            New…
+                          </Button>
+                        )}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Only criteria compatible with {meta.label} are shown. Required unless max iterations is 1.
+                      </p>
+                    </div>
+
+                    <div className="max-w-xs space-y-2">
+                      <Label htmlFor={`${gate}-maxIterations`}>Max iterations</Label>
+                      <Input
+                        id={`${gate}-maxIterations`}
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={draft.maxIterations}
+                        onChange={(e) => updateGateDraft(gate, {
+                          maxIterations: Math.max(1, Math.min(50, parseInt(e.target.value) || 1)),
+                        })}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          <CreateCriterionDialog
+            key={gateCriterionDialog ?? "none"}
+            open={gateCriterionDialog !== null}
+            onOpenChange={(open) => { if (!open) setGateCriterionDialog(null); }}
+            defaultGates={gateCriterionDialog ? [gateCriterionDialog] : undefined}
+            lockedGates={gateCriterionDialog ? [gateCriterionDialog] : undefined}
+            onCreated={(id) => {
+              const gate = gateCriterionDialog;
+              if (gate) {
+                updateGateDraft(gate, {
+                  enabled: true,
+                  criteria: [...gateDrafts[gate].criteria, id],
+                });
+              }
+              setGateCriterionDialog(null);
+            }}
+          />
+
+          {gateErrors.length > 0 && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              <p className="font-medium">Gate configuration needs attention</p>
+              <ul className="mt-1 list-disc pl-5">
+                {gateErrors.map((message) => <li key={message}>{message}</li>)}
+              </ul>
+            </div>
+          )}
         </CardContent>
       </Card>
 
       {/* ─── Agent ─────────────────────────────────────────────────────── */}
       <Card>
         <CardHeader>
-          <CardTitle>Agent</CardTitle>
-          <CardDescription>Coding agent, model and version</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="space-y-2">
-              <Label htmlFor="worker">Worker *</Label>
-              <Select value={worker} onValueChange={setWorker} disabled={profileLocked}>
-                <SelectTrigger id="worker">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableAgents.length > 0
-                    ? availableAgents.map((a: CodingAgent) => (
-                        <SelectItem key={a._id} value={a._id}>
-                          {a.name}
-                        </SelectItem>
-                      ))
-                    : WORKER_TYPES.map((w) => (
-                        <SelectItem key={w} value={w}>
-                          {w}
-                        </SelectItem>
-                      ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {selectedAgent && selectedAgent.supportedModels.length > 0 && (
-              <div className="space-y-2">
-                <Label htmlFor="model">Model *</Label>
-                <Select value={model} onValueChange={setModel} disabled={profileLocked}>
-                  <SelectTrigger id="model">
-                    <SelectValue placeholder="Select model" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <ModelSelectItems
-                      models={selectedAgent.supportedModels}
-                      capabilitiesMap={modelCapabilitiesMap}
-                      defaultModel={selectedAgent.defaultModel}
-                    />
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            {supportedEfforts.length > 0 && (
-              <div className="space-y-2">
-                <ReasoningEffortSelect
-                  supportedEfforts={supportedEfforts}
-                  value={reasoningEffort}
-                  onChange={onEffortChange}
-                  disabled={profileLocked}
-                  noSelectionLabel="Any (no preference)"
-                  workerEffortWarning={workerEffortWarning}
-                />
-              </div>
-            )}
-            {sortedVersions.length > 0 && (
-              <div className="space-y-2">
-                <Label htmlFor="agentVersion">Agent version *</Label>
-                <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion} disabled={profileLocked}>
-                  <SelectTrigger id="agentVersion">
-                    <SelectValue placeholder="Select version" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sortedVersions.map((v, i) => (
-                      <SelectItem key={v.agentVersion} value={v.agentVersion}>
-                        {v.agentVersion}{i === 0 ? " (latest)" : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ─── MCP Servers (collapsible) ─────────────────────────────────── */}
-      {activeMcpServers.length > 0 && (
-        <CollapsibleCard
-          icon={Server}
-          title="MCP Servers"
-          summary={
-            selectedMcpServers.length === 0
-              ? "None selected"
-              : `${selectedMcpServers.length} server${selectedMcpServers.length === 1 ? "" : "s"} selected`
-          }
-          open={mcpOpen}
-          onOpenChange={setMcpOpen}
-          disabled={profileLocked}
-        >
-          <div className="space-y-2">
-            {activeMcpServers.map((s: McpServerDocument) => (
-              <label
-                key={s._id}
-                className={`flex items-center gap-3 rounded-md border p-3 transition-colors ${profileLocked ? "opacity-60" : "cursor-pointer hover:bg-accent/50"}`}
-              >
-                <Checkbox
-                  checked={selectedMcpServers.includes(s._id)}
-                  disabled={profileLocked}
-                  onCheckedChange={(checked) => {
-                    setSelectedMcpServers((prev) =>
-                      checked ? [...prev, s._id] : prev.filter((id) => id !== s._id)
-                    );
-                  }}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm">{s._id}</span>
-                    <Badge variant="outline" className="text-xs uppercase">{s.type}</Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {s.name}{s.description ? ` — ${s.description}` : ""}
-                  </p>
-                </div>
-              </label>
-            ))}
-          </div>
-        </CollapsibleCard>
-      )}
-
-      {/* ─── Skills (collapsible) ──────────────────────────────────────── */}
-      <CollapsibleCard
-        icon={BookOpen}
-        title="Skills"
-        summary={
-          selectedSkills.length === 0
-            ? "None selected"
-            : `${selectedSkills.length} skill${selectedSkills.length === 1 ? "" : "s"} selected`
-        }
-        open={skillsOpen}
-        onOpenChange={setSkillsOpen}
-        disabled={profileLocked}
-      >
-        <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} disabled={profileLocked} />
-      </CollapsibleCard>
-
-      {/* ─── Extensions (collapsible, VS Code only) ────────────────────── */}
-      {isVscodeWorker && (
-        <CollapsibleCard
-          icon={Puzzle}
-          title="Extensions"
-          summary={
-            selectedExtensions.length === 0
-              ? "None selected"
-              : `${selectedExtensions.length} extension${selectedExtensions.length === 1 ? "" : "s"} selected`
-          }
-          open={extensionsOpen}
-          onOpenChange={setExtensionsOpen}
-          disabled={profileLocked}
-        >
-          <ExtensionPicker selected={selectedExtensions} onChange={setSelectedExtensions} disabled={profileLocked} />
-        </CollapsibleCard>
-      )}
-      </div>
-
-      <Card className="xl:sticky xl:top-6">
-        <CardHeader>
-          <CardTitle>Profile Variations</CardTitle>
+          <CardTitle className="flex items-center gap-1.5">
+            Profile Variations{" "}
+            <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+            <HelpTooltip
+              text="Profiles bundle worker, model, skills, MCP servers and extensions. Variations let you submit the same task against multiple profile configurations in one run for comparative analysis."
+              docs="profiles"
+            />
+          </CardTitle>
           <CardDescription>
             Choose a base profile and compose profile variations for comparative runs.
+            Profile selections override the Agent, MCP Servers, Skills and Extensions chosen below.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {profileList.length === 0 ? (
+          {selectableProfileList.length === 0 && !selectedProfileId ? (
             <div className="space-y-3 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-              <p>Create a profile to enable profile-based configuration and profile variations.</p>
+              <p>Create a profile with an available agent to enable profile-based configuration and profile variations.</p>
               <Button
                 type="button"
                 variant="outline"
@@ -1026,10 +1422,11 @@ export function SubmitRun() {
                 <Label className="text-sm">Base Profile</Label>
                 <div className="flex items-center gap-2">
                   <ProfilePicker
-                    profiles={profileList}
+                    profiles={selectableProfileList}
                     selectedProfileId={selectedProfileId}
                     onSelect={applyProfile}
                     placeholder="Search existing profiles…"
+                    workerNameById={agentNameById}
                   />
                   <Button
                     type="button"
@@ -1071,6 +1468,7 @@ export function SubmitRun() {
                     </SelectTrigger>
                     <SelectContent>
                       {profileVersions
+                        .filter(profileVersionIsAvailable)
                         .slice()
                         .sort((a: ProfileVersionDocument, b: ProfileVersionDocument) => b.version - a.version)
                         .map((v: ProfileVersionDocument) => (
@@ -1160,10 +1558,14 @@ export function SubmitRun() {
                     {selectedGraphPreview.name} {selectedGraphPreview.version ? `v${selectedGraphPreview.version}` : ""}
                   </p>
                   <p className="mt-1 text-muted-foreground">
-                    {selectedGraphPreview.versionDocument?.workerType ?? "worker: n/a"} · {selectedGraphPreview.versionDocument?.model ?? "model: n/a"}
+                    {selectedGraphPreview.versionDocument
+                      ? (agentNameById.get(selectedGraphPreview.versionDocument.workerType) ?? "Unknown agent")
+                      : "worker: n/a"}{" "}
+                    · {selectedGraphPreview.versionDocument?.model ?? "model: n/a"}
                   </p>
                   <p className="mt-1 text-muted-foreground">
                     {(selectedGraphPreview.versionDocument?.mcpServers?.length ?? 0)} MCP · {(selectedGraphPreview.versionDocument?.skillRevisions?.length ?? 0)} skills · {(selectedGraphPreview.versionDocument?.extensions?.length ?? 0)} extensions
+                    · {(selectedGraphPreview.versionDocument?.resources?.length ?? 0)} resources
                   </p>
                 </div>
               )}
@@ -1197,10 +1599,16 @@ export function SubmitRun() {
               {variationDrafts.map((draft, index) => {
                 const selectedVariationProfile = profileList.find((p) => p._id === draft.profileId);
                 const availableProfiles = getAvailableVariationProfiles(index);
+                const fetchedVariationVersions = variationProfileVersions[draft.profileId] ?? [];
+                const selectedVariationVersion = fetchedVariationVersions.find(
+                  (version) => version.version === draft.profileVersion,
+                ) ?? selectedVariationProfile?.version;
+                const selectedVariationIsUnavailable = !!selectedVariationVersion
+                  && !profileVersionIsAvailable(selectedVariationVersion);
                 const hasAvailableProfiles = availableProfiles.length > 0;
                 const variationVersionOptions = (() => {
                   if (!draft.profileId) return [] as number[];
-                  const fetched = variationProfileVersions[draft.profileId] ?? [];
+                  const fetched = fetchedVariationVersions.filter(profileVersionIsAvailable);
                   if (fetched.length > 0) {
                     return fetched.map((v) => v.version).sort((a, b) => b - a);
                   }
@@ -1233,6 +1641,11 @@ export function SubmitRun() {
                             <SelectValue placeholder="Select profile" />
                           </SelectTrigger>
                           <SelectContent>
+                            {selectedVariationIsUnavailable && selectedVariationProfile && (
+                              <SelectItem value={selectedVariationProfile._id} disabled>
+                                {selectedVariationProfile.name} (unavailable)
+                              </SelectItem>
+                            )}
                             {availableProfiles.map((p) => (
                               <SelectItem key={p._id} value={p._id}>
                                 {p.name}
@@ -1290,6 +1703,227 @@ export function SubmitRun() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ─── Agent ─────────────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Agent</CardTitle>
+          <CardDescription>Coding agent, model and version</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {profileLocked && (
+            <div className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-foreground">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <span>
+                These settings are managed by the selected profile in <span className="font-medium">Profile Variations</span> above.
+                Clear the profile to edit them manually.
+              </span>
+            </div>
+          )}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-2">
+              <div className="flex h-6 items-center gap-1.5">
+                <Label htmlFor="worker">Worker *</Label>
+                <HelpTooltip
+                  text="The runtime that drives the coding agent: GitHub Copilot, Claude Code, or VS Code Web with Copilot Chat."
+                  docs="choosingAgent"
+                />
+              </div>
+              <Select value={worker} onValueChange={setWorker} disabled={profileLocked}>
+                <SelectTrigger id="worker">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {profileLocked && worker && !availableAgents.some((agent) => agent._id === worker) && (
+                    <SelectItem value={worker} disabled>
+                      <span className="flex items-center gap-1">
+                        <AgentBadge
+                          agentId={worker}
+                          agent={selectedAgent}
+                          triggerLink={false}
+                        />
+                        <span>(unavailable)</span>
+                      </span>
+                    </SelectItem>
+                  )}
+                  {availableAgents.map((a: CodingAgent) => (
+                    <SelectItem key={a._id} value={a._id}>
+                      <AgentBadge agentId={a._id} agent={a} triggerLink={false} />
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!profileLocked && agentsLoaded && availableAgents.length === 0 && (
+                <p className="text-xs text-muted-foreground">No available agents have an active worker version.</p>
+              )}
+            </div>
+            {(activeModelIds.length > 0 || (profileLocked && !!model)) && (
+              <div className="space-y-2">
+                <Label htmlFor="model">Model *</Label>
+                {/* Model is required; ignore spurious empty-value callbacks Radix
+                    emits when the default is applied asynchronously after mount. */}
+                <Select
+                  value={model}
+                  onValueChange={(v) => {
+                    if (v) setModel(v);
+                  }}
+                  disabled={profileLocked}
+                >
+                  <SelectTrigger id="model">
+                    <SelectValue placeholder="Select model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                   {profileLocked && modelIsHistorical && (
+                     <SelectItem value={model} disabled>{model} (unavailable)</SelectItem>
+                   )}
+                   <ModelSelectItems
+                     models={activeModelIds}
+                     capabilitiesMap={modelCapabilitiesMap}
+                     defaultModel={selectedAgent?.defaultModel}
+                   />
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {displayedSupportedEfforts.length > 0 && (
+              <div className="space-y-2">
+                <ReasoningEffortSelect
+                  supportedEfforts={displayedSupportedEfforts}
+                  value={reasoningEffort}
+                  onChange={onEffortChange}
+                  disabled={profileLocked}
+                  noSelectionLabel="Any (no preference)"
+                  workerEffortWarning={workerEffortWarning}
+                />
+              </div>
+            )}
+          </div>
+
+          {(sortedVersions.length > 0 || (profileLocked && selectedVersionIsHistorical)) && (
+            <AdvancedSection show={advanced}>
+              <div className="space-y-2 sm:max-w-xs">
+                <Label htmlFor="agentVersion">Agent version *</Label>
+                <Select value={selectedAgentVersion} onValueChange={setSelectedAgentVersion} disabled={profileLocked}>
+                  <SelectTrigger id="agentVersion">
+                    <SelectValue placeholder="Latest" />
+                  </SelectTrigger>
+                  <SelectContent>
+                   {profileLocked && selectedVersionIsHistorical && (
+                     <SelectItem value={selectedAgentVersion} disabled>
+                       {selectedAgentVersion} (unavailable)
+                     </SelectItem>
+                   )}
+                   {sortedVersions.map((v, i) => (
+                      <SelectItem key={v.agentVersion} value={v.agentVersion}>
+                        {v.agentVersion}{i === 0 ? " (latest)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Defaults to the latest version. Pin an older build only to reproduce a past run.
+                </p>
+              </div>
+            </AdvancedSection>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ─── MCP Servers (collapsible) ─────────────────────────────────── */}
+      {showMcpServers && (activeMcpServers.length > 0 || selectedMcpServers.length > 0) && (
+        <CollapsibleCard
+          icon={Server}
+          title="MCP Servers"
+          help={
+            <HelpTooltip
+              text="Model Context Protocol servers expose tools and resources to the agent (filesystem, GitHub, browser, etc.)."
+              docs="mcpServers"
+            />
+          }
+          summary={
+            selectedMcpServers.length === 0
+              ? "None selected"
+              : `${selectedMcpServers.length} server${selectedMcpServers.length === 1 ? "" : "s"} selected`
+          }
+          open={mcpOpen}
+          onOpenChange={setMcpOpen}
+          disabled={profileLocked}
+        >
+          <div className="space-y-2">
+            {activeMcpServers.map((s: McpServerDocument) => (
+              <label
+                key={s._id}
+                className={`flex items-center gap-3 rounded-md border p-3 transition-colors ${profileLocked ? "opacity-60" : "cursor-pointer hover:bg-accent/50"}`}
+              >
+                <Checkbox
+                  checked={selectedMcpServers.includes(s._id)}
+                  disabled={profileLocked}
+                  onCheckedChange={(checked) => {
+                    setSelectedMcpServers((prev) =>
+                      checked ? [...prev, s._id] : prev.filter((id) => id !== s._id)
+                    );
+                  }}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-sm">{s._id}</span>
+                    <Badge variant="outline" className="text-xs uppercase">{s.type}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {s.name}{s.description ? ` — ${s.description}` : ""}
+                  </p>
+                </div>
+              </label>
+            ))}
+          </div>
+        </CollapsibleCard>
+      )}
+
+      {/* ─── Skills (collapsible) ──────────────────────────────────────── */}
+      {showSkills && <CollapsibleCard
+        icon={BookOpen}
+        title="Skills"
+        help={
+          <HelpTooltip
+            text="Reusable instruction packs (Markdown + assets) attached to the prompt so the agent has consistent guidance."
+            docs="skills"
+          />
+        }
+        summary={
+          selectedSkills.length === 0
+            ? "None selected"
+            : `${selectedSkills.length} skill${selectedSkills.length === 1 ? "" : "s"} selected`
+        }
+        open={skillsOpen}
+        onOpenChange={setSkillsOpen}
+        disabled={profileLocked}
+      >
+        <SkillPicker selected={selectedSkills} onChange={setSelectedSkills} disabled={profileLocked} />
+      </CollapsibleCard>}
+
+      {/* ─── Extensions (collapsible) ──────────────────────────────────── */}
+      {showExtensions && (
+        <CollapsibleCard
+          icon={Puzzle}
+          title="Extensions"
+          help={
+            <HelpTooltip
+              text="VS Code extensions to install in the workspace before the agent starts (e.g. language servers, linters)."
+              docs="extensions"
+            />
+          }
+          summary={
+            selectedExtensions.length === 0
+              ? "None selected"
+              : `${selectedExtensions.length} extension${selectedExtensions.length === 1 ? "" : "s"} selected`
+          }
+          open={extensionsOpen}
+          onOpenChange={setExtensionsOpen}
+          disabled={profileLocked}
+        >
+          <ExtensionPicker selected={selectedExtensions} onChange={setSelectedExtensions} disabled={profileLocked} />
+        </CollapsibleCard>
+      )}
       </div>
 
       <Dialog open={createProfileOpen} onOpenChange={setCreateProfileOpen}>

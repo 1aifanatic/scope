@@ -33,7 +33,7 @@ intentionally **outside** the pnpm workspace. `uv.lock` is committed and CI runs
 ```bash
 cd apps/gepa-optimizer
 uv sync                 # create .venv and install deps from uv.lock
-cp .env.example .env    # then edit SCOPE_API_URL, criteria ids, reflection LM creds
+cp .env.example .env    # then edit SCOPE_API_URL, SCOPE_PROJECT_ID, criteria ids, reflection LM creds
 ```
 
 ## How scoring works

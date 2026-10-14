@@ -1,36 +1,9 @@
 ARG COPILOT_CLI_VERSION
+ARG DEPS_IMAGE
 
-# --- Base stage: runtime tools shared by builder and production ---
-# Windows Server Core LTSC 2022 with Node.js, Git, pnpm, and Copilot CLI.
-FROM mcr.microsoft.com/windows/servercore:ltsc2022 AS base
-
-SHELL ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
-
-# Install Chocolatey
-RUN Set-ExecutionPolicy Bypass -Scope Process -Force; \
-    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
-    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-
-# Install Node.js via direct MSI download
-ARG NODE_VERSION=22.16.0
-RUN Invoke-WebRequest -Uri "https://nodejs.org/dist/v${env:NODE_VERSION}/node-v${env:NODE_VERSION}-x64.msi" \
-    -OutFile C:\node.msi; \
-    Start-Process msiexec.exe -ArgumentList '/i', 'C:\node.msi', '/quiet', '/norestart' -Wait; \
-    Remove-Item C:\node.msi
-
-# Install git via Chocolatey
-RUN choco install -y git
-
-# Install pnpm as a standalone executable
-RUN New-Item -ItemType Directory -Force -Path C:\tools | Out-Null; \
-    Invoke-WebRequest -Uri 'https://github.com/pnpm/pnpm/releases/download/v10.29.1/pnpm-win-x64.exe' \
-    -OutFile 'C:\tools\pnpm.exe'
-
-# Install GitHub Copilot CLI globally to C:\tools so it lands on PATH
-ARG COPILOT_CLI_VERSION
-RUN npm install -g --prefix C:\tools "@github/copilot@${env:COPILOT_CLI_VERSION}"
-
-ENV PATH="C:\tools;C:\tools\bin;C:\Program Files\nodejs;C:\Program Files\Git\cmd;C:\ProgramData\chocolatey\bin;C:\Windows\System32\WindowsPowerShell\v1.0;C:\Windows\system32;C:\Windows"
+# --- Base stage: pre-built image with Node.js, Git, pnpm, and Copilot CLI ---
+# scripts/build-windows-worker.ps1 builds base, deps and worker images locally.
+FROM ${DEPS_IMAGE} AS base
 
 # --- Builder stage: compile TypeScript ---
 FROM base AS builder
@@ -41,19 +14,29 @@ WORKDIR C:/app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/telemetry/package.json ./packages/telemetry/
+COPY packages/test-utils/package.json ./packages/test-utils/
 COPY apps/workers/coder-acp-copilot/package.json ./apps/workers/coder-acp-copilot/
 COPY apps/workers/coder-acp-copilot-windows/package.json ./apps/workers/coder-acp-copilot-windows/
 
-RUN C:\tools\pnpm.exe install --frozen-lockfile
+RUN C:\tools\pnpm.exe install --frozen-lockfile; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 COPY packages/shared/tsconfig.json ./packages/shared/
 COPY packages/shared/src ./packages/shared/src/
+COPY packages/telemetry/tsconfig.json ./packages/telemetry/
+COPY packages/telemetry/src ./packages/telemetry/src/
+COPY packages/test-utils/tsconfig.json ./packages/test-utils/
+COPY packages/test-utils/src ./packages/test-utils/src/
 COPY apps/workers/coder-acp-copilot/tsconfig.json ./apps/workers/coder-acp-copilot/
 COPY apps/workers/coder-acp-copilot/src ./apps/workers/coder-acp-copilot/src/
 COPY apps/workers/coder-acp-copilot-windows/tsconfig.json ./apps/workers/coder-acp-copilot-windows/
 COPY apps/workers/coder-acp-copilot-windows/src ./apps/workers/coder-acp-copilot-windows/src/
 
-RUN C:\tools\pnpm.exe --filter shared build; C:\tools\pnpm.exe --filter coder-acp-copilot build; C:\tools\pnpm.exe --filter coder-acp-copilot-windows build
+RUN C:\tools\pnpm.exe --filter shared build; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; \
+    C:\tools\pnpm.exe --filter telemetry build; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; \
+    C:\tools\pnpm.exe --filter test-utils build; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; \
+    C:\tools\pnpm.exe --filter coder-acp-copilot build; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; \
+    C:\tools\pnpm.exe --filter coder-acp-copilot-windows build; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Pre-convert agent.yaml to JSON so the registration job doesn't need the yaml package at runtime
 COPY apps/workers/coder-acp-copilot-windows/agent.yaml ./apps/workers/coder-acp-copilot-windows/agent.yaml
@@ -69,16 +52,19 @@ WORKDIR C:/app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/telemetry/package.json ./packages/telemetry/
 COPY apps/workers/coder-acp-copilot/package.json ./apps/workers/coder-acp-copilot/
 COPY apps/workers/coder-acp-copilot-windows/package.json ./apps/workers/coder-acp-copilot-windows/
 
-RUN C:\tools\pnpm.exe install --frozen-lockfile --prod
+RUN C:\tools\pnpm.exe install --frozen-lockfile --prod; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 COPY --from=builder C:/app/packages/shared/dist ./packages/shared/dist/
+COPY --from=builder C:/app/packages/telemetry/dist ./packages/telemetry/dist/
 COPY --from=builder C:/app/apps/workers/coder-acp-copilot/dist ./apps/workers/coder-acp-copilot/dist/
 COPY --from=builder C:/app/apps/workers/coder-acp-copilot-windows/dist ./apps/workers/coder-acp-copilot-windows/dist/
 COPY apps/workers/coder-acp-copilot-windows/agent.yaml ./apps/workers/coder-acp-copilot-windows/agent.yaml
 COPY --from=builder C:/app/apps/workers/coder-acp-copilot-windows/agent.json ./apps/workers/coder-acp-copilot-windows/agent.json
+COPY apps/workers/coder-acp-copilot-windows/register-version.ps1 ./apps/workers/coder-acp-copilot-windows/register-version.ps1
 
 # Create workspace directory for coding agents
 RUN New-Item -ItemType Directory -Force -Path C:\workspace
@@ -86,6 +72,7 @@ RUN New-Item -ItemType Directory -Force -Path C:\workspace
 WORKDIR C:/app/apps/workers/coder-acp-copilot-windows
 
 # Expose component versions + build metadata at runtime (used by self-registration)
+ARG COPILOT_CLI_VERSION
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
 ENV COPILOT_CLI_VERSION=$COPILOT_CLI_VERSION

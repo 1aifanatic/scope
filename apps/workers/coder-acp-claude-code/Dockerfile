@@ -1,8 +1,13 @@
 # --- Base stage: runtime tools shared by dev and production ---
 FROM node:22.22.0-slim AS base
 
-RUN corepack enable && corepack prepare pnpm@10.29.1 --activate
-
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
+ENV npm_config_registry=${NPM_CONFIG_REGISTRY} \
+    COREPACK_NPM_REGISTRY=${NPM_CONFIG_REGISTRY}
+# corepack bootstraps pnpm from the registry's per-version metadata endpoint,
+# which some private registry proxies don't serve; fall back to a pinned global
+# install (honors npm_config_registry) so restricted networks can still build.
+RUN corepack enable && (corepack prepare pnpm@10.29.1 --activate || npm install -g pnpm@10.29.1 --force)
 # Install system tools for coding agents: Python, uv, git, PowerShell, Go, .NET, Rust, Java, Maven, Gradle
 RUN apt-get update && apt-get install -y \
     python3 \
@@ -14,6 +19,8 @@ RUN apt-get update && apt-get install -y \
   rustc \
   cargo \
     && curl -LsSf https://astral.sh/uv/0.10.0/install.sh | sh \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/$(uname -m)/docker-27.5.1.tgz" \
+        | tar -xz --strip-components=1 -C /usr/local/bin docker/docker \
     && ARCH=$(dpkg --print-architecture) \
   && case "$ARCH" in amd64) PS_ARCH=x64; DOTNET_ARCH=x64; JAVA_ARCH=x64;; arm64) PS_ARCH=arm64; DOTNET_ARCH=arm64; JAVA_ARCH=aarch64;; *) echo "Unsupported arch: $ARCH" && exit 1;; esac \
     && curl -fsSL -o /tmp/powershell.tar.gz \
@@ -61,6 +68,15 @@ RUN apt-get update && apt-get install -y \
 
 ENV PATH="/root/.cargo/bin:/root/.local/bin:$PATH"
 
+# Disable Claude Code "policy skills" (auto-loaded, Anthropic-managed Agent Skills).
+# As of claude-agent-acp 0.52.0 / claude-agent-sdk 0.3.191 the bundled agent auto-invokes
+# a "claude-api" policy skill on ordinary coding prompts; its injected payload overflows the
+# context window available to Claude subscription OAuth tokens, so the turn fails with
+# "Internal error: Prompt is too long". Earlier agent versions never loaded it. Setting this
+# at the container level (so the worker, claude-agent-acp, and the bundled `claude` binary it
+# spawns all inherit it) restores the prior behavior and keeps benchmark runs reproducible.
+ENV CLAUDE_CODE_DISABLE_POLICY_SKILLS=1
+
 # --- Builder stage: compile TypeScript ---
 FROM base AS builder
 
@@ -69,16 +85,22 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/telemetry/package.json ./packages/telemetry/
+COPY packages/test-utils/package.json ./packages/test-utils/
 COPY apps/workers/coder-acp-claude-code/package.json ./apps/workers/coder-acp-claude-code/
 
 RUN pnpm install --frozen-lockfile
 
 COPY packages/shared/tsconfig.json ./packages/shared/
 COPY packages/shared/src ./packages/shared/src/
+COPY packages/telemetry/tsconfig.json ./packages/telemetry/
+COPY packages/telemetry/src ./packages/telemetry/src/
+COPY packages/test-utils/tsconfig.json ./packages/test-utils/
+COPY packages/test-utils/src ./packages/test-utils/src/
 COPY apps/workers/coder-acp-claude-code/tsconfig.json ./apps/workers/coder-acp-claude-code/
 COPY apps/workers/coder-acp-claude-code/src ./apps/workers/coder-acp-claude-code/src/
 
-RUN pnpm --filter shared build && pnpm --filter coder-acp-claude-code build
+RUN pnpm --filter shared build && pnpm --filter telemetry build && pnpm --filter test-utils build && pnpm --filter coder-acp-claude-code build
 
 # Pre-convert agent.yaml to JSON so the registration job doesn't need the yaml package at runtime
 COPY apps/workers/coder-acp-claude-code/agent.yaml ./apps/workers/coder-acp-claude-code/agent.yaml
@@ -115,11 +137,13 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/telemetry/package.json ./packages/telemetry/
 COPY apps/workers/coder-acp-claude-code/package.json ./apps/workers/coder-acp-claude-code/
 
 RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/packages/shared/dist ./packages/shared/dist/
+COPY --from=builder /app/packages/telemetry/dist ./packages/telemetry/dist/
 COPY --from=builder /app/apps/workers/coder-acp-claude-code/dist ./apps/workers/coder-acp-claude-code/dist/
 COPY apps/workers/coder-acp-claude-code/agent.yaml ./apps/workers/coder-acp-claude-code/agent.yaml
 COPY --from=builder /app/apps/workers/coder-acp-claude-code/agent.json ./apps/workers/coder-acp-claude-code/agent.json
@@ -142,4 +166,4 @@ ENV BUILD_TIME=$BUILD_TIME
 ENV WORKER_NAME=coder-acp-claude-code
 
 USER node
-CMD ["node", "dist/index.js"]
+CMD ["node", "--import", "telemetry/register", "dist/index.js"]

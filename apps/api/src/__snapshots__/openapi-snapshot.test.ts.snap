@@ -17,7 +17,19 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       },
       "AgentCapabilities": {
         "properties": {
+          "supportsExtensions": {
+            "type": "boolean",
+          },
+          "supportsMcpServers": {
+            "type": "boolean",
+          },
           "supportsReasoningEffort": {
+            "type": "boolean",
+          },
+          "supportsResources": {
+            "type": "boolean",
+          },
+          "supportsSkills": {
             "type": "boolean",
           },
         },
@@ -91,9 +103,11 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       "AgentVersion": {
         "properties": {
           "agentVersion": {
+            "minLength": 1,
             "type": "string",
           },
           "buildTime": {
+            "minLength": 1,
             "type": "string",
           },
           "components": {
@@ -110,9 +124,11 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             ],
           },
           "gitCommit": {
+            "minLength": 1,
             "type": "string",
           },
           "imageTag": {
+            "minLength": 1,
             "type": "string",
           },
           "queueName": {
@@ -126,6 +142,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "workerVersion": {
+            "minLength": 1,
             "type": "string",
           },
         },
@@ -136,7 +153,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "gitCommit",
           "buildTime",
           "imageTag",
-          "queueName",
           "status",
           "createdAt",
         ],
@@ -236,6 +252,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "overrides": {
             "properties": {
+              "agentVersion": {
+                "type": "string",
+              },
               "extensions": {
                 "items": {
                   "type": "string",
@@ -313,6 +332,171 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
         "type": "object",
       },
+      "CodebaseResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "creator": {
+            "type": "string",
+          },
+          "defaultBranch": {
+            "type": "string",
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "description": {
+            "type": "string",
+          },
+          "latestRevisionId": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "projectId": {
+            "type": "string",
+          },
+          "revisionCounter": {
+            "type": "number",
+          },
+          "slug": {
+            "type": "string",
+          },
+          "source": {
+            "type": "string",
+          },
+          "sourceType": {
+            "enum": [
+              "git",
+              "archive",
+            ],
+            "type": "string",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "_id",
+          "slug",
+          "name",
+          "sourceType",
+          "revisionCounter",
+          "createdAt",
+          "projectId",
+        ],
+        "type": "object",
+      },
+      "CodebaseRevisionResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "archiveUrl": {
+            "type": "string",
+          },
+          "codebaseId": {
+            "type": "string",
+          },
+          "commitTimestamp": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "contentSha256": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "creator": {
+            "type": "string",
+          },
+          "deduplicated": {
+            "type": "boolean",
+          },
+          "fileCount": {
+            "type": "number",
+          },
+          "originalFilename": {
+            "type": "string",
+          },
+          "projectId": {
+            "type": "string",
+          },
+          "ref": {
+            "type": "string",
+          },
+          "requestedRef": {
+            "type": "string",
+          },
+          "resolvedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "resolvedCommitSha": {
+            "type": "string",
+          },
+          "revisionNumber": {
+            "type": "number",
+          },
+          "sizeBytes": {
+            "type": "number",
+          },
+          "slug": {
+            "type": "string",
+          },
+          "source": {
+            "type": "string",
+          },
+          "sourceType": {
+            "enum": [
+              "git",
+              "archive",
+            ],
+            "type": "string",
+          },
+        },
+        "required": [
+          "_id",
+          "codebaseId",
+          "slug",
+          "revisionNumber",
+          "ref",
+          "sourceType",
+          "archiveUrl",
+          "resolvedAt",
+          "createdAt",
+          "projectId",
+        ],
+        "type": "object",
+      },
       "ConversationTurn": {
         "properties": {
           "aiCallCount": {
@@ -335,6 +519,16 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "durationMs": {
             "type": "number",
+          },
+          "gate": {
+            "enum": [
+              "select",
+              "build",
+              "test",
+              "run",
+              "deploy",
+            ],
+            "type": "string",
           },
           "harUrl": {
             "type": "string",
@@ -428,6 +622,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       "CreateAgentInput": {
         "properties": {
           "_id": {
+            "minLength": 1,
             "type": "string",
           },
           "available": {
@@ -446,6 +641,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "name": {
+            "minLength": 1,
             "type": "string",
           },
           "supportedModels": {
@@ -465,6 +661,19 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "properties": {
           "dependsOn": {
             "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "gates": {
+            "items": {
+              "enum": [
+                "select",
+                "build",
+                "test",
+                "run",
+                "deploy",
+              ],
               "type": "string",
             },
             "type": "array",
@@ -580,6 +789,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "reasoningEffort": {
             "type": "string",
           },
+          "resources": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceBindingSpec",
+            },
+            "type": "array",
+          },
           "skillRevisions": {
             "items": {
               "type": "string",
@@ -597,6 +812,24 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
         "type": "object",
       },
+      "CreateProjectInput": {
+        "properties": {
+          "creator": {
+            "type": "string",
+          },
+          "description": {
+            "type": "string",
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string",
+          },
+        },
+        "required": [
+          "name",
+        ],
+        "type": "object",
+      },
       "CreatePromptFeatureInput": {
         "properties": {
           "id": {
@@ -607,11 +840,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "type": {
-            "enum": [
-              "task",
-              "agents.md",
-            ],
-            "type": "string",
+            "$ref": "#/components/schemas/PromptType",
           },
         },
         "required": [
@@ -680,12 +909,22 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
+          "codebaseRevisionId": {
+            "type": "string",
+          },
           "experimentId": {
+            "minLength": 1,
             "type": "string",
           },
           "extensions": {
             "items": {
               "type": "string",
+            },
+            "type": "array",
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/GateConfig",
             },
             "type": "array",
           },
@@ -724,6 +963,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "reasoningEffort": {
             "type": "string",
           },
+          "resources": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceBindingSpec",
+            },
+            "type": "array",
+          },
           "scenario": {
             "$ref": "#/components/schemas/Scenario",
           },
@@ -736,6 +981,78 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "required": [
           "scenario",
+        ],
+        "type": "object",
+      },
+      "CreateResourceInput": {
+        "properties": {
+          "creator": {
+            "type": "string",
+          },
+          "description": {
+            "type": "string",
+          },
+          "exports": {
+            "items": {
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string",
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceParameter",
+            },
+            "type": "array",
+          },
+          "setup": {
+            "$ref": "#/components/schemas/ResourceScript",
+          },
+          "slug": {
+            "minLength": 1,
+            "type": "string",
+          },
+          "teardown": {
+            "$ref": "#/components/schemas/ResourceScript",
+          },
+        },
+        "required": [
+          "name",
+          "setup",
+        ],
+        "type": "object",
+      },
+      "CreateResourceRevisionInput": {
+        "properties": {
+          "creator": {
+            "type": "string",
+          },
+          "exports": {
+            "items": {
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceParameter",
+            },
+            "type": "array",
+          },
+          "setup": {
+            "$ref": "#/components/schemas/ResourceScript",
+          },
+          "teardown": {
+            "$ref": "#/components/schemas/ResourceScript",
+          },
+        },
+        "required": [
+          "setup",
         ],
         "type": "object",
       },
@@ -775,7 +1092,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "type": {
-            "$ref": "#/components/schemas/TaskPromptType",
+            "$ref": "#/components/schemas/PromptType",
           },
         },
         "required": [
@@ -827,6 +1144,19 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
+          "gates": {
+            "items": {
+              "enum": [
+                "select",
+                "build",
+                "test",
+                "run",
+                "deploy",
+              ],
+              "type": "string",
+            },
+            "type": "array",
+          },
           "id": {
             "type": "string",
           },
@@ -862,7 +1192,23 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
+          "gates": {
+            "items": {
+              "enum": [
+                "select",
+                "build",
+                "test",
+                "run",
+                "deploy",
+              ],
+              "type": "string",
+            },
+            "type": "array",
+          },
           "id": {
+            "type": "string",
+          },
+          "projectId": {
             "type": "string",
           },
           "prompt": {
@@ -880,6 +1226,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "id",
           "prompt",
           "createdAt",
+          "projectId",
         ],
         "type": "object",
       },
@@ -959,7 +1306,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             ],
             "type": "string",
           },
+          "projectId": {
+            "type": "string",
+          },
           "publisher": {
+            "type": "string",
+          },
+          "slug": {
             "type": "string",
           },
           "updatedAt": {
@@ -972,10 +1325,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "required": [
           "_id",
+          "slug",
           "publisher",
           "name",
           "origin",
           "createdAt",
+          "projectId",
         ],
         "type": "object",
       },
@@ -1054,6 +1409,74 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
         "type": "object",
       },
+      "GateConfig": {
+        "properties": {
+          "criteria": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "gate": {
+            "enum": [
+              "select",
+              "build",
+              "test",
+              "run",
+              "deploy",
+            ],
+            "type": "string",
+          },
+          "maxIterations": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer",
+          },
+          "promptId": {
+            "type": "string",
+          },
+          "promptText": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "gate",
+          "criteria",
+        ],
+        "type": "object",
+      },
+      "GateRunSummary": {
+        "properties": {
+          "gate": {
+            "enum": [
+              "select",
+              "build",
+              "test",
+              "run",
+              "deploy",
+            ],
+            "type": "string",
+          },
+          "iterations": {
+            "minimum": 0,
+            "type": "integer",
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "skipped",
+            ],
+            "type": "string",
+          },
+        },
+        "required": [
+          "gate",
+          "status",
+          "iterations",
+        ],
+        "type": "object",
+      },
       "GroupAggregates": {
         "properties": {
           "completionTokens": {
@@ -1098,6 +1521,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       "GroupUniformValues": {
         "properties": {
           "agentVersion": {
+            "type": "string",
+          },
+          "codebaseRevisionId": {
             "type": "string",
           },
           "extensions": {
@@ -1207,6 +1633,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "downvotes": {
             "type": "number",
           },
+          "projectId": {
+            "type": "string",
+          },
           "referenceCount": {
             "type": "number",
           },
@@ -1243,6 +1672,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "referenceCount",
           "createdBy",
           "createdAt",
+          "projectId",
         ],
         "type": "object",
       },
@@ -1317,11 +1747,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "name": {
             "type": "string",
           },
+          "projectId": {
+            "type": "string",
+          },
           "sessionMode": {
             "enum": [
               "stateful",
               "stateless",
             ],
+            "type": "string",
+          },
+          "slug": {
             "type": "string",
           },
           "type": {
@@ -1348,9 +1784,11 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "required": [
           "_id",
+          "slug",
           "name",
           "type",
           "createdAt",
+          "projectId",
         ],
         "type": "object",
       },
@@ -1593,6 +2031,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "name": {
             "type": "string",
           },
+          "projectId": {
+            "type": "string",
+          },
           "updatedAt": {
             "format": "date-time",
             "type": [
@@ -1606,6 +2047,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "name",
           "latestVersion",
           "createdAt",
+          "projectId",
         ],
         "type": "object",
       },
@@ -1642,8 +2084,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "profileId": {
             "type": "string",
           },
+          "projectId": {
+            "type": "string",
+          },
           "reasoningEffort": {
             "type": "string",
+          },
+          "resources": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceBindingSpec",
+            },
+            "type": "array",
           },
           "skillRevisions": {
             "items": {
@@ -1665,6 +2116,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "workerType",
           "model",
           "createdAt",
+          "projectId",
         ],
         "type": "object",
       },
@@ -1696,6 +2148,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "name": {
             "type": "string",
           },
+          "projectId": {
+            "type": "string",
+          },
           "updatedAt": {
             "format": "date-time",
             "type": [
@@ -1713,6 +2168,50 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "latestVersion",
           "createdAt",
           "version",
+          "projectId",
+        ],
+        "type": "object",
+      },
+      "ProjectResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "creator": {
+            "type": "string",
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "description": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "_id",
+          "name",
+          "createdAt",
         ],
         "type": "object",
       },
@@ -1735,15 +2234,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "id": {
             "type": "string",
           },
+          "projectId": {
+            "type": "string",
+          },
           "prompt": {
             "type": "string",
           },
           "type": {
-            "enum": [
-              "task",
-              "agents.md",
-            ],
-            "type": "string",
+            "$ref": "#/components/schemas/PromptType",
           },
           "updatedAt": {
             "format": "date-time",
@@ -1757,6 +2255,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "id",
           "prompt",
           "createdAt",
+          "projectId",
         ],
         "type": "object",
       },
@@ -1779,12 +2278,25 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
         "type": "object",
       },
+      "PromptType": {
+        "enum": [
+          "select",
+          "build",
+          "test",
+          "run",
+          "deploy",
+          "agents.md",
+        ],
+        "type": "string",
+      },
       "RegisterAgentVersionInput": {
         "properties": {
           "agentVersion": {
+            "minLength": 1,
             "type": "string",
           },
           "buildTime": {
+            "minLength": 1,
             "type": "string",
           },
           "components": {
@@ -1794,15 +2306,19 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "object",
           },
           "gitCommit": {
+            "minLength": 1,
             "type": "string",
           },
           "imageTag": {
+            "minLength": 1,
             "type": "string",
           },
           "queueName": {
+            "minLength": 1,
             "type": "string",
           },
           "workerVersion": {
+            "minLength": 1,
             "type": "string",
           },
         },
@@ -1841,6 +2357,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
+          "projectId": {
+            "type": "string",
+          },
           "reporter": {
             "$ref": "#/components/schemas/Reporter",
           },
@@ -1872,6 +2391,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "requestId",
           "status",
           "createdAt",
+          "projectId",
         ],
         "type": "object",
       },
@@ -1933,6 +2453,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "name": {
             "type": "string",
           },
+          "projectId": {
+            "type": "string",
+          },
           "systemPrompt": {
             "$ref": "#/components/schemas/ReportTemplateSystemPrompt",
           },
@@ -1960,6 +2483,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "name",
           "userPrompt",
           "createdAt",
+          "projectId",
         ],
         "type": "object",
       },
@@ -2125,6 +2649,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "agentsMdPromptId": {
             "type": "string",
           },
+          "codebaseRevisionId": {
+            "type": "string",
+          },
           "createdAt": {
             "format": "date-time",
             "type": [
@@ -2145,6 +2672,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "extensions": {
             "items": {
               "type": "string",
+            },
+            "type": "array",
+          },
+          "gateSummaries": {
+            "items": {
+              "$ref": "#/components/schemas/GateRunSummary",
+            },
+            "type": "array",
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/GateConfig",
             },
             "type": "array",
           },
@@ -2176,8 +2715,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "profileVersionId": {
             "type": "string",
           },
+          "projectId": {
+            "type": "string",
+          },
           "reasoningEffort": {
             "type": "string",
+          },
+          "resources": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceBinding",
+            },
+            "type": "array",
           },
           "run": {
             "$ref": "#/components/schemas/RunState",
@@ -2213,6 +2761,363 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "scenario",
           "workerType",
           "createdAt",
+          "projectId",
+        ],
+        "type": "object",
+      },
+      "ResolveCodebaseRevisionInput": {
+        "properties": {
+          "creator": {
+            "type": "string",
+          },
+          "requestedRef": {
+            "type": "string",
+          },
+        },
+        "type": "object",
+      },
+      "ResourceBinding": {
+        "properties": {
+          "params": {
+            "additionalProperties": {
+              "type": "string",
+            },
+            "type": "object",
+          },
+          "ref": {
+            "type": "string",
+          },
+          "revisionId": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "ref",
+          "revisionId",
+          "params",
+        ],
+        "type": "object",
+      },
+      "ResourceBindingSpec": {
+        "anyOf": [
+          {
+            "type": "string",
+          },
+          {
+            "properties": {
+              "params": {
+                "additionalProperties": {
+                  "type": "string",
+                },
+                "type": "object",
+              },
+              "ref": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "ref",
+            ],
+            "type": "object",
+          },
+        ],
+      },
+      "ResourceParameter": {
+        "properties": {
+          "default": {
+            "type": "string",
+          },
+          "description": {
+            "type": "string",
+          },
+          "example": {
+            "type": "string",
+          },
+          "name": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+            "type": "string",
+          },
+          "required": {
+            "default": false,
+            "type": "boolean",
+          },
+        },
+        "required": [
+          "name",
+        ],
+        "type": "object",
+      },
+      "ResourceResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "creator": {
+            "type": "string",
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "description": {
+            "type": "string",
+          },
+          "latestRevisionId": {
+            "type": "string",
+          },
+          "latestRevisionNumber": {
+            "type": "number",
+          },
+          "name": {
+            "type": "string",
+          },
+          "projectId": {
+            "type": "string",
+          },
+          "revisionCounter": {
+            "type": "number",
+          },
+          "slug": {
+            "type": "string",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "_id",
+          "slug",
+          "name",
+          "revisionCounter",
+          "createdAt",
+          "projectId",
+        ],
+        "type": "object",
+      },
+      "ResourceRevisionResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "contentSha256": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "creator": {
+            "type": "string",
+          },
+          "deduplicated": {
+            "type": "boolean",
+          },
+          "exports": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceParameter",
+            },
+            "type": "array",
+          },
+          "projectId": {
+            "type": "string",
+          },
+          "ref": {
+            "type": "string",
+          },
+          "resourceId": {
+            "type": "string",
+          },
+          "revisionNumber": {
+            "type": "number",
+          },
+          "setup": {
+            "$ref": "#/components/schemas/ResourceScript",
+          },
+          "slug": {
+            "type": "string",
+          },
+          "teardown": {
+            "$ref": "#/components/schemas/ResourceScript",
+          },
+        },
+        "required": [
+          "_id",
+          "resourceId",
+          "slug",
+          "revisionNumber",
+          "ref",
+          "setup",
+          "exports",
+          "contentSha256",
+          "createdAt",
+          "projectId",
+        ],
+        "type": "object",
+      },
+      "ResourceRunOutcome": {
+        "properties": {
+          "error": {
+            "type": "string",
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "string",
+            },
+            "type": "object",
+          },
+          "published": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "ref": {
+            "type": "string",
+          },
+          "revisionId": {
+            "type": "string",
+          },
+          "setupDurationMs": {
+            "type": "number",
+          },
+          "setupSucceeded": {
+            "type": "boolean",
+          },
+          "slug": {
+            "type": "string",
+          },
+          "teardownRan": {
+            "type": "boolean",
+          },
+        },
+        "required": [
+          "ref",
+          "slug",
+          "revisionId",
+          "setupSucceeded",
+          "published",
+        ],
+        "type": "object",
+      },
+      "ResourceScript": {
+        "properties": {
+          "sh": {
+            "minLength": 1,
+            "type": "string",
+          },
+        },
+        "type": "object",
+      },
+      "RunFacetBucket": {
+        "properties": {
+          "count": {
+            "type": "number",
+          },
+          "value": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "value",
+          "count",
+        ],
+        "type": "object",
+      },
+      "RunFacetsResponse": {
+        "properties": {
+          "facets": {
+            "properties": {
+              "agentVersion": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "model": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "os": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "outcome": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "priority": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "profileId": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "status": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+              "workerType": {
+                "items": {
+                  "$ref": "#/components/schemas/RunFacetBucket",
+                },
+                "type": "array",
+              },
+            },
+            "required": [
+              "workerType",
+              "status",
+              "outcome",
+              "model",
+              "os",
+              "priority",
+              "agentVersion",
+              "profileId",
+            ],
+            "type": "object",
+          },
+          "total": {
+            "type": "number",
+          },
+        },
+        "required": [
+          "total",
+          "facets",
         ],
         "type": "object",
       },
@@ -2258,6 +3163,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "minimum": 1,
             "type": "integer",
           },
+          "durationMs": {
+            "type": "number",
+          },
           "error": {
             "type": "string",
           },
@@ -2280,6 +3188,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "logsUrl": {
             "type": "string",
+          },
+          "mcpRegistered": {
+            "type": "boolean",
           },
           "os": {
             "properties": {
@@ -2315,11 +3226,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "null",
             ],
           },
+          "queuedQueueName": {
+            "type": "string",
+          },
           "rawChatFormat": {
             "type": "string",
           },
           "rawChatUrl": {
             "type": "string",
+          },
+          "resources": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceRunOutcome",
+            },
+            "type": "array",
           },
           "result": {
             "type": "string",
@@ -2494,7 +3414,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             ],
             "type": "string",
           },
+          "projectId": {
+            "type": "string",
+          },
           "skillName": {
+            "type": "string",
+          },
+          "slug": {
             "type": "string",
           },
           "source": {
@@ -2510,11 +3436,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "required": [
           "_id",
+          "slug",
           "source",
           "skillName",
           "name",
           "origin",
           "createdAt",
+          "projectId",
         ],
         "type": "object",
       },
@@ -2567,6 +3495,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "name": {
             "type": "string",
           },
+          "projectId": {
+            "type": "string",
+          },
           "ref": {
             "type": "string",
           },
@@ -2607,6 +3538,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "archiveUrl",
           "resolvedAt",
           "createdAt",
+          "projectId",
         ],
         "type": "object",
       },
@@ -2693,25 +3625,26 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "null",
             ],
           },
+          "keyId": {
+            "type": "string",
+          },
+          "projectId": {
+            "type": "string",
+          },
           "text": {
             "type": "string",
           },
           "type": {
-            "$ref": "#/components/schemas/TaskPromptType",
+            "$ref": "#/components/schemas/PromptType",
           },
         },
         "required": [
           "_id",
+          "keyId",
           "createdAt",
+          "projectId",
         ],
         "type": "object",
-      },
-      "TaskPromptType": {
-        "enum": [
-          "task",
-          "agents.md",
-        ],
-        "type": "string",
       },
       "TokenUsage": {
         "properties": {
@@ -2772,10 +3705,38 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "type": "object",
       },
+      "UpdateCodebaseInput": {
+        "properties": {
+          "defaultBranch": {
+            "type": "string",
+          },
+          "description": {
+            "type": "string",
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string",
+          },
+        },
+        "type": "object",
+      },
       "UpdateCriteriaInput": {
         "properties": {
           "dependsOn": {
             "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "gates": {
+            "items": {
+              "enum": [
+                "select",
+                "build",
+                "test",
+                "run",
+                "deploy",
+              ],
               "type": "string",
             },
             "type": "array",
@@ -2895,6 +3856,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "type": "object",
       },
+      "UpdateProjectInput": {
+        "properties": {
+          "description": {
+            "type": "string",
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string",
+          },
+        },
+        "type": "object",
+      },
       "UpdatePromptFeatureInput": {
         "properties": {
           "prompt": {
@@ -2946,6 +3919,44 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "type": "object",
       },
+      "UpdateResourceInput": {
+        "properties": {
+          "description": {
+            "type": "string",
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string",
+          },
+        },
+        "type": "object",
+      },
+      "UserMeResponse": {
+        "properties": {
+          "displayName": {
+            "type": "string",
+          },
+          "email": {
+            "type": "string",
+          },
+          "id": {
+            "type": "string",
+          },
+          "idp": {
+            "type": "string",
+          },
+          "idpTenant": {
+            "type": "string",
+          },
+          "role": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "id",
+        ],
+        "type": "object",
+      },
       "ValidateKeyInput": {
         "properties": {
           "token": {
@@ -2956,6 +3967,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "token",
         ],
         "type": "object",
+      },
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "description": "Use the unchanged IdP access token, without the Bearer prefix.",
+        "scheme": "bearer",
+        "type": "http",
       },
     },
   },
@@ -3181,6 +4200,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "in": "query",
+            "name": "includeDeleted",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false",
+              ],
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -3225,6 +4256,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "400": {
             "description": "Validation error",
+          },
+          "409": {
+            "description": "Restored agent versions conflict with an active queue owner",
           },
         },
         "summary": "Create or update agent (upsert)",
@@ -3280,6 +4314,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "id",
             "required": true,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "includeDeleted",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false",
+              ],
               "type": "string",
             },
           },
@@ -3428,6 +4474,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "404": {
             "description": "Agent not found",
           },
+          "409": {
+            "description": "Queue is assigned to another agent",
+          },
+          "503": {
+            "description": "Concurrent registration did not stabilize",
+          },
         },
         "summary": "Register agent version (upsert)",
         "tags": [
@@ -3481,6 +4533,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "404": {
             "description": "Agent or version not found",
           },
+          "409": {
+            "description": "Queue is assigned to another agent",
+          },
+          "503": {
+            "description": "Concurrent activation did not stabilize",
+          },
         },
         "summary": "Patch agent version",
         "tags": [
@@ -3490,6 +4548,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/analysis": {
       "get": {
+        "description": "Aggregates pass@k / success@T metrics over a single project's done runs. Requires ?projectId=.",
         "parameters": [
           {
             "in": "query",
@@ -3517,6 +4576,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           {
             "in": "query",
+            "name": "features",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
             "name": "submissionId",
             "required": false,
             "schema": {
@@ -3528,6 +4595,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "k",
             "required": false,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -3553,6 +4632,271 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/codebase-revisions/{id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodebaseRevisionResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Revision not found",
+          },
+        },
+        "summary": "Get codebase revision by id",
+        "tags": [
+          "Codebase Revisions",
+        ],
+      },
+    },
+    "/api/v1/codebase-revisions/{id}/archive": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Binary tar.gz archive",
+          },
+          "404": {
+            "description": "Revision or archive not found",
+          },
+          "500": {
+            "description": "Blob storage error",
+          },
+        },
+        "summary": "Download codebase revision archive",
+        "tags": [
+          "Codebase Revisions",
+        ],
+      },
+    },
+    "/api/v1/codebases": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CodebaseResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List all codebases",
+        "tags": [
+          "Codebases",
+        ],
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid input or missing archive",
+          },
+        },
+        "summary": "Create a codebase (archive codebases require the archive file)",
+        "tags": [
+          "Codebases",
+        ],
+      },
+    },
+    "/api/v1/codebases/{id}": {
+      "delete": {
+        "responses": {
+          "204": {
+            "description": "Success",
+          },
+          "404": {
+            "description": "Codebase not found",
+          },
+        },
+        "summary": "Delete a codebase",
+        "tags": [
+          "Codebases",
+        ],
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodebaseResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Codebase not found",
+          },
+        },
+        "summary": "Get a codebase",
+        "tags": [
+          "Codebases",
+        ],
+      },
+      "patch": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCodebaseInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodebaseResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Codebase not found",
+          },
+        },
+        "summary": "Update a codebase",
+        "tags": [
+          "Codebases",
+        ],
+      },
+    },
+    "/api/v1/codebases/{id}/revisions": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CodebaseRevisionResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Codebase not found",
+          },
+        },
+        "summary": "List codebase revisions",
+        "tags": [
+          "Codebases",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveCodebaseRevisionInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodebaseRevisionResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Not a git codebase",
+          },
+          "404": {
+            "description": "Codebase not found",
+          },
+          "502": {
+            "description": "GitHub resolution failed",
+          },
+        },
+        "summary": "Resolve a new git codebase revision",
+        "tags": [
+          "Codebases",
+        ],
+      },
+    },
+    "/api/v1/codebases/{id}/upload": {
+      "post": {
+        "responses": {
+          "201": {
+            "description": "Success",
+          },
+          "400": {
+            "description": "Missing archive or not an archive codebase",
+          },
+          "404": {
+            "description": "Codebase not found",
+          },
+        },
+        "summary": "Upload a codebase archive as a new revision",
+        "tags": [
+          "Codebases",
+        ],
+      },
+    },
     "/api/v1/criteria": {
       "get": {
         "parameters": [
@@ -3561,6 +4905,42 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "q",
             "required": false,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Comma-separated criterion IDs to include",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "description": "Comma-separated criterion IDs to include",
+              "type": "string",
+            },
+          },
+          {
+            "description": "When true and ids is set, also include dependency ancestors",
+            "in": "query",
+            "name": "ancestors",
+            "required": false,
+            "schema": {
+              "description": "When true and ids is set, also include dependency ancestors",
+              "enum": [
+                "true",
+                "false",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -3586,6 +4966,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3618,6 +5012,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/criteria/generate-prompt": {
       "post": {
+        "parameters": [
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3628,6 +5036,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                   },
                   "currentId": {
                     "type": "string",
+                  },
+                  "gates": {
+                    "items": {
+                      "type": "string",
+                    },
+                    "type": "array",
                   },
                 },
                 "required": [
@@ -3647,9 +5061,27 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "prompt": {
                       "type": "string",
                     },
+                    "suggestedChildren": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
+                    "suggestedId": {
+                      "type": "string",
+                    },
+                    "suggestedParents": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
                   },
                   "required": [
                     "prompt",
+                    "suggestedId",
+                    "suggestedParents",
+                    "suggestedChildren",
                   ],
                   "type": "object",
                 },
@@ -3672,6 +5104,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/criteria/graph": {
       "get": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "200": {
             "content": {
@@ -3733,6 +5179,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -3756,6 +5214,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/criteria/seed": {
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3802,6 +5274,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "description": "Success",
           },
+          "400": {
+            "description": "Seed batch would introduce a dependency cycle",
+          },
         },
         "summary": "Seed criteria in bulk",
         "tags": [
@@ -3817,6 +5292,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "id",
             "required": true,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -3866,6 +5353,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -3894,6 +5393,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "id",
             "required": true,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -3933,6 +5444,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/extensions": {
       "get": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "200": {
             "content": {
@@ -3954,6 +5479,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4000,6 +5539,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -4033,6 +5584,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "id",
             "required": true,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -4072,6 +5635,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -4097,6 +5672,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "id",
             "required": true,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -4250,6 +5837,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -4315,6 +5914,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "blocked",
             "required": false,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -4846,6 +6457,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/mcp/servers": {
       "get": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "200": {
             "content": {
@@ -4867,6 +6492,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4964,6 +6603,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "204": {
@@ -5000,6 +6651,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -5025,6 +6688,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "id",
             "required": true,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -5072,6 +6747,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "provider",
             "required": false,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "disappeared",
+              ],
               "type": "string",
             },
           },
@@ -5259,6 +6946,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -5281,6 +6980,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5409,6 +7122,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                   },
                   "reasoningEffort": {
                     "type": "string",
+                  },
+                  "resources": {
+                    "items": {
+                      "$ref": "#/components/schemas/ResourceBindingSpec",
+                    },
+                    "type": "array",
                   },
                   "skillRevisions": {
                     "items": {
@@ -5558,6 +7277,165 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/projects": {
+      "get": {
+        "parameters": [
+          {
+            "description": "When true, include soft-deleted projects in the result",
+            "in": "query",
+            "name": "includeDeleted",
+            "required": false,
+            "schema": {
+              "description": "When true, include soft-deleted projects in the result",
+              "enum": [
+                "true",
+                "false",
+              ],
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List all projects",
+        "tags": [
+          "Projects",
+        ],
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProjectInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid input",
+          },
+        },
+        "summary": "Create a project",
+        "tags": [
+          "Projects",
+        ],
+      },
+    },
+    "/api/v1/projects/{id}": {
+      "delete": {
+        "responses": {
+          "204": {
+            "description": "Success",
+          },
+          "404": {
+            "description": "Project not found",
+          },
+        },
+        "summary": "Soft-delete a project",
+        "tags": [
+          "Projects",
+        ],
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Project not found",
+          },
+        },
+        "summary": "Get a project",
+        "tags": [
+          "Projects",
+        ],
+      },
+      "patch": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProjectInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Project not found",
+          },
+        },
+        "summary": "Update a project",
+        "tags": [
+          "Projects",
+        ],
+      },
+    },
+    "/api/v1/projects/{id}/restore": {
+      "post": {
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Project not found",
+          },
+        },
+        "summary": "Restore a soft-deleted project",
+        "tags": [
+          "Projects",
+        ],
+      },
+    },
     "/api/v1/prompt-features": {
       "get": {
         "parameters": [
@@ -5575,9 +7453,21 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "required": false,
             "schema": {
               "enum": [
-                "task",
+                "select",
                 "agents.md",
               ],
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -5603,6 +7493,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5638,6 +7542,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/prompt-features/extract-from-text": {
       "post": {
+        "parameters": [
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5651,7 +7569,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                   },
                   "type": {
                     "enum": [
-                      "task",
+                      "select",
                       "agents.md",
                     ],
                     "type": "string",
@@ -5712,6 +7630,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/prompt-features/generate-prompt": {
       "post": {
+        "parameters": [
+          {
+            "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, a slug/id is resolved within that project (slugs may repeat across projects); when omitted, resolution falls back to a legacy global lookup for backward compatibility.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5766,6 +7698,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/prompt-features/seed": {
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5830,6 +7776,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -5873,6 +7831,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -5901,6 +7871,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "id",
             "required": true,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -5949,6 +7931,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -5971,6 +7965,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6071,6 +8079,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "204": {
@@ -6110,6 +8130,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -6138,6 +8170,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "id",
             "required": true,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -6178,6 +8222,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           {
             "in": "query",
             "name": "requestId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "projectId",
             "required": false,
             "schema": {
               "type": "string",
@@ -6625,7 +8677,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "worker",
             "required": false,
             "schema": {
-              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
             },
           },
           {
@@ -6654,18 +8716,38 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           {
             "in": "query",
-            "name": "profileId",
+            "name": "experimentId",
             "required": false,
             "schema": {
-              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
             },
           },
           {
             "in": "query",
-            "name": "experimentId",
+            "name": "profileId",
             "required": false,
             "schema": {
-              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
             },
           },
           {
@@ -6673,14 +8755,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "status",
             "required": false,
             "schema": {
-              "enum": [
-                "pending",
-                "queued",
-                "processing",
-                "paused",
-                "done",
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
               ],
-              "type": "string",
             },
           },
           {
@@ -6688,11 +8773,96 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "outcome",
             "required": false,
             "schema": {
-              "enum": [
-                "succeeded",
-                "failed",
-                "finished",
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
               ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "os",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "priority",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "agentVersion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                },
+                {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
               "type": "string",
             },
           },
@@ -6754,10 +8924,52 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "required": false,
             "schema": {
               "enum": [
-                "createdAt",
+                "created",
+                "updated",
                 "priority",
+                "worker",
+                "status",
+                "id",
+                "duration",
+                "createdAt",
               ],
               "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "sortDir",
+            "required": false,
+            "schema": {
+              "enum": [
+                "asc",
+                "desc",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "createdAfter",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null",
+              ],
+            },
+          },
+          {
+            "in": "query",
+            "name": "createdBefore",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null",
+              ],
             },
           },
           {
@@ -6810,6 +9022,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -6836,6 +9060,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6850,14 +9088,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                       "agentVersion": {
                         "type": "string",
                       },
+                      "codebase": {
+                        "type": "string",
+                      },
                       "count": {
                         "default": 1,
                         "maximum": 10,
                         "minimum": 1,
                         "type": "number",
-                      },
-                      "promptFeatureExtractionId": {
-                        "type": "string",
                       },
                       "skills": {
                         "items": {
@@ -7342,6 +9580,41 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         },
         "summary": "Bulk retry requests (start new attempts)",
+        "tags": [
+          "Requests",
+        ],
+      },
+    },
+    "/api/v1/requests/facets": {
+      "get": {
+        "description": "Returns every distinct value and its full-dataset count per categorical filter dimension for the Runs list rail. Counts are absolute over all non-deleted runs **in the given project**: they intentionally ignore the active search, date range, iteration, and categorical selections so every selectable value stays visible with a stable count. Requires ?projectId=. Computed with parallel $group aggregations (Cosmos has no $facet) and cached per-project for a short TTL.",
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunFacetsResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List run filter facets",
         "tags": [
           "Requests",
         ],
@@ -8216,8 +10489,479 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/resources": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ResourceResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List all resources",
+        "tags": [
+          "Resources",
+        ],
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateResourceInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid input",
+          },
+          "409": {
+            "description": "Resource slug or revision ref already exists in this project",
+          },
+        },
+        "summary": "Create a resource and its first revision",
+        "tags": [
+          "Resources",
+        ],
+      },
+    },
+    "/api/v1/resources/revisions/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceRevisionResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Revision not found",
+          },
+        },
+        "summary": "Get resource revision by id",
+        "tags": [
+          "Resource Revisions",
+        ],
+      },
+    },
+    "/api/v1/resources/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "204": {
+            "description": "Success",
+          },
+          "404": {
+            "description": "Resource not found",
+          },
+        },
+        "summary": "Delete a resource",
+        "tags": [
+          "Resources",
+        ],
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Resource not found",
+          },
+        },
+        "summary": "Get a resource",
+        "tags": [
+          "Resources",
+        ],
+      },
+      "patch": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateResourceInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Resource not found",
+          },
+        },
+        "summary": "Update a resource",
+        "tags": [
+          "Resources",
+        ],
+      },
+    },
+    "/api/v1/resources/{id}/revisions": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ResourceRevisionResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Resource not found",
+          },
+        },
+        "summary": "List resource revisions",
+        "tags": [
+          "Resource Revisions",
+        ],
+      },
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateResourceRevisionInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+          },
+          "404": {
+            "description": "Resource not found",
+          },
+          "409": {
+            "description": "Resource revision ref already exists in this project",
+          },
+        },
+        "summary": "Create a resource revision",
+        "tags": [
+          "Resource Revisions",
+        ],
+      },
+    },
+    "/api/v1/resources/{id}/revisions/latest": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceRevisionResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Revision not found",
+          },
+        },
+        "summary": "Get the latest resource revision",
+        "tags": [
+          "Resource Revisions",
+        ],
+      },
+    },
+    "/api/v1/resources/{id}/revisions/{revisionNumber}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "revisionNumber",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceRevisionResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Revision not found",
+          },
+        },
+        "summary": "Get a resource revision by resource and revision number",
+        "tags": [
+          "Resource Revisions",
+        ],
+      },
+    },
     "/api/v1/runs/upload": {
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "201": {
             "description": "Success",
@@ -8231,6 +10975,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/runs/upload-batch": {
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "207": {
             "description": "Multi-status: 201 if all runs imported, 400 if none imported, 207 if partial",
@@ -8247,6 +11005,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/skill-revisions/by-ref/{ref}(*)": {
       "get": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "200": {
             "content": {
@@ -8270,6 +11042,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/skill-revisions/by-ref/{ref}(*)/archive": {
       "get": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "200": {
             "description": "Binary tar.gz archive",
@@ -8312,6 +11098,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/skills": {
       "get": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "200": {
             "content": {
@@ -8333,6 +11133,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -8368,6 +11182,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "source",
             "required": true,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -8421,6 +11247,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -8465,6 +11303,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
           },
+          {
+            "description": "Optional project scope. When provided, external results are de-duplicated only against skills already installed in that project.",
+            "in": "query",
+            "name": "projectId",
+            "required": false,
+            "schema": {
+              "description": "Optional project scope. When provided, external results are de-duplicated only against skills already installed in that project.",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
         ],
         "responses": {
           "200": {
@@ -8492,6 +11341,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/skills/{id}(*)": {
       "delete": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "204": {
             "description": "Success",
@@ -8506,6 +11369,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
       "get": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "200": {
             "content": {
@@ -8529,6 +11406,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
     },
     "/api/v1/skills/{id}(*)/resolve": {
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "responses": {
           "201": {
             "content": {
@@ -8561,6 +11452,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "limit",
             "required": false,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -8627,10 +11530,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "type",
             "required": false,
             "schema": {
-              "enum": [
-                "task",
-                "agents.md",
-              ],
+              "$ref": "#/components/schemas/PromptType",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
               "type": "string",
             },
           },
@@ -8676,6 +11587,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
       "post": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -9017,6 +11942,74 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/users/me": {
+      "get": {
+        "description": "Read the existing authenticated Scope identity without enrollment or profile writes. Responses must not be HTTP-cached.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserMeResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "401": {
+            "description": "Not authenticated",
+          },
+          "403": {
+            "description": "User is not enrolled or is disabled",
+          },
+          "503": {
+            "description": "Authentication service unavailable",
+          },
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+          },
+        ],
+        "summary": "Get the authenticated user's identity",
+        "tags": [
+          "Users",
+        ],
+      },
+      "post": {
+        "description": "JIT-enroll the authenticated user, refresh their profile and lastLoginAt, apply bootstrap-admin rules, and warm the access cache. Use this only after an explicit IdP login; do not prefetch, poll, or automatically retry transient failures.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserMeResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "401": {
+            "description": "Not authenticated",
+          },
+          "403": {
+            "description": "User is disabled",
+          },
+          "503": {
+            "description": "Authentication service unavailable",
+          },
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+          },
+        ],
+        "summary": "Enroll the authenticated user",
+        "tags": [
+          "Users",
+        ],
+      },
+    },
     "/api/v1/version": {
       "get": {
         "responses": {
@@ -9034,11 +12027,15 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "environment": {
                       "type": "string",
                     },
+                    "strictAgentCapabilities": {
+                      "type": "boolean",
+                    },
                   },
                   "required": [
                     "commit",
                     "buildTime",
                     "environment",
+                    "strictAgentCapabilities",
                   ],
                   "type": "object",
                 },

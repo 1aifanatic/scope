@@ -9,6 +9,7 @@ import type { KeyType, KeyValidationResult, CreateKeyRequest } from "@/types";
 import { KEY_TYPE_LABELS, KEY_CAPABILITY_LABELS, KEY_TYPE_EXPECTED_CAPABILITIES } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -162,6 +163,21 @@ function StatusIcon({ status }: { status: string }) {
   }
 }
 
+export function buildFoundryCredentialValue(options: {
+  endpoint: string;
+  apiKey: string;
+  model: string;
+}): string {
+  const endpoint = options.endpoint.trim().replace(/\/+$/, "");
+  const apiKey = options.apiKey.trim();
+  const model = options.model.trim();
+  return JSON.stringify({
+    endpoint,
+    apiKey,
+    ...(model ? { model } : {}),
+  });
+}
+
 export function CreateToken() {
   const navigate = useNavigate();
 
@@ -185,12 +201,11 @@ export function CreateToken() {
    */
   const getSubmitValue = (): string => {
     if (type === "azure-ai-foundry") {
-      const endpoint = foundryEndpoint.trim().replace(/\/+$/, "");
-      const apiKey = foundryApiKey.trim();
-      const model = foundryModel.trim();
-      const payload: Record<string, string> = { endpoint, apiKey };
-      if (model) payload.model = model;
-      return JSON.stringify(payload);
+      return buildFoundryCredentialValue({
+        endpoint: foundryEndpoint,
+        apiKey: foundryApiKey,
+        model: foundryModel,
+      });
     }
     return value.trim();
   };
@@ -395,9 +410,8 @@ export function CreateToken() {
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="foundry-api-key" className="text-xs font-medium">API Key</Label>
-                      <Input
+                      <SecretInput
                         id="foundry-api-key"
-                        type="password"
                         value={foundryApiKey}
                         onChange={(e) => setFoundryApiKey(e.target.value)}
                         placeholder="Paste Foundry resource key…"
@@ -421,9 +435,8 @@ export function CreateToken() {
                     </div>
                   </div>
                 ) : (
-                  <Input
+                  <SecretInput
                     id="value"
-                    type="password"
                     value={value}
                     onChange={(e) => setValue(e.target.value)}
                     placeholder="Paste API key…"

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Entry point: optimize an AGENTS.md file with GEPA against Scope.
 
 Budgeting note (``GEPA_MAX_METRIC_CALLS``): GEPA counts **one metric call per
@@ -42,6 +45,9 @@ def main() -> None:
     load_dotenv()
 
     base_url = _env("SCOPE_API_URL", "http://localhost:3100")
+    project_id = _env("SCOPE_PROJECT_ID", "")
+    if not project_id:
+        raise ValueError("SCOPE_PROJECT_ID is required")
     worker = _env("SCOPE_WORKER", "coder-acp-copilot")
     model = _env("SCOPE_MODEL", "claude-haiku-4.5")
     max_concurrency = int(_env("SCOPE_MAX_CONCURRENCY", "10"))
@@ -59,7 +65,7 @@ def main() -> None:
 
     trainset, valset = default_dataset()
 
-    client = ScopeClient(base_url, worker=worker)
+    client = ScopeClient(base_url, project_id=project_id, worker=worker)
 
     # Preflight: fail fast on unknown criterion ids before burning agent runs.
     all_criteria = collect_criteria([trainset, valset])

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from gepa_optimizer.reflective import build_reflective_record
 
 

@@ -3,6 +3,7 @@
 
 import { z } from "zod";
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
+import { PromptTypeSchema } from "./prompt-type.js";
 
 extendZodWithOpenApi(z);
 
@@ -10,7 +11,7 @@ export const CreatePromptFeatureInputSchema = z
   .object({
     id: z.string().regex(/^[a-z][a-z0-9_]*$/),
     prompt: z.string(),
-    type: z.enum(["task", "agents.md"]).optional(),
+    type: PromptTypeSchema.optional(),
   })
   .openapi("CreatePromptFeatureInput");
 
@@ -24,10 +25,11 @@ export const PromptFeatureResponseSchema = z
   .object({
     id: z.string(),
     prompt: z.string(),
-    type: z.enum(["task", "agents.md"]).optional(),
+    type: PromptTypeSchema.optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
     deletedAt: z.coerce.date().optional(),
+    projectId: z.string(),
   })
   .openapi("PromptFeatureResponse");
 
@@ -46,15 +48,3 @@ export const SuggestedPromptFeatureSchema = z
     prompt: z.string(),
   })
   .openapi("SuggestedPromptFeature");
-
-export const PromptFeatureExtractionResponseSchema = z
-  .object({
-    _id: z.string().optional(),
-    taskText: z.string(),
-    taskTextHash: z.string(),
-    promptFeatureResults: z.array(PromptFeatureResultSchema),
-    suggestedFeatures: z.array(SuggestedPromptFeatureSchema).optional(),
-    extractedAt: z.coerce.date(),
-    model: z.string().optional(),
-  })
-  .openapi("PromptFeatureExtractionResponse");

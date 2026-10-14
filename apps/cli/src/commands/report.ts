@@ -7,7 +7,9 @@ import { configureHelp } from "../utils/helpFormatter.js";
 import { banner, colorLevel, dimTimestamp, errorText, successText, label, value, warnBanner } from "../utils/style.js";
 import { formatData, isMachineReadable } from "../utils/formatters.js";
 import type { OutputFormat, DisplayField } from "../utils/types.js";
-import { normalizeUrl, withOutputOption, getCliName, getDefaultApiUrl } from "../utils/shared.js";
+import { normalizeUrl, withOutputOption, withProjectOption, getCliName, getDefaultApiUrl } from "../utils/shared.js";
+import { requireProjectId } from "../utils/config.js";
+import { apiFetch, getApiBasePath } from "../utils/api-client.js";
 
 export function registerReportCommands(program: Command): void {
 // ─── Report management ──────────────────────────────────────────────────────
@@ -30,7 +32,7 @@ report
   .option("--no-stream", "Do not stream logs after submission")
   .action(async (options) => {
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/reports`, {
+      const response = await apiFetch(options.url, `/reports`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requestId: options.id }),
@@ -50,7 +52,7 @@ report
       if (options.stream) {
         console.log(`\n${label('Streaming logs...')}\n`);
         const eventSource = new EventSource(
-          `${normalizeUrl(options.url)}/api/v1/reports/${result.id}/logs?fromStart=true`
+          `${normalizeUrl(options.url)}${getApiBasePath()}/reports/${result.id}/logs?fromStart=true`
         );
 
         eventSource.onmessage = (event: MessageEvent) => {
@@ -109,7 +111,7 @@ report
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
     try {
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/reports/${options.id}`);
+      const response = await apiFetch(options.url, `/reports/${options.id}`);
 
       if (!response.ok) {
         const error = await response.json();
@@ -176,20 +178,21 @@ report
     }
   });
 
-withOutputOption(
+withProjectOption(withOutputOption(
 report
   .command("list")
   .description("List all reports (optionally filter by run)")
   .option("-r, --run <requestId>", "Filter by run ID")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
-)
+))
   .action(async (options) => {
     const format = (options.output || 'table') as OutputFormat;
+    const projectId = requireProjectId(options.project);
     try {
       const params = new URLSearchParams();
       if (options.run) params.set("requestId", options.run);
       const qs = params.toString();
-      const response = await fetch(`${normalizeUrl(options.url)}/api/v1/reports${qs ? `?${qs}` : ""}`);
+      const response = await apiFetch(options.url, `/reports${qs ? `?${qs}` : ""}`, { projectId });
 
       if (!response.ok) {
         const error = await response.json();
@@ -252,7 +255,7 @@ report
   .action(async (options) => {
     try {
       // Verify report exists first
-      const checkResponse = await fetch(`${normalizeUrl(options.url)}/api/v1/reports/${options.id}`);
+      const checkResponse = await apiFetch(options.url, `/reports/${options.id}`);
       if (!checkResponse.ok) {
         const error = await checkResponse.json();
         console.error(errorText("Error:"), error.error || JSON.stringify(error));
@@ -261,7 +264,7 @@ report
 
       const fromStartParam = options.fromStart ? "&fromStart=true" : "";
       const eventSource = new EventSource(
-        `${normalizeUrl(options.url)}/api/v1/reports/${options.id}/logs?${fromStartParam}`
+        `${normalizeUrl(options.url)}${getApiBasePath()}/reports/${options.id}/logs?${fromStartParam}`
       );
 
       eventSource.onmessage = (event: MessageEvent) => {

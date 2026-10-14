@@ -6,10 +6,17 @@ import cors from "cors";
 import { MongoClient, Db, Collection } from "mongodb";
 import { QueueClient } from "@azure/storage-queue";
 import { DefaultAzureCredential } from "@azure/identity";
-import { createQueueClientFactory } from "./utils/queue-client-factory.js";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-import { TaskPromptStore, SkillRevisionStore, SkillResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage, RedisHeartbeatStore } from "shared";
-import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, ProfileDocument, ProfileVersionDocument, HeartbeatStore } from "shared";
+import { TaskPromptStore, SkillRevisionStore, SkillResolver, CodebaseStore, CodebaseRevisionStore, CodebaseResolver, ResourceStore, ResourceRevisionStore, ResourceResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage, RedisHeartbeatStore, ProjectStore, loadAuthConfigFromEnv } from "shared";
+import { initTelemetry } from "telemetry";
+import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, ResourceDocument, ResourceRevisionDocument, ProfileDocument, ProfileVersionDocument, ProjectDocument, HeartbeatStore, AuthProvider, ProfileEnricher, UserDocument } from "shared";
+import { UserStore } from "./auth/user-store.js";
+import { createAuthMiddleware, createUserAccessMiddleware } from "./auth/middleware.js";
+import { authErrorHandler } from "./auth/error-handler.js";
+import { RedisUserAccessCache, type UserAccessCache } from "./auth/user-access-cache.js";
+import { UserAccessResolver, type UserAccessService } from "./auth/user-access-resolver.js";
 import { acquireGitHubPublicApiToken } from "./github-api-token.js";
 import { generateOpenAPIDocument, registry } from "./openapi/index.js";
 import swaggerUi from "swagger-ui-express";
@@ -33,16 +40,19 @@ import { registerAgentsRoutes } from "./routes/agents.js";
 import { registerModelsRoutes } from "./routes/models.js";
 import { registerMcpServersRoutes } from "./routes/mcp-servers.js";
 import { registerSkillsRoutes } from "./routes/skills.js";
+import { registerCodebasesRoutes } from "./routes/codebases.js";
+import { registerResourcesRoutes } from "./routes/resources.js";
 import { registerExtensionsRoutes } from "./routes/extensions.js";
 import { registerInsightsRoutes } from "./routes/insights.js";
 import { registerSecretsRoutes } from "./routes/secrets.js";
 import { registerProfilesRoutes } from "./routes/profiles.js";
-import { VALID_WORKERS } from "./route-context.js";
+import { registerProjectsRoutes } from "./routes/projects.js";
+import { ProjectScopeError } from "./utils/project-scope.js";
+import { registerUsersRoutes } from "./routes/users.js";
 import type { RouteContext } from "./route-context.js";
 import type {
   CriteriaDocument,
   PromptFeatureDocument,
-  PromptFeatureExtractionDocument,
   ReportDocument,
   ReportTemplateDocument,
   InsightDocument,
@@ -53,10 +63,12 @@ import type {
   McpServerDocument,
   ExtensionDocument,
   FeatureFlagDocument,
-  WorkerType,
 } from "./route-context.js";
 
 dotenv.config();
+
+// Initialize Application Insights telemetry (must be early to patch HTTP/DB libs)
+initTelemetry("scope-api");
 
 const TOKEN_MANAGER_URL = process.env.TOKEN_MANAGER_URL || "";
 const mcpSecretClient: McpSecretClient | null = TOKEN_MANAGER_URL
@@ -74,9 +86,9 @@ const mongoDatabase = process.env.MONGO_DATABASE || "requests-db";
 const mongoCollection = process.env.MONGO_COLLECTION || "requests";
 const storageAccountName = process.env.AZURE_STORAGE_ACCOUNT_NAME || "";
 const storageConnectionString = process.env.STORAGE_CONNECTION_STRING || process.env.AZURE_STORAGE_CONNECTION_STRING || "";
-const queueWorker1 = process.env.AZURE_STORAGE_QUEUE_WORKER_1 || "queue-coder-acp-claude-code";
-const queueWorker2 = process.env.AZURE_STORAGE_QUEUE_WORKER_2 || "queue-coder-acp-copilot";
 const queueReport = process.env.AZURE_STORAGE_QUEUE_REPORT || "report-queue";
+const strictAgentCapabilities =
+  process.env.SCOPE_STRICT_AGENT_CAPABILITIES?.toLowerCase() === "true";
 const port = parseInt(process.env.PORT || "3000", 10);
 
 // MongoDB clients
@@ -84,9 +96,10 @@ let mongoClient: MongoClient;
 let db: Db;
 let collection: Collection<RequestDocument>;
 let runsCol: Collection<RunHistoryDocument>;
+let projectCollection: Collection<ProjectDocument>;
+let projectStore: ProjectStore;
 let criteriaCollection: Collection<CriteriaDocument>;
 let promptFeatureCollection: Collection<PromptFeatureDocument>;
-let promptFeatureExtractionCollection: Collection<PromptFeatureExtractionDocument>;
 let reportCollection: Collection<ReportDocument>;
 let agentCollection: Collection<CodingAgentDocument>;
 let modelCollection: Collection<ModelDocument>;
@@ -102,10 +115,25 @@ let skillRevisionCollection: Collection<SkillRevisionDocument>;
 let skillRevisionStore: SkillRevisionStore;
 let profileCollection: Collection<ProfileDocument>;
 let profileVersionCollection: Collection<ProfileVersionDocument>;
+let usersCollection: Collection<UserDocument>;
+let authProvider: AuthProvider | null = null;
+let profileEnricher: ProfileEnricher | null = null;
+let userStore: UserStore | null = null;
+let userAccessCache: UserAccessCache | null = null;
+let userAccessResolver: UserAccessService | null = null;
 let skillResolver: SkillResolver;
+let codebaseCollection: Collection<CodebaseDocument>;
+let codebaseRevisionCollection: Collection<CodebaseRevisionDocument>;
+let codebaseStore: CodebaseStore;
+let codebaseRevisionStore: CodebaseRevisionStore;
+let codebaseResolver: CodebaseResolver;
+let resourceCollection: Collection<ResourceDocument>;
+let resourceRevisionCollection: Collection<ResourceRevisionDocument>;
+let resourceStore: ResourceStore;
+let resourceRevisionStore: ResourceRevisionStore;
+let resourceResolver: ResourceResolver;
 let blobStorage: BlobStorage;
 let heartbeatStore: HeartbeatStore;
-const queueClients: Map<WorkerType, QueueClient> = new Map();
 let reportQueueClient: QueueClient;
 
 async function initializeClients(): Promise<void> {
@@ -115,9 +143,10 @@ async function initializeClients(): Promise<void> {
   db = mongoClient.db(mongoDatabase);
   collection = db.collection<RequestDocument>(mongoCollection);
   runsCol = db.collection<RunHistoryDocument>("runs");
+  projectCollection = db.collection<ProjectDocument>("projects");
+  projectStore = new ProjectStore(projectCollection);
   criteriaCollection = db.collection<CriteriaDocument>("criteria");
   promptFeatureCollection = db.collection<PromptFeatureDocument>("prompt-features");
-  promptFeatureExtractionCollection = db.collection<PromptFeatureExtractionDocument>("prompt-feature-extractions");
   reportCollection = db.collection<ReportDocument>("reports");
   agentCollection = db.collection<CodingAgentDocument>("agents");
   modelCollection = db.collection<ModelDocument>("models");
@@ -140,69 +169,86 @@ async function initializeClients(): Promise<void> {
   profileCollection = db.collection<ProfileDocument>("profiles");
   profileVersionCollection = db.collection<ProfileVersionDocument>("profile-versions");
 
+  usersCollection = db.collection<UserDocument>("users");
+  const authRuntime = loadAuthConfigFromEnv();
+  if (authRuntime) {
+    authProvider = authRuntime.provider;
+    profileEnricher = authRuntime.enricher;
+    userStore = new UserStore(usersCollection, {
+      bootstrapAdmins: authRuntime.bootstrapAdmins,
+      bootstrapTenants: authRuntime.bootstrapTenants,
+    });
+    userAccessCache = new RedisUserAccessCache({
+      redisHost: process.env.REDIS_HOST || "",
+      redisPort: parseInt(process.env.REDIS_PORT || "6379", 10),
+      redisPassword: process.env.REDIS_PASSWORD || "",
+    }, {
+      ttlSeconds: authRuntime.userCacheTtlSeconds,
+      namespace: mongoDatabase,
+    });
+    userAccessResolver = new UserAccessResolver({
+      userStore,
+      cache: userAccessCache,
+      enricher: profileEnricher,
+    });
+    console.log(`Auth enabled: provider=${authProvider.id}`);
+  } else {
+    console.log("Auth not configured — all requests will be treated as anonymous");
+  }
+
+  codebaseCollection = db.collection<CodebaseDocument>("codebases");
+  codebaseRevisionCollection = db.collection<CodebaseRevisionDocument>("codebase-revisions");
+  codebaseStore = new CodebaseStore(codebaseCollection);
+  codebaseRevisionStore = new CodebaseRevisionStore(codebaseRevisionCollection, codebaseStore);
+  codebaseResolver = new CodebaseResolver({
+    tokenProvider: acquireGitHubPublicApiToken,
+  });
+
+  resourceCollection = db.collection<ResourceDocument>("resources");
+  resourceRevisionCollection = db.collection<ResourceRevisionDocument>("resource-revisions");
+  resourceStore = new ResourceStore(resourceCollection);
+  resourceRevisionStore = new ResourceRevisionStore(resourceRevisionCollection, resourceStore);
+  resourceResolver = new ResourceResolver();
+
   // Note: Collection indexes are managed by db-migrations (see 002-create-indexes.ts).
   // Run `pnpm migrate:up` to apply pending migrations.
 
   // Seed default feature flags (upsert — won't overwrite existing enabled state)
-  const defaultFlags: Array<{ key: string; label: string }> = [
+  const defaultFlags: Array<{ key: string; label: string; enabled?: boolean }> = [
     { key: "mcp", label: "MCP Servers" },
     { key: "models", label: "Models" },
     { key: "agents", label: "Agents" },
     { key: "tokens", label: "Tokens" },
     { key: "extensions", label: "VS Code Extensions" },
     { key: "statistics-graph", label: "Statistics Graph" },
+    // Gate pipeline: Run and Deploy are not ready for users yet — hidden in the
+    // portal by default. Backend/CLI stay permissive; flip these on in Admin
+    // when ready. See apps/portal/src/lib/gates.ts (GATE_FEATURE_FLAGS).
+    { key: "gates-run", label: "Run Gate", enabled: false },
+    { key: "gates-deploy", label: "Deploy Gate", enabled: false },
   ];
   for (const flag of defaultFlags) {
     await featureFlagCollection.updateOne(
       { key: flag.key },
-      { $setOnInsert: { key: flag.key, label: flag.label, enabled: true, updatedAt: new Date() } },
+      { $setOnInsert: { key: flag.key, label: flag.label, enabled: flag.enabled ?? true, updatedAt: new Date() } },
       { upsert: true }
     );
   }
 
-  // Seed default agents (upsert — always updates name and modelProvider, preserves existing models)
-  const defaultAgents: Array<{ _id: string; name: string; modelProvider?: string }> = [
-    { _id: "coder-acp-claude-code", name: "Claude Code CLI", modelProvider: "anthropic" },
-    { _id: "coder-acp-copilot", name: "GitHub Copilot CLI", modelProvider: "github-copilot" },
-  ];
-  for (const agent of defaultAgents) {
-    await agentCollection.updateOne(
-      { _id: agent._id },
-      {
-        $set: { name: agent.name, ...(agent.modelProvider ? { modelProvider: agent.modelProvider } : {}) },
-        $setOnInsert: { supportedModels: [], createdAt: new Date() },
-      },
-      { upsert: true }
-    );
-  }
-  console.log(`Ensured ${defaultAgents.length} default agents exist`);
-  
   console.log(`Connected to MongoDB: ${mongoUri.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
 
-  // Initialize queue clients
+  // Coding-agent queues are initialized by the scheduler from registry version
+  // manifests. The API only owns the report-generation queue.
   if (storageConnectionString) {
-    // Connection string auth (local Azurite or Azure with connection string)
-    queueClients.set("coder-acp-claude-code", new QueueClient(storageConnectionString, queueWorker1));
-    queueClients.set("coder-acp-copilot", new QueueClient(storageConnectionString, queueWorker2));
     reportQueueClient = new QueueClient(storageConnectionString, queueReport);
   } else {
-    // Azure with DefaultAzureCredential
     const credential = new DefaultAzureCredential();
     const queueUrl = `https://${storageAccountName}.queue.core.windows.net`;
-    queueClients.set("coder-acp-claude-code", new QueueClient(`${queueUrl}/${queueWorker1}`, credential));
-    queueClients.set("coder-acp-copilot", new QueueClient(`${queueUrl}/${queueWorker2}`, credential));
     reportQueueClient = new QueueClient(`${queueUrl}/${queueReport}`, credential);
   }
 
-  // Ensure queues exist (creates them in Azurite on first run)
-  for (const [name, client] of queueClients) {
-    await client.createIfNotExists();
-    console.log(`Ensured queue exists: ${name}`);
-  }
   await reportQueueClient.createIfNotExists();
   console.log(`Ensured queue exists: ${queueReport}`);
-
-  console.log(`Initialized Queue clients for workers: ${Array.from(queueClients.keys()).join(", ")}, report`);
 
   // Initialize blob storage (used for log persistence and snapshots).
   // Already constructed above for the task-prompt store; reassign to keep the
@@ -230,9 +276,9 @@ const routeCtx: RouteContext = {
   get db() { return db; },
   get requestCollection() { return collection; },
   get runsCollection() { return runsCol; },
+  get projectCollection() { return projectCollection; },
   get criteriaCollection() { return criteriaCollection; },
   get promptFeatureCollection() { return promptFeatureCollection; },
-  get promptFeatureExtractionCollection() { return promptFeatureExtractionCollection; },
   get reportCollection() { return reportCollection; },
   get reportTemplateCollection() { return reportTemplateCollection; },
   get agentCollection() { return agentCollection; },
@@ -242,6 +288,11 @@ const routeCtx: RouteContext = {
   get insightsCollection() { return insightsCollection; },
   get profileCollection() { return profileCollection; },
   get profileVersionCollection() { return profileVersionCollection; },
+  get usersCollection() { return usersCollection; },
+  get userStore() { return userStore; },
+  get userAccessResolver() { return userAccessResolver; },
+  get authProvider() { return authProvider; },
+  get profileEnricher() { return profileEnricher; },
   get taskPromptCollection() { return taskPromptCollection; },
   get featureFlagCollection() { return featureFlagCollection; },
   get skillCollection() { return skillCollection; },
@@ -250,20 +301,42 @@ const routeCtx: RouteContext = {
   get taskPromptStore() { return taskPromptStore; },
   get skillRevisionStore() { return skillRevisionStore; },
   get skillResolver() { return skillResolver; },
-  get queueClients() { return queueClients; },
+  get codebaseCollection() { return codebaseCollection; },
+  get codebaseRevisionCollection() { return codebaseRevisionCollection; },
+  get codebaseStore() { return codebaseStore; },
+  get codebaseRevisionStore() { return codebaseRevisionStore; },
+  get codebaseResolver() { return codebaseResolver; },
+  get resourceCollection() { return resourceCollection; },
+  get resourceRevisionCollection() { return resourceRevisionCollection; },
+  get resourceStore() { return resourceStore; },
+  get resourceRevisionStore() { return resourceRevisionStore; },
+  get resourceResolver() { return resourceResolver; },
+  get projectStore() { return projectStore; },
   get reportQueueClient() { return reportQueueClient; },
   get blobStorage() { return blobStorage; },
   get heartbeatStore() { return heartbeatStore; },
-  getOrCreateQueueClient: createQueueClientFactory(storageConnectionString, storageAccountName),
-  validWorkers: VALID_WORKERS,
+  strictAgentCapabilities,
   storageConnectionString,
   storageAccountName,
 };
 
 // ─── Route registration ───────────────────────────────────────────────────────
+app.use("/api/v1/users/me", (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
+app.use(
+  createAuthMiddleware({
+    getProvider: () => authProvider,
+  }),
+);
+registerUsersRoutes(routeCtx);
+app.use(createUserAccessMiddleware(() => userAccessResolver));
+
 // Secrets/proxy routes must be registered first (before :id param routes)
 registerSecretsRoutes(routeCtx);
 registerSystemRoutes(routeCtx);
+registerProjectsRoutes(routeCtx);
 registerRequestsRoutes(routeCtx);
 registerRequestsCancelRoutes(routeCtx);
 registerRequestsLogsRoutes(routeCtx);
@@ -283,12 +356,19 @@ registerAgentsRoutes(routeCtx);
 registerModelsRoutes(routeCtx);
 registerMcpServersRoutes(routeCtx);
 registerSkillsRoutes(routeCtx);
+registerCodebasesRoutes(routeCtx);
+registerResourcesRoutes(routeCtx);
 registerExtensionsRoutes(routeCtx);
 registerInsightsRoutes(routeCtx);
 registerFeatureFlagRoutes(routeCtx);
 
 // Error handler
+app.use(authErrorHandler);
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  if (err instanceof ProjectScopeError) {
+    res.status(err.status).json({ error: err.message });
+    return;
+  }
   if (err instanceof McpSecretUnavailableError) {
     res.status(503).json({ error: err.message });
     return;
@@ -307,9 +387,30 @@ async function main(): Promise<void> {
   });
   app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openapiDocument));
 
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     console.log(`API server listening on port ${port}`);
   });
+  let shuttingDown = false;
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    server.close((error) => {
+      if (error) {
+        console.error("Failed to close API server:", error);
+        process.exitCode = 1;
+      }
+      void Promise.all([
+        userAccessCache?.close(),
+        heartbeatStore.close(),
+        mongoClient.close(),
+      ]).catch((closeError: unknown) => {
+        console.error("Failed to close API dependencies:", closeError);
+        process.exitCode = 1;
+      });
+    });
+  };
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
 }
 
 // ─── Test support ────────────────────────────────────────────────────────────
@@ -323,7 +424,6 @@ export interface TestDependencies {
   runsCollection?: Collection<RunHistoryDocument>;
   criteriaCollection?: Collection<CriteriaDocument>;
   promptFeatureCollection?: Collection<PromptFeatureDocument>;
-  promptFeatureExtractionCollection?: Collection<PromptFeatureExtractionDocument>;
   reportCollection?: Collection<ReportDocument>;
   agentCollection?: Collection<CodingAgentDocument>;
   modelCollection?: Collection<ModelDocument>;
@@ -331,6 +431,11 @@ export interface TestDependencies {
   insightsCollection?: Collection<InsightDocument>;
   profileCollection?: Collection<ProfileDocument>;
   profileVersionCollection?: Collection<ProfileVersionDocument>;
+  usersCollection?: Collection<UserDocument>;
+  userStore?: UserStore | null;
+  userAccessResolver?: UserAccessService | null;
+  authProvider?: AuthProvider | null;
+  profileEnricher?: ProfileEnricher | null;
   taskPromptCollection?: Collection<TaskPromptDocument>;
   taskPromptStore?: TaskPromptStore;
   featureFlagCollection?: Collection<FeatureFlagDocument>;
@@ -339,7 +444,16 @@ export interface TestDependencies {
   skillRevisionCollection?: Collection<SkillRevisionDocument>;
   skillRevisionStore?: SkillRevisionStore;
   skillResolver?: SkillResolver;
-  queueClients?: Map<WorkerType, QueueClient>;
+  codebaseCollection?: Collection<CodebaseDocument>;
+  codebaseRevisionCollection?: Collection<CodebaseRevisionDocument>;
+  codebaseStore?: CodebaseStore;
+  codebaseRevisionStore?: CodebaseRevisionStore;
+  codebaseResolver?: CodebaseResolver;
+  resourceCollection?: Collection<ResourceDocument>;
+  resourceRevisionCollection?: Collection<ResourceRevisionDocument>;
+  resourceStore?: ResourceStore;
+  resourceRevisionStore?: ResourceRevisionStore;
+  resourceResolver?: ResourceResolver;
   reportQueueClient?: QueueClient;
   blobStorage?: BlobStorage;
 }
@@ -351,7 +465,6 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.runsCollection) runsCol = deps.runsCollection;
   if (deps.criteriaCollection) criteriaCollection = deps.criteriaCollection;
   if (deps.promptFeatureCollection) promptFeatureCollection = deps.promptFeatureCollection;
-  if (deps.promptFeatureExtractionCollection) promptFeatureExtractionCollection = deps.promptFeatureExtractionCollection;
   if (deps.reportCollection) reportCollection = deps.reportCollection;
   if (deps.agentCollection) agentCollection = deps.agentCollection;
   if (deps.modelCollection) modelCollection = deps.modelCollection;
@@ -359,6 +472,11 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.insightsCollection) insightsCollection = deps.insightsCollection;
   if (deps.profileCollection) profileCollection = deps.profileCollection;
   if (deps.profileVersionCollection) profileVersionCollection = deps.profileVersionCollection;
+  if (deps.usersCollection) usersCollection = deps.usersCollection;
+  if (deps.userStore !== undefined) userStore = deps.userStore;
+  if (deps.userAccessResolver !== undefined) userAccessResolver = deps.userAccessResolver;
+  if (deps.authProvider !== undefined) authProvider = deps.authProvider;
+  if (deps.profileEnricher !== undefined) profileEnricher = deps.profileEnricher;
   if (deps.taskPromptCollection) taskPromptCollection = deps.taskPromptCollection;
   if (deps.taskPromptStore) taskPromptStore = deps.taskPromptStore;
   if (deps.featureFlagCollection) featureFlagCollection = deps.featureFlagCollection;
@@ -367,14 +485,27 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.skillRevisionCollection) skillRevisionCollection = deps.skillRevisionCollection;
   if (deps.skillRevisionStore) skillRevisionStore = deps.skillRevisionStore;
   if (deps.skillResolver) skillResolver = deps.skillResolver;
-  if (deps.queueClients) queueClients.clear(), deps.queueClients.forEach((v, k) => queueClients.set(k, v));
+  if (deps.codebaseCollection) codebaseCollection = deps.codebaseCollection;
+  if (deps.codebaseRevisionCollection) codebaseRevisionCollection = deps.codebaseRevisionCollection;
+  if (deps.codebaseStore) codebaseStore = deps.codebaseStore;
+  if (deps.codebaseRevisionStore) codebaseRevisionStore = deps.codebaseRevisionStore;
+  if (deps.codebaseResolver) codebaseResolver = deps.codebaseResolver;
+  if (deps.resourceCollection) resourceCollection = deps.resourceCollection;
+  if (deps.resourceRevisionCollection) resourceRevisionCollection = deps.resourceRevisionCollection;
+  if (deps.resourceStore) resourceStore = deps.resourceStore;
+  if (deps.resourceRevisionStore) resourceRevisionStore = deps.resourceRevisionStore;
+  if (deps.resourceResolver) resourceResolver = deps.resourceResolver;
   if (deps.reportQueueClient) reportQueueClient = deps.reportQueueClient;
   if (deps.blobStorage) blobStorage = deps.blobStorage;
 }
 
-// ─── Start server (skipped in test environment) ──────────────────────────────
+// ─── Start server when executed directly ─────────────────────────────────────
 
-if (!process.env.VITEST) {
+const isEntrypoint =
+  process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isEntrypoint) {
   main().catch((error) => {
     console.error("Failed to start server:", error);
     process.exit(1);

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """GEPA × Scope optimizer package."""
 
 from .scope_adapter import ScopeAdapter

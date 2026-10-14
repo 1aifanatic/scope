@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { Collection, Filter } from 'mongodb';
-import { PromptFeatureConfig, PromptFeatureDocument, TaskPromptType } from '../types/types.js';
+import { PromptFeatureConfig, PromptFeatureDocument, PromptType } from '../types/types.js';
 
 /**
  * MongoDB-backed prompt feature store for CRUD operations on prompt feature definitions.
@@ -14,13 +14,14 @@ export class PromptFeatureStore {
   constructor(private collection: Collection<PromptFeatureDocument>) {}
 
   /** List all active (non-deleted) prompt features, optionally filtered by type */
-  async getAll(opts?: { type?: TaskPromptType }): Promise<PromptFeatureDocument[]> {
+  async getAll(opts?: { type?: PromptType }): Promise<PromptFeatureDocument[]> {
     const filter: Filter<PromptFeatureDocument> = { deletedAt: { $exists: false } };
     if (opts?.type) {
-      // Absent `type` is treated as 'task' for backward compatibility.
+      // Absent `type` is treated as 'select' for backward compatibility
+      // (legacy prompt features predate typing and target the scenario task).
       filter.$or =
-        opts.type === "task"
-          ? [{ type: "task" }, { type: { $exists: false } }]
+        opts.type === "select"
+          ? [{ type: "select" }, { type: { $exists: false } }]
           : [{ type: opts.type }];
     }
     return this.collection
@@ -36,11 +37,12 @@ export class PromptFeatureStore {
 
   /** Create a new prompt feature. Validates uniqueness. */
   async create(input: {
+    projectId: string;
     id: string;
     prompt: string;
-    type?: TaskPromptType;
+    type?: PromptType;
   }): Promise<PromptFeatureDocument> {
-    const { id, prompt, type } = input;
+    const { projectId, id, prompt, type } = input;
 
     // Validate ID format
     if (!/^[a-z0-9_-]+$/.test(id)) {
@@ -56,6 +58,7 @@ export class PromptFeatureStore {
     }
 
     const doc: PromptFeatureDocument = {
+      projectId,
       id,
       prompt: prompt.trim(),
       ...(type ? { type } : {}),

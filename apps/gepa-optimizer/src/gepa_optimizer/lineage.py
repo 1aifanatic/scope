@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Post-hoc lineage reconstruction from a GEPA result.
 
 The rubber-duck critique flagged that capturing parent→child lineage *during*

@@ -11,12 +11,25 @@ function makeProgram(): Command {
   return program;
 }
 
-function mockFetchWith(body: unknown): void {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => body }));
+/** Captures the outgoing request that the `ky` engine handed to `fetch`. */
+interface CapturedRequest {
+  url: string;
+  method: string;
+  body: string;
 }
 
-function fetchMock(): ReturnType<typeof vi.fn> {
-  return fetch as unknown as ReturnType<typeof vi.fn>;
+let lastRequest: CapturedRequest | undefined;
+
+function mockFetchWith(body: unknown): void {
+  lastRequest = undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (req: Request) => {
+      // `ky` calls `fetch(request)` with a single `Request`; capture it before the body is consumed.
+      lastRequest = { url: req.url, method: req.method, body: await req.text() };
+      return { ok: true, status: 200, json: async () => body };
+    }),
+  );
 }
 
 describe("prompt-feature list", () => {
@@ -30,18 +43,18 @@ describe("prompt-feature list", () => {
     try {
       const program = makeProgram();
       await program.parseAsync(
-        ["prompt-feature", "list", "--type", "agents.md", "-u", "http://localhost:3100"],
+        ["prompt-feature", "list", "--type", "agents.md", "-u", "http://localhost:3100", "--project", "proj-test"],
         { from: "user" },
       );
     } finally {
       logSpy.mockRestore();
     }
 
-    const url = fetchMock().mock.calls[0][0] as string;
-    expect(url).toContain("type=agents.md");
+    expect(lastRequest?.url).toContain("type=agents.md");
+    expect(lastRequest?.url).toContain("projectId=proj-test");
   });
 
-  it("renders a Type column defaulting to 'task'", async () => {
+  it("renders a Type column defaulting to 'select'", async () => {
     mockFetchWith([{ id: "feat-1", prompt: "detect something" }]);
     const lines: string[] = [];
     const logSpy = vi.spyOn(console, "log").mockImplementation((...p: unknown[]) => {
@@ -50,12 +63,12 @@ describe("prompt-feature list", () => {
 
     try {
       const program = makeProgram();
-      await program.parseAsync(["prompt-feature", "list", "-u", "http://localhost:3100"], { from: "user" });
+      await program.parseAsync(["prompt-feature", "list", "-u", "http://localhost:3100", "--project", "proj-test"], { from: "user" });
     } finally {
       logSpy.mockRestore();
     }
 
-    expect(lines.join("\n")).toContain("task");
+    expect(lines.join("\n")).toContain("select");
   });
 });
 
@@ -70,15 +83,15 @@ describe("prompt-feature create", () => {
     try {
       const program = makeProgram();
       await program.parseAsync(
-        ["prompt-feature", "create", "--id", "my_feat", "--prompt", "detect x", "--type", "agents.md", "-u", "http://localhost:3100"],
+        ["prompt-feature", "create", "--id", "my_feat", "--prompt", "detect x", "--type", "agents.md", "-u", "http://localhost:3100", "--project", "proj-test"],
         { from: "user" },
       );
     } finally {
       logSpy.mockRestore();
     }
 
-    const init = fetchMock().mock.calls[0][1] as { body: string };
-    expect(JSON.parse(init.body)).toEqual({ id: "my_feat", prompt: "detect x", type: "agents.md" });
+    expect(JSON.parse(lastRequest!.body)).toEqual({ id: "my_feat", prompt: "detect x", type: "agents.md" });
+    expect(lastRequest!.url).toContain("projectId=proj-test");
   });
 
   it("omits type when not provided (backward compatible)", async () => {
@@ -88,14 +101,13 @@ describe("prompt-feature create", () => {
     try {
       const program = makeProgram();
       await program.parseAsync(
-        ["prompt-feature", "create", "--id", "my_feat2", "--prompt", "detect y", "-u", "http://localhost:3100"],
+        ["prompt-feature", "create", "--id", "my_feat2", "--prompt", "detect y", "-u", "http://localhost:3100", "--project", "proj-test"],
         { from: "user" },
       );
     } finally {
       logSpy.mockRestore();
     }
 
-    const init = fetchMock().mock.calls[0][1] as { body: string };
-    expect(JSON.parse(init.body)).toEqual({ id: "my_feat2", prompt: "detect y" });
+    expect(JSON.parse(lastRequest!.body)).toEqual({ id: "my_feat2", prompt: "detect y" });
   });
 });

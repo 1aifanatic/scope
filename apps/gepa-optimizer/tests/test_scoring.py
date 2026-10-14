@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from gepa_optimizer.scoring import compute_run_score, compute_turn_scores
 
 

@@ -29,13 +29,25 @@ import { useAllTurnsToolCalls } from "@/hooks/useHarExtraction";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportThumbnail } from "@/components/ReportThumbnail";
 import { CriteriaBadge } from "@/components/CriteriaBadge";
-import { ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X } from "lucide-react";
-import { formatDate, formatId, formatDuration } from "@/lib/utils";
-import { useState, useMemo, type ReactNode } from "react";
+import { TaskPromptBadge } from "@/components/TaskPromptBadge";
+import { AgentBadge } from "@/components/AgentBadge";
+import { SkillRevisionLinks } from "@/components/SkillRevisionLinks";
+import { AlertTriangle, ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X, Boxes } from "lucide-react";
+import { formatDate, formatId, formatDuration, cn } from "@/lib/utils";
+import {
+  GATE_METADATA,
+  GATE_ORDER,
+  orderGates,
+  type GateId,
+  type GateConfig,
+  type GateRunSummary,
+} from "@/lib/gates";
+import { useState, useMemo, useEffect, type ReactNode } from "react";
 import { toast } from "sonner";
-import type { RunState } from "@/types";
+import type { RunState, LogEvent, ResourceBinding, ResourceRunOutcome } from "@/types";
 import { useShiftModifier } from "@/hooks/useShiftModifier";
 import { getRetryButtonState } from "@/components/RetryButton";
+import { getRunSkillReferences } from "@/lib/skill-spec";
 
 /** A compact labeled stat: a micro uppercase label above its value. */
 function MetaItem({ label, value, title }: { label: string; value: ReactNode; title?: string }) {
@@ -64,6 +76,176 @@ function ResourceLinks({ label, items, hrefBase }: { label: string; items: strin
         ))}
       </div>
     </div>
+  );
+}
+
+function RunResourceLinks({ bindings, outcomes }: { bindings: ResourceBinding[]; outcomes: ResourceRunOutcome[] }) {
+  const outcomeByRevisionId = new Map(outcomes.map((resource) => [resource.revisionId, resource]));
+  const bindingsByRevisionId = new Set(bindings.map((binding) => binding.revisionId));
+  const outcomeOnly = outcomes.filter((resource) => !bindingsByRevisionId.has(resource.revisionId));
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">Resources</span>
+      <div className="flex flex-wrap items-center gap-1">
+        {bindings.map((binding) => {
+          const outcome = outcomeByRevisionId.get(binding.revisionId);
+          return (
+            <Link
+              key={binding.revisionId}
+              to={`/resources/${binding.ref.split("@r")[0]}`}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-mono transition-colors hover:bg-accent",
+                outcome ? outcome.setupSucceeded ? "border-emerald-500/40" : "border-destructive/50" : "",
+              )}
+            >
+              {binding.ref}
+              {outcome && (outcome.setupSucceeded ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <XCircle className="h-3 w-3 text-destructive" />)}
+            </Link>
+          );
+        })}
+        {outcomeOnly.map((resource) => (
+          <Link
+            key={resource.revisionId}
+            to={`/resources/${resource.slug}`}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-mono transition-colors hover:bg-accent",
+              resource.setupSucceeded ? "border-emerald-500/40" : "border-destructive/50",
+            )}
+          >
+            {resource.ref}
+            {resource.setupSucceeded ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <XCircle className="h-3 w-3 text-destructive" />}
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+type GatePhase = "running" | "pending" | "skipped";
+
+function GateStatusBadge({ summary, phase }: { summary?: GateRunSummary; phase?: GatePhase }) {
+  if (summary) {
+    if (summary.status === "passed") return <Badge variant="success">Passed · {summary.iterations}</Badge>;
+    if (summary.status === "failed") return <Badge variant="destructive">Failed · {summary.iterations}</Badge>;
+    return <Badge variant="secondary">Skipped</Badge>;
+  }
+  if (phase === "running")
+    return (
+      <Badge variant="outline" className="gap-1">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Running…
+      </Badge>
+    );
+  if (phase === "pending") return <Badge variant="outline" className="text-muted-foreground">Pending</Badge>;
+  if (phase === "skipped") return <Badge variant="secondary">Skipped</Badge>;
+  return <Badge variant="outline">Not configured</Badge>;
+}
+
+/**
+ * Per-gate accent classes for the Turns-tab phase containers. Literal Tailwind
+ * class names (no dynamic concatenation) so they survive the purge step.
+ */
+const GATE_ACCENT: Record<GateId, { spine: string; chip: string; tint: string }> = {
+  select: { spine: "bg-indigo-500", chip: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40", tint: "from-indigo-500/10" },
+  build: { spine: "bg-sky-500", chip: "bg-sky-500/20 text-sky-300 border-sky-500/40", tint: "from-sky-500/10" },
+  test: { spine: "bg-purple-500", chip: "bg-purple-500/20 text-purple-300 border-purple-500/40", tint: "from-purple-500/10" },
+  run: { spine: "bg-teal-500", chip: "bg-teal-500/20 text-teal-300 border-teal-500/40", tint: "from-teal-500/10" },
+  deploy: { spine: "bg-rose-500", chip: "bg-rose-500/20 text-rose-300 border-rose-500/40", tint: "from-rose-500/10" },
+};
+
+function skippedSummaryText(summaries: GateRunSummary[]): string | null {
+  const failed = summaries.find((summary) => summary.status === "failed");
+  if (!failed) return null;
+  const failedIndex = GATE_ORDER.indexOf(failed.gate);
+  const skipped = summaries
+    .filter((summary) => summary.status === "skipped" && GATE_ORDER.indexOf(summary.gate) > failedIndex)
+    .map((summary) => GATE_METADATA[summary.gate].label);
+  if (skipped.length === 0) return null;
+  return `${GATE_METADATA[failed.gate].label} failed; ${skipped.join("/")} skipped`;
+}
+
+/** Compact status dot for a gate tab trigger. */
+function GateTabStatusDot({ summary }: { summary?: GateRunSummary }) {
+  if (summary?.status === "passed") return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
+  if (summary?.status === "failed") return <XCircle className="h-3.5 w-3.5 text-red-500" />;
+  if (summary?.status === "skipped") return <MinusCircle className="h-3.5 w-3.5 text-slate-400" />;
+  return null;
+}
+
+/**
+ * Renders one criteria diagram per configured gate behind a gate tab strip.
+ * Falls back to a single bare diagram when only one gate is present (legacy runs).
+ */
+function CriteriaGateTabs({
+  gates,
+  gateSummaryById,
+  logs,
+  isStreaming,
+}: {
+  gates: Array<Pick<GateConfig, "gate" | "criteria">>;
+  gateSummaryById: Map<GateId, GateRunSummary>;
+  logs: LogEvent[];
+  /** True while the run is actively streaming logs — drives auto-follow of the live gate. */
+  isStreaming?: boolean;
+}) {
+  const gateSet = useMemo(() => new Set(gates.map((g) => g.gate)), [gates]);
+
+  // The gate currently being evaluated in the live log stream: the most recent
+  // log event carrying a `gate` that belongs to a configured gate.
+  const latestLogGate = useMemo<GateId | undefined>(() => {
+    for (let i = logs.length - 1; i >= 0; i--) {
+      const g = logs[i]?.data?.gate as GateId | undefined;
+      if (g && gateSet.has(g)) return g;
+    }
+    return undefined;
+  }, [logs, gateSet]);
+
+  // Default active gate follows the live log gate first (most current), then the
+  // latest gate that has a summary, until the user picks one explicitly.
+  const defaultGate = useMemo<GateId | undefined>(() => {
+    if (latestLogGate) return latestLogGate;
+    for (let i = gates.length - 1; i >= 0; i--) {
+      if (gateSummaryById.get(gates[i].gate)) return gates[i].gate;
+    }
+    return gates[0]?.gate;
+  }, [gates, gateSummaryById, latestLogGate]);
+
+  const [selected, setSelected] = useState<GateId | undefined>(undefined);
+
+  // While streaming, keep the selected tab in sync with the live log gate. Keyed
+  // on the gate value so it only moves on a gate transition — manual selection
+  // sticks within a stable gate and is overridden only when the pipeline advances.
+  useEffect(() => {
+    if (isStreaming && latestLogGate) setSelected(latestLogGate);
+  }, [isStreaming, latestLogGate]);
+
+  const activeGate = selected ?? defaultGate;
+
+  if (gates.length === 0) return null;
+
+  // Single gate (or legacy run): no tab strip, just the diagram.
+  if (gates.length === 1) {
+    const only = gates[0];
+    return <CriteriaGraphView scenarioCriteria={only.criteria} gate={only.gate} logs={logs} />;
+  }
+
+  return (
+    <Tabs value={activeGate} onValueChange={(value) => setSelected(value as GateId)}>
+      <TabsList>
+        {gates.map((g) => (
+          <TabsTrigger key={g.gate} value={g.gate} className="gap-1.5">
+            {GATE_METADATA[g.gate].label}
+            <GateTabStatusDot summary={gateSummaryById.get(g.gate)} />
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      {gates.map((g) => (
+        <TabsContent key={g.gate} value={g.gate} className="mt-3">
+          <CriteriaGraphView scenarioCriteria={g.criteria} gate={g.gate} logs={logs} />
+        </TabsContent>
+      ))}
+    </Tabs>
   );
 }
 
@@ -287,15 +469,22 @@ export function RunDetail() {
   const latestCriteriaResultsMap = useMemo(() => {
     if (activeRun?.status !== "done") return undefined;
     const turns = activeRun?.turns ?? [];
-    const lastTurn = turns.length > 0 ? turns[turns.length - 1] : undefined;
-    if (!lastTurn?.criteriaResults?.length) return new Map<string, boolean | undefined>();
+    if (turns.length === 0) return new Map<string, boolean | undefined>();
 
-    return new Map<string, boolean | undefined>(
-      lastTurn.criteriaResults.map((r) => [
-        r.criterionId,
-        r.evaluated ? r.passed : undefined,
-      ])
-    );
+    const resultTurns = turns.some((turn) => turn.gate)
+      ? GATE_ORDER.map((gate) => {
+          const gateTurns = turns.filter((turn) => (turn.gate ?? "select") === gate);
+          return gateTurns[gateTurns.length - 1];
+        }).filter(Boolean)
+      : [turns[turns.length - 1]];
+
+    const results = new Map<string, boolean | undefined>();
+    for (const turn of resultTurns) {
+      for (const result of turn?.criteriaResults ?? []) {
+        results.set(result.criterionId, result.evaluated ? result.passed : undefined);
+      }
+    }
+    return results;
   }, [activeRun?.status, activeRun?.turns]);
 
   // Prefer scenario criteria as the canonical list.
@@ -359,14 +548,62 @@ export function RunDetail() {
         )
       : undefined);
 
-   const skillIdsFromRevisions = Array.from(new Set((run.skillRevisions ?? []).map((ref) => {
-     const at = ref.lastIndexOf("@");
-     return at > 0 ? ref.substring(0, at) : ref;
-   })));
-   const skillIds = skillIdsFromRevisions.length > 0
-     ? skillIdsFromRevisions
-     : (run.skills ?? []);
+  const skillReferences = getRunSkillReferences(run);
+  const runResources = run.resources ?? [];
+  const runResourceOutcomes = activeRun?.resources ?? [];
+  const resourceOutcomeByRevisionId = new Map(runResourceOutcomes.map((resource) => [resource.revisionId, resource]));
+  const resourceRows = runResources.length > 0
+    ? runResources.map((binding) => ({
+        binding,
+        outcome: resourceOutcomeByRevisionId.get(binding.revisionId),
+      }))
+    : runResourceOutcomes.map((outcome) => ({
+        binding: {
+          ref: outcome.ref,
+          revisionId: outcome.revisionId,
+          params: outcome.params ?? {},
+        },
+        outcome,
+      }));
+  const hasRunResources = resourceRows.length > 0;
 
+  const gateSummaries = (run.gateSummaries ?? []) as GateRunSummary[];
+  const gateSummaryById = new Map(gateSummaries.map((summary) => [summary.gate, summary]));
+  // Run is still in flight (not yet terminal). Used to label configured gates that
+  // haven't produced a summary as "Pending"/"Running" rather than "Skipped".
+  const isRunActive = activeRun?.status !== "done";
+  // Gates execute sequentially in GATE_ORDER and only get a summary once they finish,
+  // so the earliest configured gate without a summary is the one currently executing.
+  const currentGate = GATE_ORDER.find(
+    (gate) => !gateSummaryById.get(gate) && (run.gates ?? []).some((config) => config.gate === gate),
+  );
+  const hasGateData =
+    gateSummaries.length > 0 ||
+    (run.gates?.length ?? 0) > 0 ||
+    (activeRun?.turns ?? []).some((turn) => turn.gate);
+  const turnGroups = GATE_ORDER
+   .map((gate) => ({
+     gate,
+     turns: (activeRun?.turns ?? []).filter((turn) => (turn.gate ?? "select") === gate),
+     summary: gateSummaryById.get(gate),
+   }))
+   .filter((group) => group.turns.length > 0 || group.summary);
+  const downstreamSkippedText = skippedSummaryText(gateSummaries);
+
+  // Criteria diagrams per gate. For gated runs, use each gate's own criteria; for
+  // legacy runs (no gates configured), fall back to a single Select diagram driven by
+  // the scenario criteria. Computed inline (not memoized) to avoid adding a hook after
+  // the component's early returns.
+  const configuredGates = (run.gates ?? []) as GateConfig[];
+  const criteriaGates: Array<Pick<GateConfig, "gate" | "criteria">> =
+    configuredGates.length > 0
+      ? orderGates(configuredGates)
+          .filter((g) => (g.criteria?.length ?? 0) > 0)
+          .map((g) => ({ gate: g.gate, criteria: g.criteria }))
+      : (run.scenario?.criteria?.length ?? 0) > 0
+        ? [{ gate: "select" as GateId, criteria: run.scenario!.criteria }]
+        : [];
+ 
   return (
     <TooltipProvider delayDuration={200}>
     <div className="space-y-6">
@@ -407,9 +644,40 @@ export function RunDetail() {
               )}
             </div>
 
+            {hasGateData && (
+              <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {GATE_ORDER.map((gate) => {
+                    const summary = gateSummaryById.get(gate);
+                    const configured = summary || run.gates?.some((config) => config.gate === gate);
+                    if (!configured) return null;
+                    const phase: GatePhase | undefined = summary
+                      ? undefined
+                      : !isRunActive
+                        ? "skipped"
+                        : gate === currentGate && activeRun?.status === "processing"
+                          ? "running"
+                          : "pending";
+                    return (
+                      <div key={gate} className="flex items-center gap-1.5">
+                        <span className="text-xs font-medium">{GATE_METADATA[gate].label}</span>
+                        <GateStatusBadge summary={summary} phase={phase} />
+                      </div>
+                    );
+                  })}
+                </div>
+                {downstreamSkippedText && (
+                  <p className="text-xs text-muted-foreground">{downstreamSkippedText}</p>
+                )}
+              </div>
+            )}
+
             {/* Tier 2 — labeled configuration + metrics */}
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-              <MetaItem label="Worker" value={<span className="font-mono">{run.workerType}</span>} />
+              <MetaItem
+                label="Worker"
+                value={<AgentBadge agentId={run.workerType} version={run.agentVersion} />}
+              />
               {run.model && (
                 <MetaItem
                   label="Model"
@@ -426,6 +694,19 @@ export function RunDetail() {
                   label="Version"
                   title={activeRun?.workerVersion ? `Worker: ${activeRun?.workerVersion}` : undefined}
                   value={<span className="font-mono">{run.agentVersion}</span>}
+                />
+              )}
+              {run.profileId && (
+                <MetaItem
+                  label="Profile"
+                  value={(
+                    <Link to={`/profiles/${run.profileId}`} className="text-primary hover:underline">
+                      {profile?.name ?? <Skeleton className="inline-block h-4 w-24 align-middle" />}
+                      {run.profileVersionId?.split("@")[1] && (
+                        <span className="ml-1 font-mono text-muted-foreground">v{run.profileVersionId.split("@")[1]}</span>
+                      )}
+                    </Link>
+                  )}
                 />
               )}
               <MetaItem label="Created" value={formatDate(run.createdAt)} />
@@ -457,11 +738,24 @@ export function RunDetail() {
                   value={<span className="font-mono">{activeRun?.aiCallCount}</span>}
                 />
               )}
+              {activeRun?.mcpRegistered !== undefined && (
+                <MetaItem
+                  label="MCP registered"
+                  title="Whether MCP server registration completed for this attempt"
+                  value={(
+                    <Badge variant={activeRun.mcpRegistered ? "success" : "secondary"} className="gap-1">
+                      {activeRun.mcpRegistered ? <CheckCircle2 className="h-3 w-3" /> : <MinusCircle className="h-3 w-3" />}
+                      {activeRun.mcpRegistered ? "Yes" : "No"}
+                    </Badge>
+                  )}
+                />
+              )}
             </div>
 
             {/* Tier 3 — resource attachments */}
             {((run.mcpServers && run.mcpServers.length > 0) ||
               (run.skills && run.skills.length > 0) ||
+              hasRunResources ||
               (run.extensions && run.extensions.length > 0)) && (
               <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
                 {run.mcpServers && run.mcpServers.length > 0 && (
@@ -472,6 +766,9 @@ export function RunDetail() {
                 )}
                 {run.extensions && run.extensions.length > 0 && (
                   <ResourceLinks label="Extensions" items={run.extensions} hrefBase="/extensions" />
+                )}
+                {hasRunResources && (
+                  <RunResourceLinks bindings={runResources} outcomes={runResourceOutcomes} />
                 )}
               </div>
             )}
@@ -649,7 +946,7 @@ export function RunDetail() {
 
       {/* Tabs */}
       <Tabs
-        value={tab || (activeRun?.turns && activeRun?.turns.length > 0 ? "turns" : "logs")}
+        value={tab || (activeRun?.status === "done" && activeRun?.turns && activeRun.turns.length > 0 ? "turns" : "logs")}
         onValueChange={(value) => navigate(`/runs/${id}/${value}${selectedRunId ? `?runId=${selectedRunId}` : ""}`)}
       >
         <TabsList>
@@ -671,7 +968,49 @@ export function RunDetail() {
 
         {/* Turns tab */}
         <TabsContent value="turns" className="mt-4">
-          <TurnTimeline turns={activeRun?.turns ?? []} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
+          {hasGateData && turnGroups.length > 0 ? (
+            <div className="space-y-4">
+              {turnGroups.map(({ gate, turns, summary }) => {
+                const accent = GATE_ACCENT[gate];
+                const phaseNumber = GATE_ORDER.indexOf(gate) + 1;
+                const phase: GatePhase | undefined = summary
+                  ? undefined
+                  : !isRunActive
+                    ? "skipped"
+                    : gate === currentGate && activeRun?.status === "processing"
+                      ? "running"
+                      : "pending";
+                return (
+                  <section key={gate} className="relative overflow-hidden rounded-xl border bg-card">
+                    <span className={cn("absolute inset-y-0 left-0 w-1", accent.spine)} aria-hidden />
+                    <div className={cn("flex items-center gap-3 bg-gradient-to-r to-transparent py-3 pl-5 pr-4", accent.tint)}>
+                      <span className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-md border text-sm font-bold", accent.chip)}>
+                        {phaseNumber}
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="font-semibold leading-tight">{GATE_METADATA[gate].label}</h3>
+                        <p className="text-xs text-muted-foreground">{GATE_METADATA[gate].description}</p>
+                      </div>
+                      <div className="ml-auto">
+                        <GateStatusBadge summary={summary} phase={phase} />
+                      </div>
+                    </div>
+                    <div className="py-3 pl-5 pr-4">
+                      {turns.length > 0 ? (
+                        <TurnTimeline turns={turns} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
+                      ) : (
+                        <p className="py-1 text-sm italic text-muted-foreground">
+                          {phase === "running" ? "Running — first iteration in progress…" : phase === "pending" ? "Waiting for earlier gates to finish…" : "No iterations recorded."}
+                        </p>
+                      )}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          ) : (
+            <TurnTimeline turns={activeRun?.turns ?? []} runId={run._id} attemptRunId={isViewingHistorical ? activeRun?._id : undefined} />
+          )}
         </TabsContent>
 
         {/* Conversation tab — chat-style view of agent/judge exchanges */}
@@ -717,10 +1056,12 @@ export function RunDetail() {
 
         {/* Logs tab */}
         <TabsContent value="logs" className="mt-4 space-y-4">
-          {run.scenario?.criteria && run.scenario.criteria.length > 0 && (
-            <CriteriaGraphView
-              scenarioCriteria={run.scenario!.criteria}
+          {criteriaGates.length > 0 && (
+            <CriteriaGateTabs
+              gates={criteriaGates}
+              gateSummaryById={gateSummaryById}
               logs={effectiveLogs}
+              isStreaming={effectiveIsConnected}
             />
           )}
           <LogViewer
@@ -869,16 +1210,28 @@ export function RunDetail() {
               <CardContent className="space-y-3">
                 <div>
                   <h4 className="text-sm font-medium mb-1">Task</h4>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-5 cursor-default">
+                  {run.taskPromptId ? (
+                    <TaskPromptBadge
+                      taskPromptId={run.taskPromptId}
+                      prompt={taskPrompt}
+                      className="block"
+                    >
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-5 cursor-pointer hover:underline">
                         {run.scenario?.task ?? "–"}
                       </p>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-sm whitespace-pre-wrap">
-                      {run.scenario?.task ?? "–"}
-                    </TooltipContent>
-                  </Tooltip>
+                    </TaskPromptBadge>
+                  ) : (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-5 cursor-default">
+                          {run.scenario?.task ?? "–"}
+                        </p>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-sm whitespace-pre-wrap">
+                        {run.scenario?.task ?? "–"}
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
                 </div>
                 {run.scenario?.version && (
                   <div>
@@ -886,7 +1239,39 @@ export function RunDetail() {
                     <Badge variant="outline">{run.scenario!.version}</Badge>
                   </div>
                 )}
-                {displayedCriteria.length > 0 && (
+                {run.gates && run.gates.length > 0 ? (
+                  <div>
+                    <h4 className="text-sm font-medium mb-1">Gate criteria</h4>
+                    <div className="space-y-2">
+                      {run.gates.map((gateConfig) => (
+                        <div key={gateConfig.gate} className="rounded-md border p-2">
+                          <div className="mb-1 flex items-center justify-between gap-2">
+                            <span className="text-xs font-medium">{GATE_METADATA[gateConfig.gate].label}</span>
+                            <GateStatusBadge summary={gateSummaryById.get(gateConfig.gate)} />
+                          </div>
+                          {gateConfig.promptId && (
+                            <div className="mb-1.5">
+                              <TaskPromptBadge taskPromptId={gateConfig.promptId} />
+                            </div>
+                          )}
+                          <div className="flex flex-wrap gap-1.5">
+                            {gateConfig.criteria.length > 0 ? gateConfig.criteria.map((c) => (
+                              <CriteriaBadge
+                                key={`${gateConfig.gate}-${c}`}
+                                criterionId={c}
+                                result={latestCriteriaResultsMap?.get(c)}
+                                evaluated={activeRun?.status === "done"}
+                                showStateLabel={activeRun?.status === "done"}
+                              />
+                            )) : (
+                              <span className="text-xs text-muted-foreground">Pass-through (no criteria)</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : displayedCriteria.length > 0 && (
                   <div>
                     <h4 className="text-sm font-medium mb-1">Criteria ({displayedCriteria.length})</h4>
                     <div className="flex flex-wrap gap-1.5">
@@ -898,7 +1283,6 @@ export function RunDetail() {
                             result={latestCriteriaResultsMap?.get(c)}
                             evaluated={activeRun?.status === "done"}
                             showStateLabel={activeRun?.status === "done"}
-                            link={false}
                           />
                         );
                       })}
@@ -1011,8 +1395,12 @@ export function RunDetail() {
                     </div>
                   )}
                   <div>
-                    <span className="text-muted-foreground">Worker Type:</span>{" "}
-                    <span className="font-mono font-medium">{run.workerType}</span>
+                    <span className="text-muted-foreground">Worker:</span>{" "}
+                    <AgentBadge
+                      agentId={run.workerType}
+                      version={run.agentVersion}
+                      className="font-medium"
+                    />
                   </div>
                   {run.model && (
                     <div>
@@ -1085,24 +1473,86 @@ export function RunDetail() {
               </Card>
             )}
 
-            {/* Skills card */}
-            {skillIds.length > 0 && (
+            {/* Resources card */}
+            {hasRunResources && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
-                    Skills ({skillIds.length})
+                    <Boxes className="h-4 w-4" /> Resources ({resourceRows.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {resourceRows.map(({ binding, outcome }) => (
+                      <div key={binding.revisionId} className="rounded-md border p-3 text-sm">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link to={`/resources/${binding.ref.split("@r")[0]}`} className="font-mono text-xs text-primary hover:underline">{binding.ref}</Link>
+                          <Badge variant="outline" className="font-mono text-xs">revision {formatId(binding.revisionId)}</Badge>
+                          {outcome && (
+                            outcome.setupSucceeded ? (
+                              <Badge variant="success" className="gap-1"><CheckCircle2 className="h-3 w-3" /> setup ok</Badge>
+                            ) : (
+                              <Badge variant="destructive" className="gap-1"><XCircle className="h-3 w-3" /> setup failed</Badge>
+                            )
+                          )}
+                          {outcome?.teardownRan !== undefined && (
+                            outcome.teardownRan ? (
+                              <Badge variant="outline" className="text-xs">teardown ran</Badge>
+                            ) : (
+                              // Rendered identically to "ran" before, which made the one state
+                              // worth noticing invisible: whatever setup created is still there.
+                              <Badge variant="outline" className="gap-1 border-amber-500/50 text-xs text-amber-700 dark:text-amber-300">
+                                <AlertTriangle className="h-3 w-3" /> teardown not run
+                              </Badge>
+                            )
+                          )}
+                          {outcome?.setupDurationMs !== undefined && (
+                            <Badge variant="secondary" className="font-mono text-xs">{formatDuration(outcome.setupDurationMs)}</Badge>
+                          )}
+                        </div>
+                        {outcome?.error && <p className="mt-2 text-xs text-destructive">{outcome.error}</p>}
+                        {outcome?.teardownRan === false && (
+                          <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                            Anything this resource created is still running. Nothing reclaims it
+                            automatically under local Docker, so remove it by name, and make the
+                            setup script do the same before it provisions.
+                          </p>
+                        )}
+                        <div className="mt-2 space-y-1">
+                          <span className="text-xs text-muted-foreground">Resolved parameters:</span>
+                          {Object.keys(binding.params).length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              {Object.entries(binding.params).map(([name, value]) => (
+                                <Badge key={name} variant="outline" className="font-mono text-xs">{name}={value}</Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="ml-1 text-xs text-muted-foreground">none</span>
+                          )}
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs text-muted-foreground">Published:</span>
+                          {outcome?.published && outcome.published.length > 0 ? (
+                            outcome.published.map((name) => <Badge key={name} variant="secondary" className="font-mono text-xs">{name}</Badge>)
+                          ) : (
+                            <span className="text-xs text-muted-foreground">none</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Skills card */}
+            {skillReferences.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    Skills ({skillReferences.length})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex flex-wrap gap-1.5">
-                    {skillIds.map((skillId) => (
-                      <Link key={skillId} to={`/skills/${skillId}`}>
-                        <Badge variant="secondary" className="font-mono text-xs hover:bg-accent transition-colors">
-                          {skillId}
-                        </Badge>
-                      </Link>
-                    ))}
-                  </div>
+                  <SkillRevisionLinks references={skillReferences} />
                 </CardContent>
               </Card>
             )}
@@ -1117,11 +1567,16 @@ export function RunDetail() {
                 </CardHeader>
                 <CardContent className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <Link to={`/task-prompts/${run.agentsMdPromptId}`} className="font-mono hover:underline">
+                    <TaskPromptBadge
+                      taskPromptId={run.agentsMdPromptId}
+                      className="font-mono hover:underline"
+                    >
                       {formatId(run.agentsMdPromptId)}
-                    </Link>
+                    </TaskPromptBadge>
                     {run.experimentId && (
-                      <Badge variant="outline" className="font-mono">experiment: {run.experimentId}</Badge>
+                      <Badge variant="outline" className="font-mono">
+                        experiment: {run.experimentId}
+                      </Badge>
                     )}
                     {run.agentsMdParentIds && run.agentsMdParentIds.length > 0 && (
                       <Badge variant="secondary" className="font-mono">
@@ -1258,7 +1713,7 @@ export function RunDetail() {
 // Helper: per-iteration HAR viewer tabs for multi-turn runs
 // ---------------------------------------------------------------------------
 
-function HarIterationTabs({ runId, turns, attemptRunId }: { runId: string; turns: { iteration: number; harUrl?: string }[]; attemptRunId?: string }) {
+function HarIterationTabs({ runId, turns, attemptRunId }: { runId: string; turns: { iteration: number; gate?: GateId; harUrl?: string }[]; attemptRunId?: string }) {
   const turnsWithHar = turns.filter(t => t.harUrl);
   const [activeIteration, setActiveIteration] = useState(turnsWithHar[0]?.iteration);
 
@@ -1280,7 +1735,7 @@ function HarIterationTabs({ runId, turns, attemptRunId }: { runId: string; turns
             className="font-mono text-xs"
             onClick={() => setActiveIteration(t.iteration)}
           >
-            Iteration {t.iteration}
+            {t.gate ? `${GATE_METADATA[t.gate].label} · ` : ""}Iteration {t.iteration}
           </Button>
         ))}
       </div>
@@ -1295,7 +1750,7 @@ function HarIterationTabs({ runId, turns, attemptRunId }: { runId: string; turns
 // Helper: per-iteration video player tabs for multi-turn runs
 // ---------------------------------------------------------------------------
 
-function VideoIterationTabs({ runId, turns, setupVideoUrls, attemptRunId }: { runId: string; turns: { iteration: number; videoUrls?: string[] }[]; setupVideoUrls?: string[]; attemptRunId?: string }) {
+function VideoIterationTabs({ runId, turns, setupVideoUrls, attemptRunId }: { runId: string; turns: { iteration: number; gate?: GateId; videoUrls?: string[] }[]; setupVideoUrls?: string[]; attemptRunId?: string }) {
   const turnsWithVideo = turns.filter(t => t.videoUrls && t.videoUrls.length > 0);
   const hasSetupVideo = setupVideoUrls && setupVideoUrls.length > 0;
   const [activeTab, setActiveTab] = useState<string>(hasSetupVideo ? "setup" : String(turnsWithVideo[0]?.iteration));
@@ -1329,7 +1784,7 @@ function VideoIterationTabs({ runId, turns, setupVideoUrls, attemptRunId }: { ru
               className="font-mono text-xs"
               onClick={() => setActiveTab(String(t.iteration))}
             >
-              Iteration {t.iteration}
+              {t.gate ? `${GATE_METADATA[t.gate].label} · ` : ""}Iteration {t.iteration}
             </Button>
           ))}
         </div>
@@ -1389,6 +1844,14 @@ function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; t
     byName.set(tc.name, (byName.get(tc.name) ?? 0) + 1);
   }
 
+  // Map each iteration to its gate so the table can show which phase a tool call
+  // ran in. Only shown when the run actually has gated turns.
+  const iterationGate = new Map<number, GateId>();
+  for (const t of turns ?? []) {
+    if (t.gate) iterationGate.set(t.iteration, t.gate);
+  }
+  const showGate = iterationGate.size > 0;
+
   const harDownloadUrl = attemptRunId ? api.runHarUrl(runId, attemptRunId) : api.harUrl(runId);
   const harIterationUrl = (iteration: number) => attemptRunId ? api.runHarUrl(runId, attemptRunId, iteration) : api.harUrl(runId, iteration);
 
@@ -1442,6 +1905,7 @@ function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; t
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/50">
+                      {showGate && <th className="text-left p-3 font-medium">Gate</th>}
                       <th className="text-left p-3 font-medium">Iteration</th>
                       <th className="text-left p-3 font-medium">Tool</th>
                       <th className="text-left p-3 font-medium">Arguments</th>
@@ -1450,8 +1914,22 @@ function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; t
                     </tr>
                   </thead>
                   <tbody>
-                    {allToolCalls.map((tc, idx) => (
+                    {allToolCalls.map((tc, idx) => {
+                      const gate = tc._iteration != null ? iterationGate.get(tc._iteration) : undefined;
+                      return (
                       <tr key={tc.id || idx} className="border-b last:border-0">
+                        {showGate && (
+                          <td className="p-3">
+                            {gate ? (
+                              <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs">
+                                <span className={cn("h-2 w-2 rounded-full", GATE_ACCENT[gate].spine)} aria-hidden />
+                                {GATE_METADATA[gate].label}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">–</span>
+                            )}
+                          </td>
+                        )}
                         <td className="p-3 text-xs text-muted-foreground">
                           {tc._iteration ?? "–"}
                         </td>
@@ -1492,7 +1970,8 @@ function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; t
                           {tc.timestamp ? new Date(tc.timestamp).toLocaleTimeString() : "–"}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1513,7 +1992,7 @@ function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; t
                     onClick={() => window.open(harIterationUrl(t.iteration), "_blank")}
                   >
                     <Download className="h-3 w-3" />
-                    Iteration {t.iteration}
+                    {t.gate ? `${GATE_METADATA[t.gate].label} · ` : ""}Iteration {t.iteration}
                   </Button>
                 ))}
               </div>

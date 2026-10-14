@@ -6,6 +6,7 @@ import {
   CreateTaskPromptInputSchema,
   PatchTaskPromptFeatureInputSchema,
   PromptFeatureResultSchema,
+  PromptTypeSchema,
   SuggestedPromptFeatureSchema,
   TaskPromptResponseSchema,
 } from "shared";
@@ -14,6 +15,7 @@ import type { RouteContext } from "../route-context.js";
 import { extractPromptFeatures, isLlmAvailable as isPromptFeatureLlmAvailable } from "../prompt-feature-llm.js";
 import { generateTaskPrompt, isTaskPromptLlmAvailable } from "../task-prompt-llm.js";
 import { isInferenceError } from "../llm-token.js";
+import { ProjectIdQuerySchema, getQueryProjectId } from "../utils/project-scope.js";
 
 export function registerTaskPromptsRoutes(ctx: RouteContext): void {
 
@@ -48,7 +50,7 @@ apiRoute(ctx.app, ctx.registry, {
     const recentPrompts = await ctx.taskPromptCollection
       .find({
         deletedAt: { $exists: false },
-        $or: [{ type: "task" }, { type: { $exists: false } }],
+        $or: [{ type: "select" }, { type: { $exists: false } }],
       })
       .sort({ createdAt: -1 })
       .limit(20)
@@ -78,8 +80,8 @@ apiRoute(ctx.app, ctx.registry, {
     limit: z.coerce.number().optional(),
     offset: z.coerce.number().optional(),
     search: z.string().optional(),
-    type: z.enum(["task", "agents.md"]).optional(),
-  }),
+    type: PromptTypeSchema.optional(),
+  }).merge(ProjectIdQuerySchema),
   response: z.object({
     items: z.array(TaskPromptResponseSchema),
     total: z.number(),
@@ -92,7 +94,7 @@ apiRoute(ctx.app, ctx.registry, {
     const search = req.query.search;
     const type = req.query.type;
 
-    const { items, total } = await ctx.taskPromptStore.getAll({ limit, offset, search, type });
+    const { items, total } = await ctx.taskPromptStore.getAll({ projectId: getQueryProjectId(req), limit, offset, search, type });
     res.json({ items, total, limit, offset });
   },
 });
@@ -121,6 +123,14 @@ apiRoute(ctx.app, ctx.registry, {
 
 // GET /api/v1/task-prompts/:id/content — get the resolved plain-text body
 // (inline or downloaded from blob). Used by workers to fetch AGENTS.md / task text.
+//
+// NOTE: This returns any prompt body by ID with no authorization check. That is
+// consistent with the rest of the API, which has no auth/tenancy model today
+// (see index.ts: just cors() + express.json()). Because prompts are globally
+// content-addressed and deduplicated via taskPromptStore.findOrCreate, this route
+// implicitly assumes a trusted-network, single-tenant deployment. If auth or
+// multi-tenancy is ever introduced, revisit this: the dedup store is NOT tenant-safe
+// and this endpoint would leak prompt bodies across tenants.
 apiRoute(ctx.app, ctx.registry, {
   method: "get",
   path: "/api/v1/task-prompts/:id/content",
@@ -152,6 +162,7 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Task Prompts"],
   summary: "Create or find task prompt",
   body: CreateTaskPromptInputSchema,
+  query: ProjectIdQuerySchema,
   response: TaskPromptResponseSchema,
   errorResponses: {
     400: { description: "Empty text string" },
@@ -164,7 +175,7 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     try {
-      const taskPrompt = await ctx.taskPromptStore.findOrCreate(text, { type });
+      const taskPrompt = await ctx.taskPromptStore.findOrCreate(getQueryProjectId(req), text, type);
       res.status(201).json(taskPrompt);
     } catch (err) {
       next(err);
@@ -247,11 +258,11 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     // Scope candidate features to the prompt's own type: task prompts get task
-    // features; AGENTS.md prompts get agents.md features. Absent type ⇒ task.
-    const promptType = taskPrompt.type ?? "task";
+    // features; AGENTS.md prompts get agents.md features. Absent type ⇒ select.
+    const promptType = taskPrompt.type ?? "select";
     const typeFilter: Record<string, unknown> =
-      promptType === "task"
-        ? { $or: [{ type: "task" }, { type: { $exists: false } }] }
+      promptType === "select"
+        ? { $or: [{ type: "select" }, { type: { $exists: false } }] }
         : { type: promptType };
     const allFeatures = await ctx.promptFeatureCollection
       .find({ deletedAt: { $exists: false }, ...typeFilter })

@@ -58,7 +58,7 @@ export interface SkillDiscoveryEntry {
 
 /**
  * Well-known directories to search for skills in a GitHub repo,
- * per the skills.sh CLI discovery order.
+ * per the Agent Skills specification (https://agentskills.io/specification).
  */
 const SKILL_SEARCH_DIRS = [
   'skills',
@@ -125,6 +125,7 @@ export class SkillResolver {
   /**
    * Resolve a skill from a GitHub repo, returning an existing or newly created SkillRevisionDocument.
    *
+   * @param projectId - Project scope the revision belongs to (per-project copy)
    * @param source - GitHub repo (e.g. "vercel-labs/agent-skills")
    * @param skillName - Skill name (e.g. "vercel-react-best-practices")
    * @param store - SkillRevisionStore for persistence
@@ -132,6 +133,7 @@ export class SkillResolver {
    * @returns The SkillRevisionDocument for this skill at its latest commit
    */
   async resolve(
+    projectId: string,
     source: string,
     skillName: string,
     store: SkillRevisionStore,
@@ -146,9 +148,9 @@ export class SkillResolver {
     // 2. Get the latest commit touching the skill directory
     const commitInfo = await this.getLatestCommit(source, skillPath);
 
-    // 3. Check if we already have this revision
+    // 3. Check if we already have this revision within the project
     const ref = buildSkillRevisionRef(source, skillName, commitInfo.sha);
-    const existing = await store.getByRef(ref);
+    const existing = await store.getByRef(projectId, ref);
     if (existing) {
       return existing;
     }
@@ -164,14 +166,16 @@ export class SkillResolver {
 
     const parsed = parseSkillMd(skillMdFile.content);
 
-    // 6. Validate per spec (use actual directory name from discovered path)
+    // 6. Validate per spec (use actual directory name from discovered path).
+    //    Validation is non-blocking: spec-constraint violations (and any other
+    //    issues) are surfaced as warnings on the revision rather than failing
+    //    the import, so off-spec skills can still be imported.
     const dirName = skillPath.split('/').pop()!;
     const validation = validateSkillFrontmatter(parsed.frontmatter, dirName);
-    if (!validation.valid) {
-      const errorMessages = validation.errors.map(e => `${e.field}: ${e.message}`).join('; ');
-      throw new Error(`Invalid SKILL.md in ${source}/${skillPath}: ${errorMessages}`);
-    }
-    const validationWarnings = validation.warnings.map(w => `${w.field}: ${w.message}`);
+    const validationWarnings = [
+      ...validation.errors.map(e => `${e.field}: ${e.message}`),
+      ...validation.warnings.map(w => `${w.field}: ${w.message}`),
+    ];
 
     // 7. Create tar.gz archive and upload
     const archiveData = await this.createArchive(skillName, files);
@@ -180,13 +184,14 @@ export class SkillResolver {
     // 8. Store the revision
     const now = new Date();
     return store.findOrCreate({
+      projectId,
       ref,
       source,
       skillName,
       skillPath,
       commitHash: commitInfo.sha,
       commitTimestamp: commitInfo.date,
-      name: parsed.frontmatter.name,
+      name: parsed.frontmatter.name || dirName,
       description: parsed.frontmatter.description,
       license: parsed.frontmatter.license,
       compatibility: parsed.frontmatter.compatibility,

@@ -267,6 +267,7 @@ sequenceDiagram
 - **Blob retry**: `BlobWriter` retries append operations up to 20× with exponential backoff, with a per-operation timeout controlled by `plugins.har.appendTimeoutSecs` (default 120 s). If the timeout fires, the session is marked hard-failed and subsequent proxied requests receive a 502.
 - **Rotation safety**: On `POST /api/v1/sessions/{id}/rotate`, plugins prepare iteration `N+1` before the iteration CAS is applied. For HAR blob storage this means creating the append blob first, preventing a state where iteration advances but the target blob is missing.
 - **Sensitive header redaction**: When `redactCredentials` is `true` (default), headers like `authorization`, `x-github-token`, `x-api-key`, `cookie`, and `set-cookie` are redacted at write time. Secrets never reach storage.
+- **Per-session opt-out**: Sessions created with `"plugins": {"har": {"enabled": false}}` record nothing: no local file or append blob is created, rotation is a no-op, and `GET .../har` returns 404. Recording is on by default (`enabled` omitted or `true`). Used for non-agent callers such as the Copilot model scanner.
 - **On-the-fly HAR assembly**: `GET /api/v1/sessions/{id}/har` reads the JSONL source (local file or blob download) and wraps entries in a HAR 1.2 envelope. No separate `.har` file is stored.
 - **Idempotent reads**: The JSONL source can be read multiple times (safe for retries). It is deleted on session cleanup (`DELETE /api/v1/sessions/{id}` or idle reap).
 
@@ -478,7 +479,12 @@ The gateway runs as a standalone Deployment (not a sidecar) in the `scoped` name
 - **Service** with `sessionAffinity: ClientIP` (10 min timeout) — performance optimization: keeps a worker's connections pinned to one replica for in-memory cache hits (not required for correctness — sessions are resolved via Proxy-Authorization, not IP)
 - **Resources**: 100m CPU / 128Mi memory (requests), 500m CPU / 512Mi memory (limits) per pod
 
-Workers that use the gateway (currently VS Code Electron) have their DevProxy sidecar **removed entirely**. The worker pod drops from 3 containers to 1, and proxy URLs point to the gateway Service:
+Workers that use the gateway have their DevProxy sidecar (and its `fix-permissions`
+init container) **removed entirely**, and proxy URLs point to the gateway Service.
+Workers currently on the gateway: **VS Code Electron**, **Linux `coder-acp-copilot`**,
+and **Windows `coder-acp-copilot-windows`**. Removing the proxy sidecar drops the
+DevProxy container plus its init container; the Linux Copilot pod goes from 3 containers
+to 2 (it keeps its MCPJungle `mcp-gateway` sidecar, which is unrelated to the proxy):
 
 ```yaml
 env:
@@ -490,14 +496,12 @@ env:
     value: "http://<sessionId>@gateway-service.scoped.svc.cluster.local:18000"
 ```
 
-**Manifests:** [`deploy/base/gateway.yaml`](../../deploy/base/gateway.yaml), [`deploy/base/gateway-config.yaml`](../../deploy/base/gateway-config.yaml)
-
 ## Future Plugins
 
 | Phase | Plugin | Status | Purpose |
 |-------|--------|--------|---------|
 | 1.b | Copilot Token Refresh | ✅ Shipped (#724) | Auto-mint and refresh Copilot session tokens |
-| 1.c | CAPI HMAC Signing | Planned | Sign requests with HMAC for Copilot API |
+| 1.c | CAPI HMAC Signing | Optional, not in default binary | Sign Copilot API requests with integration HMAC auth. Sessions opt in with `{"capi_hmac":{"enabled":true}}`, which workers and the Copilot model scanner send when `GATEWAY_CAPI_HMAC_ENABLED=true`. Set the flag only with a gateway build that registers and configures the plugin; otherwise the setting is ignored and requests fail with 401/403. |
 | 2.b | Rate Limiting | Planned | Budget-aware rate limiting for Claude Code (#659) |
 | 3 | Metrics | Planned | Prometheus `/metrics` — request counts, latency, bytes, error rates |
 
@@ -516,4 +520,15 @@ flowchart TD
     F --> G["Remove DevProxy sidecars + init containers"]
 ```
 
-**Current status (Phase 1.b):** VS Code Electron worker uses the gateway with Copilot token minting enabled (via `TOKEN_MANAGER_URL`). Other workers (ACP Copilot, ACP Claude Code) still use DevProxy sidecars. Both paths converge on the same `extractHarMetadata()` pipeline, so HAR output is identical regardless of backend.
+**Current status (Phase 3):** The gateway is the default backend. On it: the **VS Code
+Electron** worker (with Copilot token minting enabled via `TOKEN_MANAGER_URL`) and both
+**Copilot ACP** workers — **Windows** (#1058) and **Linux** (#723). The Copilot ACP
+workers run with the token plugin **disabled** (`GATEWAY_TOKEN_PLUGIN_ENABLED=false`)
+because the Copilot CLI manages its own token lifecycle. Only **ACP Claude Code** still
+uses a DevProxy sidecar. All paths converge on the same `extractHarMetadata()` pipeline,
+so HAR output is identical regardless of backend.
+
+Migrating the Linux Copilot worker is what makes gpt-5.x tool calls visible to the
+judge: DevProxy's HAR generator records HTTP only, but Copilot CLI ≥ 1.0.65 carries its
+`/responses` traffic over a **WebSocket**, which the gateway records into
+`_webSocketMessages` (see [`gateway-websocket.md`](./gateway-websocket.md)).

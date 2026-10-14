@@ -7,8 +7,18 @@ import { registerRunCommands } from "./run.js";
 
 interface MockResponse {
   ok: boolean;
+  status: number;
   json: () => Promise<unknown>;
 }
+
+/** Captures the outgoing request that the `ky` engine handed to `fetch`. */
+interface CapturedRequest {
+  url: string;
+  method: string;
+  body: string;
+}
+
+let lastRequest: CapturedRequest | undefined;
 
 function makeProgram(): Command {
   const program = new Command();
@@ -17,11 +27,20 @@ function makeProgram(): Command {
 }
 
 function mockFetchWith(body: unknown): void {
-  const response: MockResponse = {
-    ok: true,
-    json: async () => body,
-  };
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+  lastRequest = undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (req: Request) => {
+      // `ky` calls `fetch(request, options)`; capture the request before it is consumed.
+      lastRequest = { url: req.url, method: req.method, body: await req.text() };
+      const response: MockResponse = {
+        ok: true,
+        status: 200,
+        json: async () => body,
+      };
+      return response;
+    }),
+  );
 }
 
 async function runListAndCaptureOutput(args: string[] = []): Promise<string> {
@@ -32,7 +51,7 @@ async function runListAndCaptureOutput(args: string[] = []): Promise<string> {
 
   try {
     const program = makeProgram();
-    await program.parseAsync(["run", "list", "-u", "http://localhost:3100", ...args], { from: "user" });
+    await program.parseAsync(["run", "list", "-u", "http://localhost:3100", "--project", "proj-test", ...args], { from: "user" });
   } finally {
     logSpy.mockRestore();
   }
@@ -71,6 +90,7 @@ describe("run list", () => {
     expect(output).toContain("coder-acp-copilot");
     expect(output).toContain("done");
     expect(output).not.toContain('"data"');
+    expect(lastRequest?.url).toContain("projectId=proj-test");
   });
 
   it("renders table output for legacy array API response", async () => {
@@ -161,9 +181,8 @@ describe("run list", () => {
 
     await runListAndCaptureOutput(["--experiment-id", "exp-42", "--group-by", "experiment"]);
 
-    const calledUrl = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-    expect(calledUrl).toContain("experimentId=exp-42");
-    expect(calledUrl).toContain("groupBy=experiment");
+    expect(lastRequest?.url).toContain("experimentId=exp-42");
+    expect(lastRequest?.url).toContain("groupBy=experiment");
   });
 });
 
@@ -176,13 +195,12 @@ describe("run submit", () => {
     vi.restoreAllMocks();
   });
 
-  function captureSubmit(args: string[]): { url: string; body: Record<string, unknown> } {
-    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-    const [url, init] = fetchMock.mock.calls[0];
-    return { url: url as string, body: JSON.parse((init as { body: string }).body) };
+  function captureSubmit(): { url: string; body: Record<string, unknown> } {
+    if (!lastRequest) throw new Error("No request was captured");
+    return { url: lastRequest.url, body: JSON.parse(lastRequest.body) as Record<string, unknown> };
   }
 
-  it("includes experimentId and agentsMd in the submit body", async () => {
+  it("includes agentsMd and experimentId in the submit body", async () => {
     mockFetchWith({ id: "req-submit-1", workerType: "coder-acp-copilot", status: "queued" });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -192,10 +210,12 @@ describe("run submit", () => {
         [
           "run", "submit",
           "-m", "do the thing",
-          "--experiment-id", "exp-99",
+          "--worker", "dynamic-worker",
           "--agents-md", "# Be helpful",
+          "--experiment-id", "exp-99",
           "--no-stream",
           "-u", "http://localhost:3100",
+          "--project", "proj-test",
         ],
         { from: "user" },
       );
@@ -203,27 +223,28 @@ describe("run submit", () => {
       logSpy.mockRestore();
     }
 
-    const { url, body } = captureSubmit([]);
-    expect(url).toContain("/api/v1/requests?worker=coder-acp-copilot");
-    expect(body.experimentId).toBe("exp-99");
+    const { url, body } = captureSubmit();
+    expect(url).toContain("/api/v1/requests?worker=dynamic-worker");
+    expect(url).toContain("projectId=proj-test");
     expect(body.agentsMd).toBe("# Be helpful");
+    expect(body.experimentId).toBe("exp-99");
   });
 
-  it("omits agentsMd and experimentId when not provided", async () => {
+  it("omits agentsMd when not provided", async () => {
     mockFetchWith({ id: "req-submit-2", workerType: "coder-acp-copilot", status: "queued" });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     try {
       const program = makeProgram();
       await program.parseAsync(
-        ["run", "submit", "-m", "plain task", "--no-stream", "-u", "http://localhost:3100"],
+        ["run", "submit", "-m", "plain task", "--worker", "dynamic-worker", "--no-stream", "-u", "http://localhost:3100", "--project", "proj-test"],
         { from: "user" },
       );
     } finally {
       logSpy.mockRestore();
     }
 
-    const { body } = captureSubmit([]);
+    const { body } = captureSubmit();
     expect(body).not.toHaveProperty("agentsMd");
     expect(body).not.toHaveProperty("experimentId");
   });
@@ -297,11 +318,132 @@ describe("run retry", () => {
     }
 
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:3100/api/v1/requests/req-retry-force/retry",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ force: true }),
+    expect(lastRequest?.url).toBe("http://localhost:3100/api/v1/requests/req-retry-force/retry");
+    expect(lastRequest?.method).toBe("POST");
+    expect(lastRequest?.body).toBe(JSON.stringify({ force: true }));
+  });
+});
+
+describe("run submit gates", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sends parsed gates in the request body", async () => {
+    mockFetchWith({
+      id: "req-gates-1",
+      workerType: "coder-acp-copilot",
+      mode: "multi-turn",
+      status: "queued",
+    });
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code}) called`);
+    }) as never);
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync([
+        "run",
+        "submit",
+        "--message",
+        "Implement the task",
+        "--worker",
+        "dynamic-worker",
+        "--max-iterations",
+        "3",
+        "--gates",
+        JSON.stringify([
+          { gate: "select", criteria: ["implements_task"] },
+          { gate: "build", promptId: "build-prompt", criteria: [], maxIterations: 1 },
+        ]),
+        "--no-stream",
+        "-u",
+        "http://localhost:3100",
+        "--project",
+        "proj-test",
+      ], { from: "user" });
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(lastRequest?.url).toBe("http://localhost:3100/api/v1/requests?worker=dynamic-worker&projectId=proj-test");
+    expect(lastRequest?.method).toBe("POST");
+    expect(lastRequest?.body).toBe(
+      JSON.stringify({
+        scenario: { task: "Implement the task", criteria: [] },
+        maxIterations: 3,
+        gates: [
+          { gate: "select", criteria: ["implements_task"] },
+          { gate: "build", promptId: "build-prompt", criteria: [], maxIterations: 1 },
+        ],
+      }),
+    );
+  });
+});
+
+describe("run submit codebase", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sends codebase in the request body", async () => {
+    mockFetchWith({
+      id: "req-codebase-1",
+      workerType: "coder-acp-copilot",
+      mode: "one-shot",
+      status: "queued",
+    });
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code}) called`);
+    }) as never);
+
+    try {
+      const program = makeProgram();
+      await program.parseAsync([
+        "run",
+        "submit",
+        "--message",
+        "Implement the task",
+        "--worker",
+        "dynamic-worker",
+        "--codebase",
+        "scope-core@r3",
+        "--no-stream",
+        "-u",
+        "http://localhost:3100",
+        "--project",
+        "proj-test",
+      ], { from: "user" });
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(lastRequest?.url).toBe("http://localhost:3100/api/v1/requests?worker=dynamic-worker&projectId=proj-test");
+    expect(lastRequest?.method).toBe("POST");
+    expect(lastRequest?.body).toBe(
+      JSON.stringify({
+        scenario: { task: "Implement the task", criteria: [] },
+        codebase: "scope-core@r3",
       }),
     );
   });
