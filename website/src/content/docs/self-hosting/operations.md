@@ -4,7 +4,8 @@ description: Upgrade, scale, rotate secrets, monitor, back up, and troubleshoot 
 ---
 
 This page covers deployments provisioned from `deploy/azure` and installed
-with [Helm](/self-hosting/deploy-helm/).
+with [Helm](https://helm.sh/docs/) by following
+[Deploy with Helm](/self-hosting/deploy-helm/).
 
 ## Upgrade the application
 

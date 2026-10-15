@@ -1,10 +1,10 @@
 ---
-title: Self-hosting
-description: Deploy Scope to Kubernetes with Helm, using Azure as one infrastructure option.
+title: Kubernetes self-hosting
+description: Deploy and scale Scope on Kubernetes, using Azure as one infrastructure option.
 ---
 
 Scope can be self-hosted on Kubernetes with the
-[`deploy/helm/scope`](https://github.com/microsoft/scope/tree/main/deploy/helm/scope)
+[`deploy/helm/scope`](/self-hosting/deploy-helm/)
 chart. Infrastructure provisioning is separate from application deployment
 and can vary by cloud or Kubernetes provider.
 
@@ -28,7 +28,8 @@ It is separate from the repository's internal development infrastructure.
 
 For the Azure option, the infrastructure template creates the network, AKS
 cluster, managed data services, container registry, and workload identities.
-Helm installs the application into the `scope` namespace.
+[Helm](https://helm.sh/docs/) installs the application into the `scope`
+namespace.
 
 ```mermaid
 flowchart TD
@@ -48,10 +49,10 @@ flowchart TD
     Data --> Workers
 ```
 
-AKS has one fixed-size System node pool and one fixed-size User Linux node
-pool. OIDC and workload identity are enabled. The native Azure Key Vault
-Secrets Provider add-on syncs selected Key Vault objects into one Kubernetes
-Secret.
+The public Azure quickstart has one fixed-size System node pool and one
+fixed-size User Linux node pool. OIDC and workload identity are enabled. The
+native Azure Key Vault Secrets Provider add-on syncs selected Key Vault
+objects into one Kubernetes Secret.
 
 The core images come from `ghcr.io/microsoft`. The API builder-stage image
 runs database migrations. The ACP worker images are built in the provisioned
@@ -78,6 +79,11 @@ are not supported by this deployment.
 
 The chart also does not install an ingress controller, DNS, TLS,
 cert-manager, autoscaling, or an observability stack.
+
+Scope's production/reference architecture adds queue-driven AI coding-agent
+worker and node-pool scaling beyond this quickstart. See
+[Autoscaling with KEDA](/self-hosting/scaling/) for how KEDA, the Kubernetes
+scheduler, and the cluster autoscaler work together.
 
 ## Azure identity boundary
 
