@@ -25,16 +25,53 @@ it dequeue and process runs.
 
 ```mermaid
 flowchart TD
-    Scheduler[Scope scheduler] -->|dispatches run| Queue[Azure Storage Queue]
-    Queue -->|queue depth| KEDA[KEDA ScaledObject]
-    KEDA -->|sets replicas| Deployment[AI agent worker Deployment]
-    Deployment --> Requested[Requested AI agent worker pods]
-    Requested --> KubeScheduler[Kubernetes scheduler]
-    KubeScheduler -->|places pods when capacity is available| Pool[AI agent worker node pool]
-    Pool -->|hosts| Running[Running AI agent worker pods]
-    Running -->|dequeue and process runs| Queue
-    KubeScheduler -->|pods remain pending without capacity| Autoscaler[Cluster autoscaler]
-    Autoscaler -->|adds or removes nodes| Pool
+    Scheduler[Scope scheduler]
+
+    subgraph Demand["Event-driven pod scaling"]
+        Queue[(Azure Storage Queue)]
+        KEDA[KEDA ScaledObject]
+        Deployment[AI agent worker Deployment]
+
+        Queue -->|queue depth| KEDA
+        KEDA -->|sets replicas| Deployment
+    end
+
+    subgraph Capacity["Kubernetes scheduling and capacity"]
+        Requested[Requested AI agent worker pods]
+        KubeScheduler[Kubernetes scheduler]
+        Autoscaler[Cluster autoscaler]
+        Pool[AI agent worker node pool]
+        Running[Running AI agent worker pods]
+
+        Requested --> KubeScheduler
+        KubeScheduler -->|places pods when capacity is available| Pool
+        KubeScheduler -.->|pods remain pending without capacity| Autoscaler
+        Autoscaler -->|adds or removes nodes| Pool
+        Pool -->|hosts| Running
+    end
+
+    Scheduler -->|dispatches run| Queue
+    Deployment --> Requested
+    Running -->|dequeues and processes runs| Queue
+
+    classDef scope fill:#6035d8,stroke:#a78bfa,color:#fff,stroke-width:2px
+    classDef queue fill:#0078d4,stroke:#7dd3fc,color:#fff,stroke-width:2px
+    classDef scaler fill:#7c3aed,stroke:#c4b5fd,color:#fff
+    classDef deployment fill:#326ce5,stroke:#93c5fd,color:#fff
+    classDef pending fill:#b45309,stroke:#fcd34d,color:#fff
+    classDef kubernetes fill:#0f766e,stroke:#5eead4,color:#fff
+    classDef running fill:#047857,stroke:#6ee7b7,color:#fff,stroke-width:2px
+
+    class Scheduler scope
+    class Queue queue
+    class KEDA,Autoscaler scaler
+    class Deployment deployment
+    class Requested pending
+    class KubeScheduler,Pool kubernetes
+    class Running running
+
+    style Demand fill:transparent,stroke:#7c3aed,stroke-width:2px
+    style Capacity fill:transparent,stroke:#326ce5,stroke-width:2px
 ```
 
 ## Scale AI coding-agent worker pods with KEDA
