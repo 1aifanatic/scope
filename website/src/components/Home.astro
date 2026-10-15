@@ -133,18 +133,37 @@ const paths = [
 				</a>
 			))}
 		</div>
-		<div class="scope-help-row"><span>Already running experiments?</span><a href={`${base}resources/troubleshooting/`}>Troubleshooting</a><a href={`${base}resources/faq/`}>Common questions</a><a href={`${base}resources/data-collection/`}>Data &amp; privacy</a></div>
-		<div class="scope-help-row"><span>Running your own stack or contributing?</span><a href={`${base}getting-started/local-development/`}>Local development</a><a href={`${base}resources/contributing/`}>Contributing</a><a href={`${base}resources/support/`}>Support &amp; security</a></div>
 	</section>
 
 	<CommunityTeaser />
+
+	<section class="scope-section scope-kubernetes" aria-labelledby="kubernetes-heading">
+		<div class="scope-kubernetes-copy">
+			<p class="scope-eyebrow">Cloud-native foundations</p>
+			<h2 id="kubernetes-heading">Built on<br /><span>Kubernetes.</span></h2>
+			<p class="scope-kubernetes-description">
+				Your experiments deserve serious infrastructure. Scope runs on
+				Kubernetes, bringing containerized agent workers, queue-driven
+				scaling, and GitOps deployments to your benchmarking stack.
+			</p>
+			<a class="scope-btn scope-kubernetes-link" href={`${base}getting-started/local-development/`}>Explore self-hosting <span aria-hidden="true">&rarr;</span></a>
+		</div>
+		<div class="scope-kubernetes-brand">
+			<img src={`${base}kubernetes-stacked-white.svg`} alt="Kubernetes" width="240" height="234" loading="lazy" />
+			<span>Open infrastructure. Repeatable experiments.</span>
+		</div>
+		<ul class="scope-kubernetes-features">
+			<li><strong>Containerized workers</strong><span>Coding agents run in containers.</span></li>
+			<li><strong>Queue-driven scaling</strong><span>KEDA scales workers with demand.</span></li>
+			<li><strong>GitOps deployments</strong><span>Flux keeps deployments in sync.</span></li>
+		</ul>
+	</section>
 
 	<section class="scope-cta" aria-labelledby="cta-heading">
 		<p class="scope-eyebrow">Bring your own question</p>
 		<h2 id="cta-heading">What will your next<br />benchmark reveal?</h2>
 		<p>Start with one task you care about. Scope helps you see the rest.</p>
 		<a class="scope-btn scope-btn--primary" href={`${base}getting-started/access/`}>Get started <span aria-hidden="true">&rarr;</span></a>
-		<span class="scope-access-note">You'll need access to a Scope deployment. No account is needed for this demo.</span>
 	</section>
 </div>
 

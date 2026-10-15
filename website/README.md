@@ -54,6 +54,14 @@ development, contribution, and support guidance live under
 
 Sidebar order is defined in `astro.config.mjs`, not by directory order.
 
+The landing page places its Kubernetes infrastructure section before the
+final Get started call to action in
+[Home.astro](src/components/Home.astro), styled with Kubernetes blue
+(`#326CE5`). Its unmodified white logo is vendored from the
+[CNCF Kubernetes artwork](https://github.com/cncf/artwork/tree/main/projects/kubernetes)
+in [public/kubernetes-stacked-white.svg](public/kubernetes-stacked-white.svg).
+Keep the official artwork intact rather than recreating or recoloring it.
+
 ## Commands
 
 Run these commands from `website/`. The site has its own

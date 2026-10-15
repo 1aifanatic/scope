@@ -100,6 +100,26 @@ scope-showreel { display: block; max-width: 60rem; margin: 3rem auto 0; }
 .scope-strip-divider { width: 1px; height: 1.1rem; background: var(--scope-border); }
 .scope-section { margin-top: clamp(3.5rem, 7vw, 6rem); }
 .scope-demo-section { margin-top: 3.5rem; }
+.scope-kubernetes { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 2.5rem; padding: clamp(1.5rem, 5vw, 4rem); border: 1px solid #326ce5; border-radius: 1rem; color: #fff; background: radial-gradient(ellipse at 100% 0, #326ce5 0, transparent 65%), #102b64; box-shadow: 0 24px 70px -36px #326ce580; }
+.scope-kubernetes .scope-eyebrow { color: #c5dcff; }
+.scope-kubernetes h2 { margin-top: 1rem; font-size: clamp(2.5rem, 5vw, 4.5rem); font-weight: 650; line-height: 1.08; letter-spacing: -0.05em; }
+.scope-kubernetes h2 span { color: #fff; }
+.scope-home .scope-kubernetes-description { max-width: 49ch; margin-top: 1.5rem; color: #d9e6ff; font-size: 1rem; }
+.scope-kubernetes-link { margin-top: 1.75rem; background: #fff; color: #143572; }
+.scope-kubernetes-link:hover { background: #e5eeff; }
+.scope-kubernetes :focus-visible { outline-color: #fff; }
+.scope-kubernetes-brand { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 1.5rem; text-align: center; }
+.scope-kubernetes-brand img { display: block; width: min(100%, 240px); height: auto; }
+.scope-kubernetes-brand > span { max-width: 25ch; color: #d9e6ff; font: 0.75rem/1.6 var(--sl-font-mono); }
+.scope-home .scope-kubernetes-features { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; list-style: none; margin: 0; padding: 1.75rem 0 0; border-top: 1px solid #ffffff40; }
+.scope-kubernetes-features li { display: flex; flex-direction: column; gap: 0.4rem; }
+.scope-kubernetes-features strong { font-size: 0.9rem; font-weight: 600; }
+.scope-kubernetes-features span { color: #d9e6ff; font-size: 0.8rem; }
+@media (max-width: 48rem) {
+	.scope-kubernetes { grid-template-columns: minmax(0, 1fr); }
+	.scope-kubernetes-brand img { width: 160px; }
+	.scope-home .scope-kubernetes-features { grid-template-columns: minmax(0, 1fr); }
+}
 .scope-section-heading { display: flex; justify-content: space-between; align-items: end; gap: 2rem; margin-bottom: 1.8rem; }
 .scope-section-heading h2 { margin-top: 0.55rem; font-size: clamp(1.8rem, 3.3vw, 2.65rem); font-weight: 600; letter-spacing: -0.04em; line-height: 1.2; text-wrap: balance; }
 .scope-section-heading > p { max-width: 33ch; font-size: 0.9rem; color: var(--scope-muted); }
@@ -210,7 +230,7 @@ scope-showreel { display: block; max-width: 60rem; margin: 3rem auto 0; }
 .flow-result-profile { display: block; color: var(--scope-muted); font-size: 0.7rem; }
 .flow-results [data-result='pass'] { color: var(--scope-pass); }.flow-results [data-result='fail'] { color: var(--scope-fail); }.flow-results [data-result='skipped'] { color: var(--scope-muted); }
 .scope-home .flow-disclaimer { padding: 0 1.5rem 1rem; font-size: 0.68rem; color: var(--scope-muted); }
-.scope-home :is(.flow-canvas-label, .flow-demo-badge, .flow-node-kicker, .flow-agent .flow-node-kicker, .flow-node-tag, .flow-criteria, .flow-agent-status, .flow-code-label, .flow-results, .flow-results caption, .flow-results thead th, .flow-step-buttons button, .flow-step-buttons button > span:first-child, .flow-disclaimer, .scope-path-top, .scope-profile-preview, .scope-trace-preview, .scope-mini-dag span, .scope-access-note) { font-size: 0.75rem; }
+.scope-home :is(.flow-canvas-label, .flow-demo-badge, .flow-node-kicker, .flow-agent .flow-node-kicker, .flow-node-tag, .flow-criteria, .flow-agent-status, .flow-code-label, .flow-results, .flow-results caption, .flow-results thead th, .flow-step-buttons button, .flow-step-buttons button > span:first-child, .flow-disclaimer, .scope-path-top, .scope-profile-preview, .scope-trace-preview, .scope-mini-dag span) { font-size: 0.75rem; }
 .flow-node > span:not([class]) { font-size: 0.75rem; }
 .scope-flow:not(:defined) .flow-controls { display: none; }
 .scope-flow:not(:defined) .flow-node { opacity: 1; }
@@ -233,8 +253,6 @@ scope-showreel { display: block; max-width: 60rem; margin: 3rem auto 0; }
 .scope-path h3 { font-size: 1.1rem; font-weight: 600; letter-spacing: -0.02em; }
 .scope-path p { color: var(--scope-muted); font-size: 0.85rem; margin: 0.7rem 0 1.5rem; }
 .scope-path .scope-text-link { margin-top: auto; }
-.scope-help-row { display: flex; flex-wrap: wrap; gap: 1.25rem; margin-top: 1.5rem; font-size: 0.75rem; }
-.scope-help-row span { color: var(--scope-muted); }.scope-help-row a { color: var(--scope-brand); }.scope-help-row a:hover { text-decoration: underline; }
 /* Community teaser: restyle the shared article and talk components with landing tokens. */
 .scope-community__grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2rem; align-items: start; }
 .scope-community__label { margin: 0; color: var(--scope-muted); font: 600 0.65rem var(--sl-font-mono); letter-spacing: 0.12em; text-transform: uppercase; }
@@ -254,7 +272,6 @@ scope-showreel { display: block; max-width: 60rem; margin: 3rem auto 0; }
 .scope-cta { margin-top: 6rem; text-align: center; padding: 4rem 1.5rem; background: radial-gradient(ellipse at 50% 110%, color-mix(in srgb, var(--scope-brand) 12%, transparent), transparent 70%), var(--scope-surface); border: 1px solid var(--scope-border); border-radius: 1rem; }
 .scope-cta h2 { font-size: clamp(2rem, 4vw, 3.25rem); letter-spacing: -0.045em; font-weight: 600; line-height: 1.15; margin: 1rem 0; }
 .scope-cta > p:not(.scope-eyebrow) { color: var(--scope-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
-.scope-access-note { display: block; font-size: 0.72rem; color: var(--scope-muted); margin: 1rem auto 0; max-width: 50ch; }
 
 @media (max-width: 65rem) {
 	.flow-step-name { display: none; }
