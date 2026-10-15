@@ -62,6 +62,9 @@ final Get started call to action in
 in [public/kubernetes-stacked-white.svg](public/kubernetes-stacked-white.svg).
 Keep the official artwork intact rather than recreating or recoloring it.
 
+The Kubernetes section's Explore self-hosting link opens the
+[Helm deployment guide](src/content/docs/self-hosting/deploy-helm.md).
+
 ## Commands
 
 Run these commands from `website/`. The site has its own
