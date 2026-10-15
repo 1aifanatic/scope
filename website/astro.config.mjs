@@ -157,6 +157,17 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Self-hosting',
+					collapsed: true,
+					items: [
+						{ label: 'Overview', slug: 'self-hosting/overview' },
+						{ label: 'Provision Azure infrastructure', slug: 'self-hosting/provision-aks' },
+						{ label: 'Deploy with Helm', slug: 'self-hosting/deploy-helm' },
+						{ label: 'Configuration', slug: 'self-hosting/configuration' },
+						{ label: 'Operations', slug: 'self-hosting/operations' },
+					],
+				},
+				{
 					label: 'Reference',
 					collapsed: true,
 					items: [
