@@ -54,13 +54,13 @@ flowchart TD
     Deployment --> Requested
     Running -->|dequeues and processes runs| Queue
 
-    classDef scope fill:#6035d8,stroke:#a78bfa,color:#fff,stroke-width:2px
-    classDef queue fill:#0078d4,stroke:#7dd3fc,color:#fff,stroke-width:2px
-    classDef scaler fill:#7c3aed,stroke:#c4b5fd,color:#fff
-    classDef deployment fill:#326ce5,stroke:#93c5fd,color:#fff
-    classDef pending fill:#b45309,stroke:#fcd34d,color:#fff
-    classDef kubernetes fill:#0f766e,stroke:#5eead4,color:#fff
-    classDef running fill:#047857,stroke:#6ee7b7,color:#fff,stroke-width:2px
+    classDef scope fill:#514bc5,stroke:#b1b4ff,color:#fff,stroke-width:2px
+    classDef queue fill:#36318a,stroke:#7778ee,color:#fff,stroke-width:2px
+    classDef scaler fill:#514bc5,stroke:#b1b4ff,color:#fff
+    classDef deployment fill:#202453,stroke:#7778ee,color:#fff
+    classDef pending fill:#576079,stroke:#a7afc5,color:#fff
+    classDef kubernetes fill:#303749,stroke:#a7afc5,color:#fff
+    classDef running fill:#16754c,stroke:#83dcb0,color:#fff,stroke-width:2px
 
     class Scheduler scope
     class Queue queue
@@ -70,8 +70,8 @@ flowchart TD
     class KubeScheduler,Pool kubernetes
     class Running running
 
-    style Demand fill:transparent,stroke:#7c3aed,stroke-width:2px
-    style Capacity fill:transparent,stroke:#326ce5,stroke-width:2px
+    style Demand fill:transparent,stroke:#7778ee,stroke-width:2px
+    style Capacity fill:transparent,stroke:#576079,stroke-width:2px
 ```
 
 ## Scale AI coding-agent worker pods with KEDA

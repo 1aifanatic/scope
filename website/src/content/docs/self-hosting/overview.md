@@ -64,11 +64,11 @@ flowchart TD
     Core <-->|uses| Data
     Workers <-->|uses| Data
 
-    classDef actor fill:#6035d8,stroke:#a78bfa,color:#fff,stroke-width:2px
-    classDef deployment fill:#326ce5,stroke:#93c5fd,color:#fff,stroke-width:2px
-    classDef managed fill:#0078d4,stroke:#7dd3fc,color:#fff
-    classDef workload fill:#0f766e,stroke:#5eead4,color:#fff
-    classDef registry fill:#24292f,stroke:#9ca3af,color:#fff
+    classDef actor fill:#514bc5,stroke:#b1b4ff,color:#fff,stroke-width:2px
+    classDef deployment fill:#36318a,stroke:#7778ee,color:#fff,stroke-width:2px
+    classDef managed fill:#202453,stroke:#7778ee,color:#fff
+    classDef workload fill:#303749,stroke:#a7afc5,color:#fff
+    classDef registry fill:#161a27,stroke:#576079,color:#fff
 
     class Admin actor
     class Bicep,Helm deployment
@@ -76,8 +76,8 @@ flowchart TD
     class Core,Workers workload
     class GHCR registry
 
-    style Azure fill:transparent,stroke:#0078d4,stroke-width:2px
-    style AKS fill:transparent,stroke:#326ce5,stroke-width:2px
+    style Azure fill:transparent,stroke:#7778ee,stroke-width:2px
+    style AKS fill:transparent,stroke:#576079,stroke-width:2px
 ```
 
 The public Azure quickstart has one fixed-size System node pool and one
