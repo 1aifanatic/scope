@@ -6,7 +6,7 @@ description: Set up Scope locally and run your first evaluation with the Portal 
 Use this guide to run your own local Scope stack. If your organization already
 provides a deployment, start with [Access](/getting-started/access/) instead.
 To host a shared deployment on Kubernetes, see
-[Self-hosting](/self-hosting/overview/).
+[Kubernetes self-hosting](/self-hosting/overview/).
 The default local workflow uses the GitHub Copilot worker.
 
 ## Prerequisites
@@ -161,4 +161,4 @@ Read [Concepts](/introduction/concepts/) for the evaluation building blocks,
 [Development guide](/resources/development/) for repository layout and
 commands, and [Contributing](/resources/contributing/) for how to propose
 changes. When you're ready to share Scope with a team, follow
-[Self-hosting](/self-hosting/overview/) to deploy it on Kubernetes.
+[Kubernetes self-hosting](/self-hosting/overview/).

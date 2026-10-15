@@ -4,6 +4,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import mermaid from 'astro-mermaid';
 import starlightOpenAPI, { openAPISidebarGroups } from 'starlight-openapi';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -66,6 +67,10 @@ export default defineConfig({
 		remarkPlugins: [remarkGfm, [remarkBasePath, { base }], remarkHttpSnippets],
 	},
 	integrations: [
+		mermaid({
+			autoTheme: true,
+			enableLog: false,
+		}),
 		starlight({
 			title: 'Scope',
 			logo: {
@@ -157,12 +162,13 @@ export default defineConfig({
 					],
 				},
 				{
-					label: 'Self-hosting',
+					label: 'Kubernetes self-hosting',
 					collapsed: true,
 					items: [
 						{ label: 'Overview', slug: 'self-hosting/overview' },
 						{ label: 'Provision Azure infrastructure', slug: 'self-hosting/provision-aks' },
 						{ label: 'Deploy with Helm', slug: 'self-hosting/deploy-helm' },
+						{ label: 'Autoscaling with KEDA', slug: 'self-hosting/scaling' },
 						{ label: 'Configuration', slug: 'self-hosting/configuration' },
 						{ label: 'Operations', slug: 'self-hosting/operations' },
 					],

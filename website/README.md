@@ -62,8 +62,13 @@ final Get started call to action in
 in [public/kubernetes-stacked-white.svg](public/kubernetes-stacked-white.svg).
 Keep the official artwork intact rather than recreating or recoloring it.
 
-The Kubernetes section's Explore self-hosting link opens the
-[Helm deployment guide](src/content/docs/self-hosting/deploy-helm.md).
+The Kubernetes section's Host on Kubernetes link opens the
+[Kubernetes self-hosting overview](src/content/docs/self-hosting/overview.md).
+
+Mermaid diagrams in Markdown and MDX are rendered client-side by
+`astro-mermaid`, which must remain before Starlight in the `integrations`
+array. Automatic theme detection keeps diagrams legible when readers switch
+between the light and dark site themes.
 
 ## Commands
 

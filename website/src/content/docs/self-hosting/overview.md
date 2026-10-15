@@ -1,10 +1,10 @@
 ---
-title: Self-hosting
-description: Deploy Scope to Kubernetes with Helm, using Azure as one infrastructure option.
+title: Kubernetes self-hosting
+description: Deploy and scale Scope on Kubernetes, using Azure as one infrastructure option.
 ---
 
 Scope can be self-hosted on Kubernetes with the
-[`deploy/helm/scope`](https://github.com/microsoft/scope/tree/main/deploy/helm/scope)
+[`deploy/helm/scope`](/self-hosting/deploy-helm/)
 chart. Infrastructure provisioning is separate from application deployment
 and can vary by cloud or Kubernetes provider.
 
@@ -28,30 +28,62 @@ It is separate from the repository's internal development infrastructure.
 
 For the Azure option, the infrastructure template creates the network, AKS
 cluster, managed data services, container registry, and workload identities.
-Helm installs the application into the `scope` namespace.
+[Helm](https://helm.sh/docs/) installs the application into the `scope`
+namespace.
 
 ```mermaid
 flowchart TD
-    User[Administrator] --> Azure[deploy/azure Bicep]
-    Azure --> AKS[AKS: System and User Linux pools]
-    Azure --> Data[Cosmos DB, Managed Redis, Storage]
-    Azure --> KV[Key Vault]
-    Azure --> ACR[Azure Container Registry]
-    User --> Helm[deploy/helm/scope]
-    Helm --> Core[API, Portal, Judge, Token Manager, Scheduler, Report Generator]
-    Helm --> Workers[Optional Copilot and Claude Code workers]
-    GHCR[Public GHCR images] --> Core
-    ACR --> Workers
-    KV --> CSI[Key Vault Secrets Provider CSI]
-    CSI --> Core
-    Data --> Core
-    Data --> Workers
+    Admin[Administrator]
+    Bicep[1. Provision with Bicep<br/>deploy/azure]
+    Helm[2. Install with Helm<br/>deploy/helm/scope]
+
+    Admin --> Bicep
+    Admin --> Helm
+
+    subgraph Azure["Azure managed services"]
+        Data[(Cosmos DB, Redis,<br/>Blob and Queue Storage)]
+        KV[Key Vault]
+        ACR[Container Registry<br/>AI agent worker images]
+    end
+
+    subgraph AKS["AKS cluster · System and User Linux node pools"]
+        direction LR
+        Core[Scope core services<br/>API, Portal, Judge, Scheduler, and more]
+        Workers[AI coding-agent workers<br/>GitHub Copilot and Claude Code]
+    end
+
+    Bicep -->|creates| Data
+    Bicep -->|creates| KV
+    Bicep -->|creates| ACR
+    Bicep -->|creates| AKS
+    Helm -->|installs| Core
+    Helm -->|installs| Workers
+    GHCR[GitHub Container Registry<br/>core images] -->|supplies images| Core
+    ACR -->|supplies images| Workers
+    KV -->|syncs secrets| Core
+    Core <-->|uses| Data
+    Workers <-->|uses| Data
+
+    classDef actor fill:#514bc5,stroke:#b1b4ff,color:#fff,stroke-width:2px
+    classDef deployment fill:#36318a,stroke:#7778ee,color:#fff,stroke-width:2px
+    classDef managed fill:#202453,stroke:#7778ee,color:#fff
+    classDef workload fill:#303749,stroke:#a7afc5,color:#fff
+    classDef registry fill:#161a27,stroke:#576079,color:#fff
+
+    class Admin actor
+    class Bicep,Helm deployment
+    class Data,KV,ACR managed
+    class Core,Workers workload
+    class GHCR registry
+
+    style Azure fill:transparent,stroke:#7778ee,stroke-width:2px
+    style AKS fill:transparent,stroke:#576079,stroke-width:2px
 ```
 
-AKS has one fixed-size System node pool and one fixed-size User Linux node
-pool. OIDC and workload identity are enabled. The native Azure Key Vault
-Secrets Provider add-on syncs selected Key Vault objects into one Kubernetes
-Secret.
+The public Azure quickstart has one fixed-size System node pool and one
+fixed-size User Linux node pool. OIDC and workload identity are enabled. The
+native Azure Key Vault Secrets Provider add-on syncs selected Key Vault
+objects into one Kubernetes Secret.
 
 The core images come from `ghcr.io/microsoft`. The API builder-stage image
 runs database migrations. The ACP worker images are built in the provisioned
@@ -78,6 +110,11 @@ are not supported by this deployment.
 
 The chart also does not install an ingress controller, DNS, TLS,
 cert-manager, autoscaling, or an observability stack.
+
+Scope's production/reference architecture adds queue-driven AI coding-agent
+worker and node-pool scaling beyond this quickstart. See
+[Autoscaling with KEDA](/self-hosting/scaling/) for how KEDA, the Kubernetes
+scheduler, and the cluster autoscaler work together.
 
 ## Azure identity boundary
 

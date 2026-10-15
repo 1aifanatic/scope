@@ -3,7 +3,8 @@ title: Deploy with Helm
 description: Install Scope's core services and ACP workers on the provisioned AKS cluster.
 ---
 
-The Scope chart is in
+Scope is packaged as a
+[Helm chart](https://helm.sh/docs/topics/charts/). The chart source is in
 [`deploy/helm/scope`](https://github.com/microsoft/scope/tree/main/deploy/helm/scope).
 Use it after [provisioning Azure infrastructure](/self-hosting/provision-aks/).
 
@@ -37,6 +38,10 @@ Review the generated file before installing. See
 worker, and ingress settings.
 
 ## Phase 2: install the core application
+
+Use Helm's
+[`upgrade --install`](https://helm.sh/docs/helm/helm_upgrade/) workflow to
+create the release or update it in place:
 
 ```bash
 helm upgrade --install scope deploy/helm/scope \
