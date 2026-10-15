@@ -29,7 +29,7 @@ const handlers = [
 ];
 
 const meta: Meta<typeof RunDetail> = {
-  title: "pages/RunDetail/Report feedback",
+  title: "pages/RunDetailReportFeedback",
   component: RunDetail,
   tags: ["ai-generated", "needs-work"],
   parameters: { layout: "padded" },
