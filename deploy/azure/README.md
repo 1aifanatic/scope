@@ -11,6 +11,23 @@ below and is also usable standalone via the Azure CLI.
 > drive an internal `azd`-based developer CosmosDB setup and are not part of this
 > package.
 
+## Good to know before you deploy
+
+- **Smooth sailing most of the time, with the occasional retry.** This template is
+  tuned to deploy cleanly on typical free/dev subscriptions, but a couple of the
+  managed services it provisions (AKS node availability zones, Cosmos DB zonal
+  capacity, Azure Managed Redis allocation) sit on shared regional capacity that
+  Azure allocates on demand. If a deployment reports a capacity or quota error,
+  it's almost always transient — re-running the same deployment, or picking a
+  different region, resolves it. See [Sizing and
+  quota](#sizing-and-quota-this-is-a-minimal-dev-footprint) below for the specifics
+  and workarounds we've already tuned in.
+- **Built to be lean, so it's easy to try and easy to tidy up.** Every resource here
+  defaults to the smallest practical SKU to keep this an inexpensive way to kick the
+  tires. Once you're done exploring, deleting the resource group removes everything
+  in one step and stops billing immediately — a nice habit to get into for any
+  sandbox deployment like this one.
+
 ## What this deploys
 
 - **Networking**: a VNet with a dedicated AKS node subnet and a private-endpoints
