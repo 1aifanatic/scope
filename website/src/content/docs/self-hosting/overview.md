@@ -33,20 +33,51 @@ namespace.
 
 ```mermaid
 flowchart TD
-    User[Administrator] --> Azure[deploy/azure Bicep]
-    Azure --> AKS[AKS: System and User Linux pools]
-    Azure --> Data[Cosmos DB, Managed Redis, Storage]
-    Azure --> KV[Key Vault]
-    Azure --> ACR[Azure Container Registry]
-    User --> Helm[deploy/helm/scope]
-    Helm --> Core[API, Portal, Judge, Token Manager, Scheduler, Report Generator]
-    Helm --> Workers[Optional Copilot and Claude Code workers]
-    GHCR[Public GHCR images] --> Core
-    ACR --> Workers
-    KV --> CSI[Key Vault Secrets Provider CSI]
-    CSI --> Core
-    Data --> Core
-    Data --> Workers
+    Admin[Administrator]
+    Bicep[1. Provision with Bicep<br/>deploy/azure]
+    Helm[2. Install with Helm<br/>deploy/helm/scope]
+
+    Admin --> Bicep
+    Admin --> Helm
+
+    subgraph Azure["Azure managed services"]
+        Data[(Cosmos DB, Redis,<br/>Blob and Queue Storage)]
+        KV[Key Vault]
+        ACR[Container Registry<br/>AI agent worker images]
+    end
+
+    subgraph AKS["AKS cluster · System and User Linux node pools"]
+        direction LR
+        Core[Scope core services<br/>API, Portal, Judge, Scheduler, and more]
+        Workers[AI coding-agent workers<br/>GitHub Copilot and Claude Code]
+    end
+
+    Bicep -->|creates| Data
+    Bicep -->|creates| KV
+    Bicep -->|creates| ACR
+    Bicep -->|creates| AKS
+    Helm -->|installs| Core
+    Helm -->|installs| Workers
+    GHCR[GitHub Container Registry<br/>core images] -->|supplies images| Core
+    ACR -->|supplies images| Workers
+    KV -->|syncs secrets| Core
+    Core <-->|uses| Data
+    Workers <-->|uses| Data
+
+    classDef actor fill:#6035d8,stroke:#a78bfa,color:#fff,stroke-width:2px
+    classDef deployment fill:#326ce5,stroke:#93c5fd,color:#fff,stroke-width:2px
+    classDef managed fill:#0078d4,stroke:#7dd3fc,color:#fff
+    classDef workload fill:#0f766e,stroke:#5eead4,color:#fff
+    classDef registry fill:#24292f,stroke:#9ca3af,color:#fff
+
+    class Admin actor
+    class Bicep,Helm deployment
+    class Data,KV,ACR managed
+    class Core,Workers workload
+    class GHCR registry
+
+    style Azure fill:transparent,stroke:#0078d4,stroke-width:2px
+    style AKS fill:transparent,stroke:#326ce5,stroke-width:2px
 ```
 
 The public Azure quickstart has one fixed-size System node pool and one
