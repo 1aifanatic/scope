@@ -11,6 +11,7 @@ interface AnalyticsTestState {
 	paused: number;
 	unloaded: number;
 	managed: number;
+	appliedThemes: string[];
 	initializer?: () => boolean;
 	changeConsent?: () => void;
 }
@@ -45,6 +46,7 @@ function consentStub() {
 				isConsentRequired: state.consentRequired,
 				getConsentFor: () => state.granted,
 				manageConsent: () => { state.managed++; },
+				applyTheme: (theme) => { state.appliedThemes.push(theme); },
 			});
 		},
 	};
@@ -87,6 +89,7 @@ async function mockPublishedSite(page: Page, options: {
 			paused: 0,
 			unloaded: 0,
 			managed: 0,
+			appliedThemes: [],
 		};
 		Object.defineProperty(navigator, 'globalPrivacyControl', { value: options.globalPrivacyControl ?? false });
 		Object.defineProperty(navigator, 'doNotTrack', { value: options.doNotTrack ?? null });
@@ -153,6 +156,15 @@ test('stored consent initializes once and can be withdrawn and granted again', a
 	expect(await page.evaluate(() => window.scopeAnalyticsTest.initializer?.())).toBe(false);
 	await page.getByRole('button', { name: 'Accept analytics' }).click();
 	await expect.poll(() => page.evaluate(() => window.scopeAnalyticsTest.configurations.length)).toBe(2);
+});
+
+test('consent UI follows Starlight theme changes', async ({ page }) => {
+	await mockPublishedSite(page);
+	await page.goto('https://microsoft.github.io/scope/');
+	await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+	await expect.poll(() => page.evaluate(() => window.scopeAnalyticsTest.appliedThemes)).toEqual(['light']);
+	await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+	await expect.poll(() => page.evaluate(() => window.scopeAnalyticsTest.appliedThemes)).toEqual(['light', 'dark']);
 });
 
 for (const options of [

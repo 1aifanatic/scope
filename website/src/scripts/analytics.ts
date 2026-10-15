@@ -5,6 +5,7 @@ interface SiteConsent {
 	isConsentRequired: boolean;
 	getConsentFor(category: string): boolean;
 	manageConsent(): void;
+	applyTheme(theme: 'light' | 'dark'): void;
 }
 
 interface WcpConsent {
@@ -150,7 +151,7 @@ async function initializeConsent(allowAnalytics: boolean): Promise<void> {
 		manageCookies.addEventListener('click', () => consent.manageConsent());
 		onConsentChanged();
 		new MutationObserver(() => {
-			window.dispatchEvent(new CustomEvent('theme-changed', { detail: { currentTheme: theme() } }));
+			consent.applyTheme(theme());
 		}).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 	}, onConsentChanged, theme());
 }
