@@ -161,10 +161,18 @@ test('stored consent initializes once and can be withdrawn and granted again', a
 test('consent UI follows Starlight theme changes', async ({ page }) => {
 	await mockPublishedSite(page);
 	await page.goto('https://microsoft.github.io/scope/');
-	await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
-	await expect.poll(() => page.evaluate(() => window.scopeAnalyticsTest.appliedThemes)).toEqual(['light']);
-	await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
-	await expect.poll(() => page.evaluate(() => window.scopeAnalyticsTest.appliedThemes)).toEqual(['light', 'dark']);
+	await expect.poll(() => page.evaluate(() => Boolean(window.scopeAnalyticsTest.changeConsent))).toBe(true);
+	const initialTheme = await page.evaluate(
+		() => document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
+	);
+	const nextTheme = initialTheme === 'light' ? 'dark' : 'light';
+
+	await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, initialTheme);
+	await expect.poll(() => page.evaluate(() => window.scopeAnalyticsTest.appliedThemes)).toEqual([]);
+	await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, nextTheme);
+	await expect.poll(() => page.evaluate(() => window.scopeAnalyticsTest.appliedThemes)).toEqual([nextTheme]);
+	await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, initialTheme);
+	await expect.poll(() => page.evaluate(() => window.scopeAnalyticsTest.appliedThemes)).toEqual([nextTheme, initialTheme]);
 });
 
 for (const options of [

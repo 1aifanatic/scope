@@ -141,6 +141,7 @@ async function initializeConsent(allowAnalytics: boolean): Promise<void> {
 		});
 	};
 	const theme = () => document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+	const initialTheme = theme();
 	wcp.init(document.documentElement.lang || 'en-US', banner, (error, consent) => {
 		if (error || !consent) {
 			console.error('Scope cookie consent could not initialize', error ?? new Error('Missing consent manager'));
@@ -150,10 +151,19 @@ async function initializeConsent(allowAnalytics: boolean): Promise<void> {
 		manageCookies.hidden = false;
 		manageCookies.addEventListener('click', () => consent.manageConsent());
 		onConsentChanged();
-		new MutationObserver(() => {
-			consent.applyTheme(theme());
-		}).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-	}, onConsentChanged, theme());
+		let appliedTheme = initialTheme;
+		const applyTheme = () => {
+			const nextTheme = theme();
+			if (nextTheme === appliedTheme) return;
+			appliedTheme = nextTheme;
+			consent.applyTheme(nextTheme);
+		};
+		applyTheme();
+		new MutationObserver(applyTheme).observe(
+			document.documentElement,
+			{ attributes: true, attributeFilter: ['data-theme'] },
+		);
+	}, onConsentChanged, initialTheme);
 }
 
 const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
