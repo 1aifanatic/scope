@@ -78,7 +78,7 @@ describe several regional frameworks; this is not an exhaustive list:
 | European Union and European Economic Area | [General Data Protection Regulation (GDPR)](https://commission.europa.eu/law/law-topic/data-protection/legal-framework-eu-data-protection_en) |
 | United Kingdom | [UK GDPR privacy notices](https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/individual-rights/individual-rights/right-to-be-informed/) and [PECR cookie rules](https://ico.org.uk/for-organisations/direct-marketing-and-privacy-and-electronic-communications/guide-to-pecr/cookies-and-similar-technologies/) |
 | California, United States | [California Consumer Privacy Act (CCPA), as amended by the California Privacy Rights Act (CPRA)](https://cppa.ca.gov/regulations/) |
-| Brazil | [Lei Geral de Protecao de Dados (LGPD) and the ANPD](https://www.gov.br/anpd/pt-br/acesso-a-informacao/institucional/competencias) |
+| Brazil | [Lei Geral de Proteção de Dados (LGPD) and the ANPD](https://www.gov.br/anpd/pt-br/acesso-a-informacao/institucional/competencias) |
 | Canada | [Personal Information Protection and Electronic Documents Act (PIPEDA)](https://www.priv.gc.ca/en/privacy-topics/privacy-laws-in-canada/the-personal-information-protection-and-electronic-documents-act-pipeda/) |
 | Australia | [Privacy Act 1988 and Australian Privacy Principles](https://www.oaic.gov.au/privacy/privacy-legislation/the-privacy-act) |
 | Japan | [Act on the Protection of Personal Information (APPI)](https://www.ppc.go.jp/en/legal/) |
