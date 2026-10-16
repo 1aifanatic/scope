@@ -115,13 +115,11 @@ walkthrough, failures, cache isolation, and implemented/deferred boundary.
 4. **Judge** — After the agent completes, the worker invokes the Judge to evaluate output against criteria. Results (pass/fail per criterion, scores) are persisted to CosmosDB.
 5. **Snapshot** — Each iteration's workspace is snapshotted to Blob Storage for later inspection.
 
-Every native submit also creates a stable submission that owns the complete
-request set. Submission processing follows the requests' exact current run-id
-vector: request retries archive and supersede the previous submission attempt,
-run-level `pp-observations` completion feeds an all-runs dependency projection,
-and only the embedded current submission attempt may dispatch `pp-readout`.
-Portal and CLI users can inspect current/history attempts and retry current
-submission processing without mutating request execution history.
+Deliberately composed benchmark requests may be created as an
+[Experiment](experiments.md). The Experiment owns an exact request/run vector,
+bounded inline-or-chunked persistence, immutable execution history, and the only
+dispatchable current execution. Standalone request submission remains
+first-class and never infers an Experiment.
 
 > A run may execute as a sequence of **gates** (`Select → Build → Test → Run →
 > Deploy`), each with its own prompt, criteria subset, and iteration budget,

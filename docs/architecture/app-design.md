@@ -466,81 +466,21 @@ When a codebase is selected, the API resolves the submitted spec (`codebaseRevis
 Profile fan-out mode is also supported for comparative runs:
 
 1. User selects a base `profileId` (optionally pinned via `profileId@version`) and a `profileVariations[]` array of profile spec strings to compare against (e.g. `["def456", "ghi789@2"]`)
-2. API parses each spec, validates every variation upfront, then expands one submit call into multiple requests under one shared `submissionId`
+2. API parses each spec, validates every variation upfront, then expands one submit call into multiple requests
 3. Each expanded request resolves configuration from its variation profile; unpinned specs resolve to `latestVersion`
 4. Expanded requests persist `profileId` and `profileVersionId` on each `RequestDocument` for indexing and traceability
 
-### Submission identity and processing attempts
+### Experiment identity and processing executions
 
-Every native submit creates a stable `SubmissionDocument`, including one-request
-submissions. The API generates the submission id, every request id, and every
-initial run id before writing anything. It inserts the requests first, then
-idempotently finalizes the submission with:
+An [Experiment](experiments.md) is created only through the deliberate
+Experiment creation surface. It owns a stable project-scoped identity, revision,
+and exact request/run vector. The current execution is embedded in the bounded
+root, immutable history is archived separately, and deterministic fixed buckets
+keep large vectors below Cosmos DB's universal 2 MB limit.
 
-- immutable `projectId` and ordered `requestIds`;
-- one embedded current `SubmissionRunState`;
-- an exact immutable vector of `{ requestId, runId }` pairs for that attempt;
-- a deterministic vector fingerprint, dependency projection, blocking details,
-  submission-level handler status, and report pointers.
-
-Requests carry `submissionExpectedRequestCount`, `submissionRequestIndex`, and
-the immutable `submissionInitialRunId`, then receive `submissionFinalizedAt`
-only after the parent document exists. The scheduler uses those markers to
-recover the exact initial vector after an interrupted final write, even if a
-request has since been retried. It never adopts historical/imported requests
-that only have `submissionId`; those remain view-only and non-triggering.
-
-The current attempt lives only at `SubmissionDocument.run`. When any request's
-current run id changes, reconciliation archives the previous attempt to the
-immutable `submission-runs` collection and compare-and-swaps a fresh embedded
-attempt containing every request's latest run id. The next attempt id is
-deterministic for `(submissionId, attemptNumber, vectorFingerprint)`, so a
-rollover first claims that successor on the exact current attempt. Only the
-claim winner writes the immutable archive's supersession metadata, then swaps
-the embedded current attempt. A restart between claim, archive, and swap resumes
-the same claimed rollover instead of creating a dangling successor or parallel
-current attempt. Claimed attempts reject worker claims/completions, and only the
-latest embedded vector without a rollover claim is dispatchable. Individual
-retries may therefore leave useful intermediate history.
-Bulk request retry places a short, expiring reconciliation hold on each affected
-submission while all replacement runs are installed, then releases it so the
-completed batch produces one rollover. Polling clears expired holds and repairs
-vector drift, missing projections, dropped notifications, and interrupted
-archive/swap operations.
-
-`pp-readout` is a registered `submission-handler` with
-`dependencyMode: all-runs` and `dependsOn: [pp-observations]`. Reconciliation
-projects the authoritative `run.handlerStatus` for every exact request/run pair:
-
-- `pp-observations: done` is valid evidence even when the coding outcome failed
-  or an observation result has `passed: false`;
-- a failed `pp-observations`, or one blocked by a failed DAG ancestor, blocks
-  readout;
-- unrelated handler failures do not block;
-- completed projections are naturally preserved for request/run pairs whose
-  run id did not change.
-
-Submission queue messages are attempt-scoped:
-`{ type, submissionId, submissionRunId }`. PR B's worker must claim and complete
-with filters on both `submissionId` and `run._id`, call
-`isCurrentSubmissionRun()` before expensive work and final publication, and
-discard a message when `claimSubmissionHandler()` returns `null`. Final writes
-use `completeSubmissionHandler()`, whose compare-and-swap rejects stale
-publication after supersession.
-
-The API exposes:
-
-- `GET /api/v1/submissions?projectId=...`
-- `GET /api/v1/submissions/:id`
-- `GET /api/v1/submissions/:id/runs`
-- `GET /api/v1/submissions/:id/runs/:submissionRunId`
-- `POST /api/v1/submissions/:id/retry`
-
-Responses expose readiness, exact blocking request/run pairs, handler progress,
-supersession metadata, resolved request summaries, and the current report
-pointer without queue names or scheduler claim fields. Portal submit flows
-navigate to Submission Detail, and the CLI mirrors list/get/history/retry
-capabilities under `scope submission`.
+Standalone request creation, profile fan-out, and bulk resubmission remain
+first-class request workflows and never infer an Experiment. Only legacy
+composition inputs that overlap Experiment creation are deprecated.
 
 ## Runs List Query API
 
@@ -566,7 +506,7 @@ A single value compiles to an equality clause; multiple values compile to `$in`.
 | `agentVersion` | `agentVersion` |
 | `profileId` | `profileId` |
 | `taskPromptId` | `taskPromptId` |
-| `submissionId` | `submissionId` (prefix match) |
+| `experimentId` | `experimentId` (prefix match) |
 | `criteria` | `scenario.criteria` |
 | `turns` / `maxIterations` | `run.turns` size / `maxIterations` |
 

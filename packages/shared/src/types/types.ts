@@ -204,7 +204,7 @@ export interface ConversationTurn {
   timestamp: Date;
   criteriaResults?: CriterionResult[];  // Per-criterion breakdown from DAG evaluation
   /** Per-iteration observation results (kind:"observation" criteria), recorded
-   *  by the pp-observations post-processor. Same shape as criteriaResults but never
+   *  by the pp-taxonomy post-processor. Same shape as criteriaResults but never
    *  gates the agent. Empty/absent when no observations were selected. #1156. */
   observationResults?: CriterionResult[];
   harUrl?: string;         // Blob storage URL to the HAR file for this turn
@@ -409,7 +409,7 @@ export interface RequestDocument {
   gates?: GateConfig[];
   /**
    * Observation-criteria ids (kind:"observation") selected at submit. The
-   * pp-observations post-processor evaluates exactly this set after the run
+   * pp-taxonomy post-processor evaluates exactly this set after the run
    * completes and writes per-turn `observationResults`. Empty/absent = none.
    * See issue #1156.
    */
@@ -545,7 +545,7 @@ export interface RunState {
   handlerStatus?: Record<string, HandlerRunStatus>;
   /** Whole-run observation results — one entry per selected `subject:"run"`
    *  observation criterion, evaluated once against the final snapshot + the
-   * merged trajectory across all iterations by pp-observations. Per-iteration
+   *  merged trajectory across all iterations by pp-taxonomy. Per-iteration
    *  (`subject:"iteration"`) observations live on `turn.observationResults`
    *  instead. Empty/absent when no run-subject observations were selected. #1156. */
   observationResults?: CriterionResult[];

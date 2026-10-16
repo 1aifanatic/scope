@@ -49,6 +49,7 @@ function experiment(
         storage: "inline",
         entryCount: requests.length,
         payloadFingerprint: fingerprint,
+        payloadVersion: 1,
         entries: requests,
       },
       vectorFingerprint: fingerprint,
@@ -139,6 +140,14 @@ describe("ExperimentCoordinator", () => {
     vi.spyOn(FixedPayloadStore.prototype, "readRequests").mockResolvedValue([
       initialRequest,
     ]);
+    vi.spyOn(
+      ExperimentStore.prototype,
+      "casUpdateRequestStates",
+    ).mockResolvedValue({
+      status: "applied",
+      experiment: projected,
+      requests: [projectedRequest],
+    });
     const enqueue = vi.fn().mockResolvedValue(undefined);
     const coordinator = new ExperimentCoordinator(
       collections({
@@ -187,7 +196,7 @@ describe("ExperimentCoordinator", () => {
             dependencyMode: "all-runs",
           },
         ],
-        updatedExperiments: [projected, queued],
+        updatedExperiments: [queued],
       }),
       enqueue,
     );

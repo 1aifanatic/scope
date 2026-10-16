@@ -8,10 +8,10 @@ import { DefaultAzureCredential } from "@azure/identity";
 import { RequestScheduler } from "./request-scheduler.js";
 import { PostProcessorDispatcher } from "./post-processor-dispatcher.js";
 import { HandlerDispatcher } from "./handler-dispatcher.js";
-import { ExperimentDispatcher } from "./experiment-dispatcher.js";
 import { createHttpServer, type NotifyHandler } from "./notify-routes.js";
 import { StuckRunReaper } from "./stuck-run-reaper.js";
 import { RedisHeartbeatStore, type HeartbeatStore } from "shared";
+import { ExperimentStore } from "shared";
 import type {
   CodingAgentDocument,
   RequestDocument,
@@ -204,17 +204,11 @@ async function main(): Promise<void> {
     `[Scheduler] Handler dispatcher (DAG) started (poll=${ppPollIntervalMs}ms, topologyCacheTtl=${handlerCacheTtlMs}ms)`,
   );
 
-  const experimentDispatcher = new ExperimentDispatcher(
-    collection,
-    experimentCollection,
-    experimentExecutionsCollection,
-    experimentChunksCollection,
-    db,
-    createQueueClient,
-    ppPollIntervalMs,
-  );
-  experimentDispatcher.start();
-  console.log(`[Scheduler] Experiment dispatcher started (poll=${ppPollIntervalMs}ms)`);
+  const experimentStore = new ExperimentStore({
+    experiments: experimentCollection,
+    executions: experimentExecutionsCollection,
+    chunks: experimentChunksCollection,
+  });
 
   // Start the stuck-run reaper (authoritative backstop). Redis is non-fatal:
   // on misconfig or connection failure the reaper self-disables (its sweeps
@@ -252,12 +246,12 @@ async function main(): Promise<void> {
     );
   }
 
-  // Run notifications update the run DAG and immediately reconcile the parent
-  // experiment. The polling loop remains the durable safety net.
+  // The API-owned ExperimentCoordinator projects run state and dispatches
+  // workflow handlers. The scheduler only applies exact handler claim and
+  // completion messages through the shared CAS store.
   const notifyHandler: NotifyHandler = {
     onRunTerminal: async (requestId, runId) => {
       await handlerDispatcher.onRunTerminal(requestId, runId);
-      await experimentDispatcher.onRequestChanged(requestId);
     },
     onHandlerComplete: async (requestId, runId, handlerId, status) => {
       await handlerDispatcher.onHandlerComplete(
@@ -266,12 +260,21 @@ async function main(): Promise<void> {
         handlerId,
         status,
       );
-      await experimentDispatcher.onRequestChanged(requestId);
     },
-    onExperimentHandlerClaim: (input) =>
-      experimentDispatcher.onHandlerClaim(input),
-    onExperimentHandlerComplete: (input) =>
-      experimentDispatcher.onHandlerComplete(input),
+    onExperimentHandlerClaim: async (input) => {
+      const updated = await experimentStore.claimHandler({
+        ...input,
+        expectedExecutionVersion: input.executionVersion,
+      });
+      return updated?.execution.version ?? null;
+    },
+    onExperimentHandlerComplete: async (input) => {
+      const updated = await experimentStore.completeHandler({
+        ...input,
+        expectedExecutionVersion: input.executionVersion,
+      });
+      return updated !== null;
+    },
     registerHandler: (doc) => handlerDispatcher.registerHandler(doc),
   };
   const httpServer = createHttpServer(notifyHandler);
@@ -285,7 +288,6 @@ async function main(): Promise<void> {
     await scheduler.stop();
     await postProcessorDispatcher.stop();
     await handlerDispatcher.stop();
-    await experimentDispatcher.stop();
     if (stuckRunReaper) await stuckRunReaper.stop();
     if (heartbeatStore) await heartbeatStore.close();
     httpServer.close();

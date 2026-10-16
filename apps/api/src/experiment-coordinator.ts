@@ -233,39 +233,32 @@ export class ExperimentCoordinator {
       );
       const blockers = projected.flatMap((request) => request.blockers);
       if (!sameProjection(requests, projected)) {
-        if (experiment.execution.requests.storage !== "inline") {
+        const projectionFingerprint = fingerprintExperimentPayload(projected);
+        const updated = await this.store.casUpdateRequestStates({
+          projectId,
+          experimentId,
+          experimentExecutionId:
+            experiment.execution.experimentExecutionId,
+          expectedExecutionVersion: experiment.execution.version,
+          updateId: `projection:${projectionFingerprint}`,
+          requests: projected,
+        });
+        if (updated.status === "stale" || updated.status === "contention") {
+          continue;
+        }
+        if (updated.status === "invariant") {
           throw new Error(
-            `Chunked experiment ${experimentId} requires a rollover before dependency projection changes`,
+            `Experiment ${experimentId} projection invariant failed: ${updated.message}`,
           );
         }
-        const now = new Date();
-        const payloadFingerprint = fingerprintExperimentPayload(projected);
-        const updated = await this.collections.experiments.findOneAndUpdate(
-          {
-            _id: experimentId,
-            projectId,
-            "execution.experimentExecutionId":
-              experiment.execution.experimentExecutionId,
-            "execution.version": experiment.execution.version,
-            "execution.frozenAt": { $exists: false },
-            "execution.rollover": { $exists: false },
-          } as Document,
-          {
-            $set: {
-              "execution.requests.entries": projected,
-              "execution.requests.payloadFingerprint": payloadFingerprint,
-              "execution.vectorFingerprint": payloadFingerprint,
-              "execution.blocking": blockers,
-              "execution.updatedAt": now,
-              updatedAt: now,
-            },
-            $inc: { "execution.version": 1, stateVersion: 1 },
-          } as Document,
-          { returnDocument: "after" },
-        );
-        if (!updated) continue;
-        experiment = updated;
-      } else if (
+        if (updated.status === "partial-failure") {
+          throw new Error(
+            `Experiment ${experimentId} projection update ${updated.updateId} is incomplete: ${updated.message}`,
+          );
+        }
+        experiment = updated.experiment;
+      }
+      if (
         fingerprintExperimentPayload(experiment.execution.blocking) !==
         fingerprintExperimentPayload(blockers)
       ) {

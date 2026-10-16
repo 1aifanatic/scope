@@ -52,6 +52,7 @@ import { registerExperimentsRoutes } from "./routes/experiments.js";
 import { ProjectScopeError } from "./utils/project-scope.js";
 import { registerUsersRoutes } from "./routes/users.js";
 import { shutdownPortalCopilotClientPool } from "./copilot-client-pool.js";
+import { ExperimentDispatcher } from "./experiment-dispatcher.js";
 import type { RouteContext } from "./route-context.js";
 import type {
   CriteriaDocument,
@@ -90,6 +91,10 @@ const mongoCollection = process.env.MONGO_COLLECTION || "requests";
 const storageAccountName = process.env.AZURE_STORAGE_ACCOUNT_NAME || "";
 const storageConnectionString = process.env.STORAGE_CONNECTION_STRING || process.env.AZURE_STORAGE_CONNECTION_STRING || "";
 const queueReport = process.env.AZURE_STORAGE_QUEUE_REPORT || "report-queue";
+const experimentPollIntervalMs = parseInt(
+  process.env.EXPERIMENT_POLL_INTERVAL_MS || "30000",
+  10,
+);
 const strictAgentCapabilities =
   process.env.SCOPE_STRICT_AGENT_CAPABILITIES?.toLowerCase() === "true";
 const port = parseInt(process.env.PORT || "3000", 10);
@@ -141,6 +146,16 @@ let resourceResolver: ResourceResolver;
 let blobStorage: BlobStorage;
 let heartbeatStore: HeartbeatStore;
 let reportQueueClient: QueueClient;
+let experimentDispatcher: ExperimentDispatcher;
+
+function createQueueClient(queueName: string): QueueClient {
+  if (storageConnectionString) {
+    return new QueueClient(storageConnectionString, queueName);
+  }
+  const credential = new DefaultAzureCredential();
+  const queueUrl = `https://${storageAccountName}.queue.core.windows.net`;
+  return new QueueClient(`${queueUrl}/${queueName}`, credential);
+}
 
 async function initializeClients(): Promise<void> {
   // Connect to MongoDB
@@ -247,15 +262,7 @@ async function initializeClients(): Promise<void> {
 
   console.log(`Connected to MongoDB: ${mongoUri.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
 
-  // Coding-agent queues are initialized by the scheduler from registry version
-  // manifests. The API only owns the report-generation queue.
-  if (storageConnectionString) {
-    reportQueueClient = new QueueClient(storageConnectionString, queueReport);
-  } else {
-    const credential = new DefaultAzureCredential();
-    const queueUrl = `https://${storageAccountName}.queue.core.windows.net`;
-    reportQueueClient = new QueueClient(`${queueUrl}/${queueReport}`, credential);
-  }
+  reportQueueClient = createQueueClient(queueReport);
 
   await reportQueueClient.createIfNotExists();
   console.log(`Ensured queue exists: ${queueReport}`);
@@ -274,6 +281,16 @@ async function initializeClients(): Promise<void> {
     redisPort: parseInt(process.env.REDIS_PORT || "6300", 10),
     redisPassword: process.env.REDIS_PASSWORD || "",
   });
+
+  experimentDispatcher = new ExperimentDispatcher(
+    collection,
+    experimentCollection,
+    experimentExecutionsCollection,
+    experimentChunksCollection,
+    db,
+    createQueueClient,
+    experimentPollIntervalMs,
+  );
 }
 
 // --- OpenAPI documentation (lazy — Swagger UI mounted in main() after all routes register) ---
@@ -393,6 +410,10 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 
 async function main(): Promise<void> {
   await initializeClients();
+  experimentDispatcher.start();
+  console.log(
+    `Experiment coordinator started (poll=${experimentPollIntervalMs}ms)`,
+  );
 
   // Mount OpenAPI docs (after all routes are registered)
   const openapiDocument = generateOpenAPIDocument();
@@ -414,6 +435,7 @@ async function main(): Promise<void> {
         process.exitCode = 1;
       }
       void Promise.all([
+        experimentDispatcher.stop(),
         shutdownPortalCopilotClientPool(),
         userAccessCache?.close(),
         heartbeatStore.close(),
