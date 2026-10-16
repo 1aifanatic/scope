@@ -56,8 +56,7 @@ Content-Type: application/json
 {
   "metadata": {
     "name": "Copilot and Claude comparison",
-    "description": "Five occurrences per pinned profile",
-    "tags": ["migration", "comparison"]
+    "description": "Five occurrences per pinned profile"
   },
   "request": {
     "scenario": {
@@ -101,7 +100,6 @@ scope experiment create \
   --project "$SCOPE_PROJECT" \
   --name "Copilot and Claude comparison" \
   --description "Five occurrences per pinned profile" \
-  --tags migration comparison \
   --message "Implement the feature." \
   --criteria builds tests-pass \
   --profile copilot-profile@3 \

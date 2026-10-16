@@ -49,7 +49,6 @@ export const ExperimentMetadataSchema = z
   .object({
     name: z.string().trim().min(1).max(256),
     description: z.string().max(4_096).optional(),
-    tags: z.array(z.string().trim().min(1).max(64)).max(32).optional(),
     createdBy: IdSchema.optional(),
   })
   .strict();

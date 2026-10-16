@@ -224,15 +224,6 @@ export function ExperimentDetail() {
           {experiment.metadata.description}
         </p>
       )}
-      {experiment.metadata.tags && experiment.metadata.tags.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {experiment.metadata.tags.map((tag) => (
-            <Badge key={tag} variant="secondary">
-              {tag}
-            </Badge>
-          ))}
-        </div>
-      )}
 
       <ExperimentStatusCard experiment={experiment} />
 

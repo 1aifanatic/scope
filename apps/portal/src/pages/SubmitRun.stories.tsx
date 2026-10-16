@@ -45,6 +45,7 @@ export const ExperimentProgressiveDisclosure: Story = {
     await expect(
       canvas.getByRole("button", { name: /Create empty experiment/ }),
     ).toBeInTheDocument();
+    await expect(canvas.queryByLabelText("Tags")).not.toBeInTheDocument();
     await expect(canvas.queryByText("Gate pipeline")).not.toBeInTheDocument();
     await expect(
       canvas.queryByRole("switch", { name: "Toggle advanced options" }),
