@@ -4,10 +4,29 @@
 import { describe, expect, it } from "vitest";
 import {
   ExperimentDocumentSchema,
+  ExperimentMetadataSchema,
   ExperimentRequestStateSchema,
 } from "./schemas.js";
 
 describe("experiment schemas", () => {
+  it("accepts only canonical Experiment metadata fields", () => {
+    expect(
+      ExperimentMetadataSchema.parse({
+        name: "Experiment",
+        description: "Comparison",
+      }),
+    ).toEqual({
+      name: "Experiment",
+      description: "Comparison",
+    });
+    expect(() =>
+      ExperimentMetadataSchema.parse({
+        name: "Experiment",
+        tags: ["nightly"],
+      }),
+    ).toThrow();
+  });
+
   it("parses the bounded request leaf and rejects recursive or unknown data", () => {
     expect(
       ExperimentRequestStateSchema.parse({

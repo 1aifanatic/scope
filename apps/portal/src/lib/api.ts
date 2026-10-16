@@ -274,14 +274,16 @@ export const api = {
     }, { scoped: true });
   },
 
-  createExperiment: async (body: {
-    metadata: ExperimentMetadataView;
-    request?: RunCreateInput;
-    empty?: boolean;
-  }): Promise<ExperimentView> => {
-    const worker = body.request?.worker;
-    const requestBody = body.request
-      ? { ...body.request, worker: undefined }
+  createExperiment: async (
+    body: { metadata: ExperimentMetadataView } & (
+      | { request: RunCreateInput; empty?: never }
+      | { empty: true; request?: never }
+    ),
+  ): Promise<ExperimentView> => {
+    const composedRequest = "request" in body ? body.request : undefined;
+    const worker = composedRequest?.worker;
+    const requestBody = composedRequest
+      ? { ...composedRequest, worker: undefined }
       : undefined;
     const path = worker
       ? `/experiments?worker=${encodeURIComponent(worker)}`
@@ -291,7 +293,7 @@ export const api = {
       {
         method: "POST",
         body: JSON.stringify({
-          mode: body.empty ? "empty" : "compose",
+          mode: "empty" in body ? "empty" : "compose",
           metadata: body.metadata,
           requests: requestBody ? [requestBody] : [],
         }),

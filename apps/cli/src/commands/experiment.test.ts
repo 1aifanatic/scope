@@ -73,6 +73,20 @@ describe("experiment commands", () => {
     process.exitCode = undefined;
   });
 
+  it("does not expose removed Experiment tags", () => {
+    const experimentCommand = makeProgram().commands.find(
+      (command) => command.name() === "experiment",
+    );
+    const createCommand = experimentCommand?.commands.find(
+      (command) => command.name() === "create",
+    );
+
+    expect(createCommand).toBeDefined();
+    expect(createCommand?.options.map((option) => option.long)).not.toContain(
+      "--tags",
+    );
+  });
+
   it("previews composition without calling the API or warning", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);

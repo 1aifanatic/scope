@@ -724,6 +724,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       "CreateExperimentInput": {
         "properties": {
           "metadata": {
+            "additionalProperties": false,
             "properties": {
               "description": {
                 "maxLength": 4096,
@@ -733,15 +734,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                 "maxLength": 256,
                 "minLength": 1,
                 "type": "string",
-              },
-              "tags": {
-                "items": {
-                  "maxLength": 64,
-                  "minLength": 1,
-                  "type": "string",
-                },
-                "maxItems": 32,
-                "type": "array",
               },
             },
             "required": [
@@ -1869,6 +1861,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "metadata": {
+            "additionalProperties": false,
             "properties": {
               "createdBy": {
                 "type": "string",
@@ -1881,15 +1874,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                 "maxLength": 256,
                 "minLength": 1,
                 "type": "string",
-              },
-              "tags": {
-                "items": {
-                  "maxLength": 64,
-                  "minLength": 1,
-                  "type": "string",
-                },
-                "maxItems": 32,
-                "type": "array",
               },
             },
             "required": [

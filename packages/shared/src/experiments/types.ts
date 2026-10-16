@@ -70,7 +70,6 @@ export interface ExperimentRequestState {
 export interface ExperimentMetadata {
   name: string;
   description?: string;
-  tags?: string[];
   createdBy?: string;
 }
 

@@ -146,6 +146,23 @@ describe("Experiment API contract", () => {
     expect(composeWithoutMembers.status).toBe(400);
   });
 
+  it("rejects removed Experiment metadata fields", async () => {
+    const { app } = harness();
+
+    const response = await request(app)
+      .post("/api/v1/experiments?projectId=project-1")
+      .send({
+        mode: "empty",
+        metadata: {
+          name: "Tagged experiment",
+          tags: ["nightly"],
+        },
+        requests: [],
+      });
+
+    expect(response.status).toBe(400);
+  });
+
   it("creates an empty, visible, non-dispatchable experiment", async () => {
     const experimentCollection = emptyExperimentCollection();
     const { app } = harness({
@@ -264,6 +281,12 @@ describe("Experiment API contract", () => {
 
     const executionSchema = document.components?.schemas
       ?.ExperimentExecutionResponse;
+    expect(
+      JSON.stringify(document.components?.schemas?.CreateExperimentInput),
+    ).not.toContain('"tags"');
+    expect(
+      JSON.stringify(document.components?.schemas?.ExperimentResponse),
+    ).not.toContain('"tags"');
     expect(executionSchema).toMatchObject({
       type: "object",
       properties: {

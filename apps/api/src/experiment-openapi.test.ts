@@ -65,6 +65,12 @@ describe("Experiment OpenAPI contract", () => {
         path.includes("submission"),
       ),
     ).toEqual([]);
+    expect(
+      JSON.stringify(document.components?.schemas?.CreateExperimentInput),
+    ).not.toContain('"tags"');
+    expect(
+      JSON.stringify(document.components?.schemas?.ExperimentResponse),
+    ).not.toContain('"tags"');
   });
 
   it("keeps POST /requests active while deprecating only composition properties", () => {

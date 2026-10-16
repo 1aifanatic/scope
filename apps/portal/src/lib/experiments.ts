@@ -7,7 +7,6 @@ export const LEGACY_REQUEST_COMPOSITION_DEPRECATION =
 export interface ExperimentMetadataView {
   name: string;
   description?: string;
-  tags?: string[];
   createdBy?: string;
 }
 
@@ -278,14 +277,6 @@ export function parseExperiment(value: unknown): ExperimentView {
     metadata: {
       name: requiredString(metadata, "name", "experiment metadata"),
       description: optionalString(metadata, "description"),
-      tags: Array.isArray(metadata.tags)
-        ? metadata.tags.map((tag) => {
-            if (typeof tag !== "string") {
-              throw new Error("Invalid experiment metadata tag response from Scope");
-            }
-            return tag;
-          })
-        : undefined,
       createdBy: optionalString(metadata, "createdBy"),
     },
     revision: {
