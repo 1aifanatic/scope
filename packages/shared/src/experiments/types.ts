@@ -50,6 +50,8 @@ export type ExperimentBlockerReason =
   | "dependency-blocked";
 
 export interface ExperimentBlocker {
+  requestId?: string;
+  runId?: string;
   handlerId: string;
   reason: ExperimentBlockerReason;
   error?: string;
@@ -88,6 +90,7 @@ export type ExperimentHandlerStatus =
 export interface ExperimentHandlerSummary {
   status: ExperimentHandlerStatus;
   version: number;
+  claimToken?: string;
   updatedAt: Date;
   error?: string;
 }

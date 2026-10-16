@@ -304,7 +304,6 @@ function makeFixtureRun(id = "run-fixture-1") {
     workerType: "coder-acp-copilot",
     createdAt: new Date("2026-01-01T00:00:00Z"),
     priority: 0,
-    submissionId: "submission-abc",
     run: {
       _id: id,
       attemptNumber: 1,
@@ -765,7 +764,6 @@ describe("run import/export — round-trip (export → import)", () => {
       updatedAt: new Date("2026-05-11T23:04:47.446Z"),
       maxIterations: 1,
       priority: 0,
-      submissionId: "sub-rich-1",
       run: {
         _id: runId,
         attemptNumber: 2, // ← not 1; previous code hard-coded 1

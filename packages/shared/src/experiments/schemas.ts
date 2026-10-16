@@ -22,6 +22,8 @@ export const ExperimentDependencyProjectionSchema = z
 
 export const ExperimentBlockerSchema = z
   .object({
+    requestId: IdSchema.optional(),
+    runId: IdSchema.optional(),
     handlerId: IdSchema,
     reason: z.enum([
       "request-missing",
@@ -67,6 +69,7 @@ export const ExperimentHandlerSummarySchema = z
   .object({
     status: z.enum(["queued", "processing", "done", "failed"]),
     version: z.number().int().nonnegative(),
+    claimToken: IdSchema.optional(),
     updatedAt: z.coerce.date(),
     error: ErrorSchema.optional(),
   })

@@ -766,19 +766,19 @@ describe("API Endpoints", () => {
       expect(res.body.data[0]).toHaveProperty("uniform");
     });
 
-    it("returns grouped results when groupBy=submissionId", async () => {
+    it("returns grouped results when groupBy=experimentId", async () => {
       const groupedDocs = [
-        { key: "sub-1", label: "sub-1", aggregates: { count: 2, turns: null, duration: null, promptTokens: null, completionTokens: null }, uniform: {} },
+        { key: "experiment-1", label: "experiment-1", aggregates: { count: 2, turns: null, duration: null, promptTokens: null, completionTokens: null }, uniform: {} },
       ];
       (mocks.collection.aggregate as any)
-        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ _id: "sub-1" }]) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ _id: "experiment-1" }]) })
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue(groupedDocs) })
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) })
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) });
 
-      const res = await request(testServer()).get(`/api/v1/requests?groupBy=submissionId&projectId=${TEST_PROJECT_ID}`);
+      const res = await request(testServer()).get(`/api/v1/requests?groupBy=experimentId&projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
-      expect(res.body.data[0]).toHaveProperty("key", "sub-1");
+      expect(res.body.data[0]).toHaveProperty("key", "experiment-1");
     });
 
     it("calls aggregate pipeline when groupBy is provided", async () => {
@@ -1955,15 +1955,14 @@ describe("API Endpoints", () => {
       expect(res.status).toBe(201);
       const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
       expect(doc).toHaveProperty("reasoningEffort", "high");
-      expect(doc).toHaveProperty("submissionExpectedRequestCount", 1);
-      const submissionInsert = (mocks.submissionCollection.updateOne as any).mock.calls[0][1].$setOnInsert;
-      expect(submissionInsert.requestIds).toEqual([doc._id]);
-      expect(submissionInsert.run.requests).toEqual([
-        { requestId: doc._id, runId: doc.run._id },
-      ]);
+      expect(doc).not.toHaveProperty("experimentId");
+      expect(mocks.experimentCollection.updateOne).not.toHaveBeenCalled();
+      expect(res.headers).not.toHaveProperty("deprecation");
+      expect(res.headers).not.toHaveProperty("link");
+      expect(res.headers).not.toHaveProperty("sunset");
     });
 
-    it("creates one complete submission vector for count fan-out", async () => {
+    it("keeps count fan-out independent from experiments", async () => {
       const res = await request(testServer())
         .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
         .send({
@@ -1974,25 +1973,13 @@ describe("API Endpoints", () => {
       expect(res.status).toBe(201);
       const docs = (mocks.collection.insertMany as any).mock.calls[0][0];
       expect(docs).toHaveLength(3);
-      expect(docs.every((doc: { submissionExpectedRequestCount: number }) =>
-        doc.submissionExpectedRequestCount === 3)).toBe(true);
-      expect(
-        docs.map((doc: { submissionRequestIndex: number }) => doc.submissionRequestIndex),
-      ).toEqual([0, 1, 2]);
-      expect(
-        docs.every(
-          (doc: { submissionInitialRunId: string; run: { _id: string } }) =>
-            doc.submissionInitialRunId === doc.run._id,
-        ),
-      ).toBe(true);
-      const submissionInsert = (mocks.submissionCollection.updateOne as any).mock.calls[0][1].$setOnInsert;
-      expect(submissionInsert.requestIds).toEqual(docs.map((doc: { _id: string }) => doc._id));
-      expect(submissionInsert.run.requests).toEqual(
-        docs.map((doc: { _id: string; run: { _id: string } }) => ({
-          requestId: doc._id,
-          runId: doc.run._id,
-        })),
+      expect(docs.every((doc: object) => !("experimentId" in doc))).toBe(true);
+      expect(mocks.experimentCollection.updateOne).not.toHaveBeenCalled();
+      expect(res.headers.deprecation).toBe("true");
+      expect(res.headers.link).toBe(
+        '</api/v1/experiments>; rel="successor-version"; title="POST /api/v1/experiments"',
       );
+      expect(res.headers).not.toHaveProperty("sunset");
     });
 
     it("profile reasoningEffort takes precedence over client-provided effort", async () => {
@@ -2297,7 +2284,7 @@ describe("API Endpoints", () => {
         new Set(["base-profile", "var-profile"]),
       );
       for (const doc of docs) {
-        expect(doc.submissionExpectedRequestCount).toBe(2);
+        expect(doc.experimentId).toBeUndefined();
         expect(Array.isArray(doc.gates)).toBe(true);
         const selectGate = doc.gates.find((g: { gate: string }) => g.gate === "select");
         const buildGate = doc.gates.find((g: { gate: string }) => g.gate === "build");
@@ -2308,10 +2295,7 @@ describe("API Endpoints", () => {
         expect(buildGate.promptId).toBe("tp-build");
         expect(buildGate.promptText).toBeUndefined();
       }
-      const submissionInsert = (mocks.submissionCollection.updateOne as any).mock.calls[0][1].$setOnInsert;
-      expect(submissionInsert.requestIds).toEqual(
-        docs.map((doc: { _id: string }) => doc._id),
-      );
+      expect(mocks.experimentCollection.updateOne).not.toHaveBeenCalled();
       // Response surfaces the configured gate count.
       expect(res.body.gates).toBe(2);
     });
@@ -2469,9 +2453,8 @@ describe("API Endpoints", () => {
       expect(insertCall[0]).toHaveProperty("taskPromptId", "tp-123");
       expect(insertCall[0]).toHaveProperty("model", "gpt-4o");
       expect(insertCall[0]).toHaveProperty("maxIterations", 5);
-      expect(insertCall[0]).toHaveProperty("submissionExpectedRequestCount", 1);
-      const submissionInsert = (mocks.submissionCollection.updateOne as any).mock.calls[0][1].$setOnInsert;
-      expect(submissionInsert.requestIds).toEqual([insertCall[0]._id]);
+      expect(insertCall[0]).not.toHaveProperty("experimentId");
+      expect(mocks.experimentCollection.updateOne).not.toHaveBeenCalled();
     });
 
     it("applies profile override: uses profile fields for worker, model, mcpServers, skillRevisions, extensions", async () => {
@@ -2848,13 +2831,13 @@ describe("API Endpoints", () => {
     it("retries eligible requests and skips non-terminal ones", async () => {
       const doc1 = {
         _id: "req-1",
-        submissionId: "submission-1",
+        experimentId: "experiment-1",
         workerType: "coder-acp-copilot",
         run: { _id: "run-1", attemptNumber: 1, status: "done", outcome: "failed" },
       };
       const doc2 = {
         _id: "req-2",
-        submissionId: "submission-1",
+        experimentId: "experiment-1",
         workerType: "coder-acp-copilot",
         run: { _id: "run-2", attemptNumber: 1, status: "processing" },
       };
@@ -2880,22 +2863,7 @@ describe("API Endpoints", () => {
           $set: expect.objectContaining({ agentVersion: "1.0.0" }),
         }),
       );
-      expect(mocks.submissionCollection.updateMany).toHaveBeenNthCalledWith(
-        1,
-        { _id: { $in: ["submission-1"] } },
-        expect.objectContaining({
-          $set: expect.objectContaining({
-            "run.reconcileAfter": expect.any(Date),
-          }),
-        }),
-      );
-      expect(mocks.submissionCollection.updateMany).toHaveBeenNthCalledWith(
-        2,
-        { _id: { $in: ["submission-1"] } },
-        expect.objectContaining({
-          $unset: { "run.reconcileAfter": "" },
-        }),
-      );
+      expect(mocks.experimentCollection.updateMany).not.toHaveBeenCalled();
     });
 
     it("returns 400 when ids array is empty", async () => {

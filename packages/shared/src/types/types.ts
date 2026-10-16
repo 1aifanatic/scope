@@ -384,16 +384,18 @@ export interface RequestDocument {
   agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
   profileId?: string;             // FK → ProfileDocument._id (the profile lineage)
   profileVersionId?: string;      // FK → ProfileVersionDocument._id (exact version used)
-  experimentId?: string;
-  experimentRevisionId?: string;
-  experimentExecutionId?: string;
-  /** Expected request count for interrupted Experiment finalization. */
+  experimentId?: string;           // FK → ExperimentDocument._id
+  /** Expected native request count for interrupted ExperimentDocument finalization.
+   * Historical/imported requests omit it and remain view-only if their parent
+   * experiment document is missing. */
   experimentExpectedRequestCount?: number;
-  /** Stable position within the Experiment's immutable request vector. */
+  /** Stable position within the experiment's immutable request vector. */
   experimentRequestIndex?: number;
-  /** Initial run id retained so recovery can rebuild the exact first vector. */
+  /** Run id minted for the experiment's first execution. It remains unchanged
+   * across request retries so recovery can rebuild the exact initial vector. */
   experimentInitialRunId?: string;
-  /** Set only after the parent Experiment has been published. */
+  /** Set after the parent ExperimentDocument has been idempotently finalized.
+   * Missing on interrupted native writes so the scheduler can recover them. */
   experimentFinalizedAt?: Date;
   /** Scheduling priority. Higher = processed first. Default: 0. */
   priority: number;
@@ -591,6 +593,12 @@ export interface ExperimentHandlerServiceDocument {
 export type ServiceHandlerDocument =
   | HandlerServiceDocument
   | ExperimentHandlerServiceDocument;
+
+export interface ExperimentQueueMessagePayload {
+  type: string;
+  experimentId: string;
+  experimentExecutionId: string;
+}
 
 /**
  * Field names whose values move from `RequestDocument` (top-level, legacy

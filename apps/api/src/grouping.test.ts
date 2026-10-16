@@ -14,8 +14,8 @@ describe("buildGroupingPipeline", () => {
     expect(pipeline[3]).toHaveProperty("$sort");
   });
 
-  it("returns 4 pipeline stages for submissionId grouping", () => {
-    const pipeline = buildGroupingPipeline("submissionId");
+  it("returns 4 pipeline stages for experimentId grouping", () => {
+    const pipeline = buildGroupingPipeline("experimentId");
     expect(pipeline).toHaveLength(4);
   });
 
@@ -32,8 +32,8 @@ describe("buildGroupingPipeline", () => {
     expect(addFields._groupKey).toBe("$taskPromptId");
   });
 
-  it("groups by submissionId for submissionId grouping", () => {
-    const pipeline = buildGroupingPipeline("submissionId");
+  it("groups by experimentId for experimentId grouping", () => {
+    const pipeline = buildGroupingPipeline("experimentId");
     const addFields = pipeline[0].$addFields as Record<string, unknown>;
     expect(addFields._groupKey).toBeDefined();
   });
@@ -74,7 +74,7 @@ describe("buildGroupingPipeline", () => {
     expect(group._agentVersions).toBeDefined();
     expect(group._platforms).toBeDefined();
     expect(group._statuses).toBeDefined();
-    expect(group._submissionIds).toBeDefined();
+    expect(group._experimentIds).toBeDefined();
     expect(group._tasks).toBeDefined();
     expect(group._mcpKeys).toBeDefined();
     expect(group._skillKeys).toBeDefined();

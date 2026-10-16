@@ -8,15 +8,15 @@ import { DefaultAzureCredential } from "@azure/identity";
 import { RequestScheduler } from "./request-scheduler.js";
 import { PostProcessorDispatcher } from "./post-processor-dispatcher.js";
 import { HandlerDispatcher } from "./handler-dispatcher.js";
-import { SubmissionDispatcher } from "./submission-dispatcher.js";
+import { ExperimentDispatcher } from "./experiment-dispatcher.js";
 import { createHttpServer, type NotifyHandler } from "./notify-routes.js";
 import { StuckRunReaper } from "./stuck-run-reaper.js";
 import { RedisHeartbeatStore, type HeartbeatStore } from "shared";
 import type {
   CodingAgentDocument,
   RequestDocument,
-  SubmissionDocument,
-  SubmissionRunHistoryDocument,
+  ExperimentDocument,
+  ExperimentExecutionHistoryDocument,
 } from "shared";
 import { initTelemetry, trackMetric, trackEvent, shutdownTelemetry } from "telemetry";
 
@@ -134,9 +134,13 @@ async function main(): Promise<void> {
   const db = mongoClient.db(MONGO_DATABASE);
   const collection = db.collection<RequestDocument>(MONGO_COLLECTION);
   const agentCollection = db.collection<CodingAgentDocument>("agents");
-  const submissionCollection = db.collection<SubmissionDocument>("submissions");
-  const submissionRunsCollection =
-    db.collection<SubmissionRunHistoryDocument>("submission-runs");
+  const experimentCollection =
+    db.collection<ExperimentDocument>("experiments");
+  const experimentExecutionsCollection =
+    db.collection<ExperimentExecutionHistoryDocument>(
+      "experiment-executions",
+    );
+  const experimentChunksCollection = db.collection("experiment-chunks");
 
   // Start the scheduler
   const scheduler = new RequestScheduler(
@@ -200,16 +204,17 @@ async function main(): Promise<void> {
     `[Scheduler] Handler dispatcher (DAG) started (poll=${ppPollIntervalMs}ms, topologyCacheTtl=${handlerCacheTtlMs}ms)`,
   );
 
-  const submissionDispatcher = new SubmissionDispatcher(
+  const experimentDispatcher = new ExperimentDispatcher(
     collection,
-    submissionCollection,
-    submissionRunsCollection,
+    experimentCollection,
+    experimentExecutionsCollection,
+    experimentChunksCollection,
     db,
     createQueueClient,
     ppPollIntervalMs,
   );
-  submissionDispatcher.start();
-  console.log(`[Scheduler] Submission dispatcher started (poll=${ppPollIntervalMs}ms)`);
+  experimentDispatcher.start();
+  console.log(`[Scheduler] Experiment dispatcher started (poll=${ppPollIntervalMs}ms)`);
 
   // Start the stuck-run reaper (authoritative backstop). Redis is non-fatal:
   // on misconfig or connection failure the reaper self-disables (its sweeps
@@ -248,11 +253,11 @@ async function main(): Promise<void> {
   }
 
   // Run notifications update the run DAG and immediately reconcile the parent
-  // submission. The polling loop remains the durable safety net.
+  // experiment. The polling loop remains the durable safety net.
   const notifyHandler: NotifyHandler = {
     onRunTerminal: async (requestId, runId) => {
       await handlerDispatcher.onRunTerminal(requestId, runId);
-      await submissionDispatcher.onRequestChanged(requestId);
+      await experimentDispatcher.onRequestChanged(requestId);
     },
     onHandlerComplete: async (requestId, runId, handlerId, status) => {
       await handlerDispatcher.onHandlerComplete(
@@ -261,8 +266,12 @@ async function main(): Promise<void> {
         handlerId,
         status,
       );
-      await submissionDispatcher.onRequestChanged(requestId);
+      await experimentDispatcher.onRequestChanged(requestId);
     },
+    onExperimentHandlerClaim: (input) =>
+      experimentDispatcher.onHandlerClaim(input),
+    onExperimentHandlerComplete: (input) =>
+      experimentDispatcher.onHandlerComplete(input),
     registerHandler: (doc) => handlerDispatcher.registerHandler(doc),
   };
   const httpServer = createHttpServer(notifyHandler);
@@ -276,7 +285,7 @@ async function main(): Promise<void> {
     await scheduler.stop();
     await postProcessorDispatcher.stop();
     await handlerDispatcher.stop();
-    await submissionDispatcher.stop();
+    await experimentDispatcher.stop();
     if (stuckRunReaper) await stuckRunReaper.stop();
     if (heartbeatStore) await heartbeatStore.close();
     httpServer.close();

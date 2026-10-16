@@ -9,9 +9,29 @@ import type {
   HandlerRunStatus,
   ServiceHandlerDocument,
 } from "shared";
-import { DependencyGraph, isHandlerDagDrained, withRetry } from "shared";
+import { DependencyGraph, withRetry } from "shared";
 import type { RetryOptions } from "shared";
 import type { NotifyHandler } from "./notify-routes.js";
+
+function isHandlerDagDrained(
+  handlers: readonly HandlerServiceDocument[],
+  handlerStatus: Record<string, HandlerRunStatus> | undefined,
+): boolean {
+  const graph = new DependencyGraph(
+    handlers.map((handler) => ({
+      id: handler._id,
+      dependsOn: handler.dependsOn,
+    })),
+  );
+  return handlers.every((handler) => {
+    const status = handlerStatus?.[handler._id]?.status;
+    if (status === "done" || status === "failed") return true;
+    if (status !== undefined) return false;
+    return [...graph.getAncestors(handler._id)].some(
+      (ancestorId) => handlerStatus?.[ancestorId]?.status === "failed",
+    );
+  });
+}
 
 /**
  * HandlerDispatcher — DAG-aware post-processing orchestrator.
@@ -157,12 +177,12 @@ export class HandlerDispatcher implements NotifyHandler {
   }
 
   async registerHandler(doc: ServiceHandlerDocument): Promise<void> {
-    if (doc.type === "submission-handler") {
+    if (doc.type === "experiment-handler") {
       const postProcessHandlers = await this.loadHandlers(true);
       for (const dependency of doc.dependsOn) {
         if (!postProcessHandlers.some((handler) => handler._id === dependency)) {
           throw new Error(
-            `Submission handler '${doc._id}' depends on unknown run handler '${dependency}'`,
+            `Experiment handler '${doc._id}' depends on unknown run handler '${dependency}'`,
           );
         }
       }
@@ -173,7 +193,7 @@ export class HandlerDispatcher implements NotifyHandler {
         { upsert: true },
       );
       console.log(
-        `[HandlerDispatcher] Registered submission handler ${_id} (version=${doc.version}, queue=${doc.queue}, dependsOn=[${doc.dependsOn.join(", ")}])`,
+        `[HandlerDispatcher] Registered experiment handler ${_id} (version=${doc.version}, queue=${doc.queue}, dependsOn=[${doc.dependsOn.join(", ")}])`,
       );
       return;
     }

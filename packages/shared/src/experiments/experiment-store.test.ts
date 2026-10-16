@@ -115,7 +115,12 @@ function experiment(): ExperimentDocument {
       },
       vectorFingerprint: "vector",
       handlerSummary: {
-        report: { status: "queued", version: 1, updatedAt: now },
+        report: {
+          status: "queued",
+          version: 1,
+          claimToken: "claim-1",
+          updatedAt: now,
+        },
       },
       blocking: [],
       createdAt: now,
@@ -146,6 +151,7 @@ describe("ExperimentStore CAS contracts", () => {
         expectedExecutionVersion: 1,
         handlerId: "report",
         handlerVersion: 1,
+        claimToken: "claim-1",
       }),
       store.freezeCurrent({
         projectId: "project-1",
@@ -177,6 +183,7 @@ describe("ExperimentStore CAS contracts", () => {
         expectedExecutionVersion: 1,
         handlerId: "report",
         handlerVersion: 1,
+        claimToken: "claim-1",
       }),
     ).resolves.toBeNull();
     await expect(
@@ -187,7 +194,58 @@ describe("ExperimentStore CAS contracts", () => {
         expectedExecutionVersion: 1,
         handlerId: "report",
         handlerVersion: 1,
+        claimToken: "claim-1",
       }),
     ).resolves.toBeNull();
+  });
+
+  it("rejects stale completion tokens and accepts the exact claimed version", async () => {
+    const experiments = atomicCollection(experiment());
+    const store = new ExperimentStore({
+      experiments:
+        experiments as unknown as Collection<ExperimentDocument>,
+      executions:
+        {} as Collection<ExperimentExecutionHistoryDocument>,
+      chunks: {} as Collection,
+    });
+    const claimed = await store.claimHandler({
+      projectId: "project-1",
+      experimentId: "experiment-1",
+      experimentExecutionId: "execution-1",
+      expectedExecutionVersion: 1,
+      handlerId: "report",
+      handlerVersion: 1,
+      claimToken: "claim-1",
+    });
+    expect(claimed?.execution.version).toBe(2);
+
+    await expect(
+      store.completeHandler({
+        projectId: "project-1",
+        experimentId: "experiment-1",
+        experimentExecutionId: "execution-1",
+        expectedExecutionVersion: 2,
+        handlerId: "report",
+        handlerVersion: 1,
+        claimToken: "stale-token",
+        status: "done",
+      }),
+    ).resolves.toBeNull();
+
+    const completed = await store.completeHandler({
+      projectId: "project-1",
+      experimentId: "experiment-1",
+      experimentExecutionId: "execution-1",
+      expectedExecutionVersion: 2,
+      handlerId: "report",
+      handlerVersion: 1,
+      claimToken: "claim-1",
+      status: "done",
+    });
+    expect(completed?.execution.handlerSummary.report).toMatchObject({
+      status: "done",
+      version: 1,
+      claimToken: "claim-1",
+    });
   });
 });

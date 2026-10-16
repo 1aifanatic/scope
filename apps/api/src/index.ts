@@ -10,6 +10,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { TaskPromptStore, SkillRevisionStore, SkillResolver, CodebaseStore, CodebaseRevisionStore, CodebaseResolver, ResourceStore, ResourceRevisionStore, ResourceResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage, RedisHeartbeatStore, ProjectStore, loadAuthConfigFromEnv } from "shared";
+import type { ExperimentDocument, ExperimentExecutionHistoryDocument } from "shared";
 import { initTelemetry } from "telemetry";
 import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, ResourceDocument, ResourceRevisionDocument, ProfileDocument, ProfileVersionDocument, ProjectDocument, HeartbeatStore, AuthProvider, ProfileEnricher, UserDocument } from "shared";
 import { UserStore } from "./auth/user-store.js";
@@ -47,7 +48,7 @@ import { registerInsightsRoutes } from "./routes/insights.js";
 import { registerSecretsRoutes } from "./routes/secrets.js";
 import { registerProfilesRoutes } from "./routes/profiles.js";
 import { registerProjectsRoutes } from "./routes/projects.js";
-import { registerSubmissionsRoutes } from "./routes/submissions.js";
+import { registerExperimentsRoutes } from "./routes/experiments.js";
 import { ProjectScopeError } from "./utils/project-scope.js";
 import { registerUsersRoutes } from "./routes/users.js";
 import { shutdownPortalCopilotClientPool } from "./copilot-client-pool.js";
@@ -60,8 +61,6 @@ import type {
   InsightDocument,
   RequestDocument,
   RunHistoryDocument,
-  SubmissionDocument,
-  SubmissionRunHistoryDocument,
   CodingAgentDocument,
   ModelDocument,
   McpServerDocument,
@@ -100,8 +99,9 @@ let mongoClient: MongoClient;
 let db: Db;
 let collection: Collection<RequestDocument>;
 let runsCol: Collection<RunHistoryDocument>;
-let submissionCollection: Collection<SubmissionDocument>;
-let submissionRunsCollection: Collection<SubmissionRunHistoryDocument>;
+let experimentCollection: Collection<ExperimentDocument>;
+let experimentExecutionsCollection: Collection<ExperimentExecutionHistoryDocument>;
+let experimentChunksCollection: Collection;
 let projectCollection: Collection<ProjectDocument>;
 let projectStore: ProjectStore;
 let criteriaCollection: Collection<CriteriaDocument>;
@@ -149,8 +149,10 @@ async function initializeClients(): Promise<void> {
   db = mongoClient.db(mongoDatabase);
   collection = db.collection<RequestDocument>(mongoCollection);
   runsCol = db.collection<RunHistoryDocument>("runs");
-  submissionCollection = db.collection<SubmissionDocument>("submissions");
-  submissionRunsCollection = db.collection<SubmissionRunHistoryDocument>("submission-runs");
+  experimentCollection = db.collection<ExperimentDocument>("experiments");
+  experimentExecutionsCollection =
+    db.collection<ExperimentExecutionHistoryDocument>("experiment-executions");
+  experimentChunksCollection = db.collection("experiment-chunks");
   projectCollection = db.collection<ProjectDocument>("projects");
   projectStore = new ProjectStore(projectCollection);
   criteriaCollection = db.collection<CriteriaDocument>("criteria");
@@ -284,8 +286,9 @@ const routeCtx: RouteContext = {
   get db() { return db; },
   get requestCollection() { return collection; },
   get runsCollection() { return runsCol; },
-  get submissionCollection() { return submissionCollection; },
-  get submissionRunsCollection() { return submissionRunsCollection; },
+  get experimentCollection() { return experimentCollection; },
+  get experimentExecutionsCollection() { return experimentExecutionsCollection; },
+  get experimentChunksCollection() { return experimentChunksCollection; },
   get projectCollection() { return projectCollection; },
   get criteriaCollection() { return criteriaCollection; },
   get promptFeatureCollection() { return promptFeatureCollection; },
@@ -347,7 +350,7 @@ app.use(createUserAccessMiddleware(() => userAccessResolver));
 registerSecretsRoutes(routeCtx);
 registerSystemRoutes(routeCtx);
 registerProjectsRoutes(routeCtx);
-registerSubmissionsRoutes(routeCtx);
+registerExperimentsRoutes(routeCtx);
 registerRequestsRoutes(routeCtx);
 registerRequestsCancelRoutes(routeCtx);
 registerRequestsLogsRoutes(routeCtx);
@@ -434,8 +437,9 @@ export interface TestDependencies {
   db?: Db;
   collection?: Collection<RequestDocument>;
   runsCollection?: Collection<RunHistoryDocument>;
-  submissionCollection?: Collection<SubmissionDocument>;
-  submissionRunsCollection?: Collection<SubmissionRunHistoryDocument>;
+  experimentCollection?: Collection<ExperimentDocument>;
+  experimentExecutionsCollection?: Collection<ExperimentExecutionHistoryDocument>;
+  experimentChunksCollection?: Collection;
   criteriaCollection?: Collection<CriteriaDocument>;
   promptFeatureCollection?: Collection<PromptFeatureDocument>;
   reportCollection?: Collection<ReportDocument>;
@@ -477,8 +481,9 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.db) db = deps.db;
   if (deps.collection) collection = deps.collection;
   if (deps.runsCollection) runsCol = deps.runsCollection;
-  if (deps.submissionCollection) submissionCollection = deps.submissionCollection;
-  if (deps.submissionRunsCollection) submissionRunsCollection = deps.submissionRunsCollection;
+  if (deps.experimentCollection) experimentCollection = deps.experimentCollection;
+  if (deps.experimentExecutionsCollection) experimentExecutionsCollection = deps.experimentExecutionsCollection;
+  if (deps.experimentChunksCollection) experimentChunksCollection = deps.experimentChunksCollection;
   if (deps.criteriaCollection) criteriaCollection = deps.criteriaCollection;
   if (deps.promptFeatureCollection) promptFeatureCollection = deps.promptFeatureCollection;
   if (deps.reportCollection) reportCollection = deps.reportCollection;

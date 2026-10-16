@@ -305,6 +305,7 @@ export class ExperimentStore {
     expectedExecutionVersion: number;
     handlerId: string;
     handlerVersion: number;
+    claimToken: string;
     now?: Date;
   }): Promise<ExperimentDocument | null> {
     assertHandlerId(input.handlerId);
@@ -322,12 +323,14 @@ export class ExperimentStore {
         "execution.rollover": { $exists: false },
         [`${path}.status`]: "queued",
         [`${path}.version`]: input.handlerVersion,
+        [`${path}.claimToken`]: input.claimToken,
       } as Document,
       {
         $set: {
           [path]: {
             status: "processing",
             version: input.handlerVersion,
+            claimToken: input.claimToken,
             updatedAt: now,
           },
           "execution.startedAt": now,
@@ -348,6 +351,7 @@ export class ExperimentStore {
     expectedExecutionVersion: number;
     handlerId: string;
     handlerVersion: number;
+    claimToken: string;
     status: Extract<ExperimentHandlerStatus, "done" | "failed">;
     error?: string;
     now?: Date;
@@ -366,12 +370,14 @@ export class ExperimentStore {
         "execution.frozenAt": { $exists: false },
         [`${path}.status`]: "processing",
         [`${path}.version`]: input.handlerVersion,
+        [`${path}.claimToken`]: input.claimToken,
       } as Document,
       {
         $set: {
           [path]: {
             status: input.status,
             version: input.handlerVersion,
+            claimToken: input.claimToken,
             updatedAt: now,
             ...(input.error ? { error: input.error } : {}),
           },
