@@ -5,19 +5,34 @@ import { Download, ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { ReportStatusBadge } from "@/components/ReportStatusBadge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { Report } from "@/types";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type {
+  ExperimentReportGroup,
+  ExperimentReportSelection,
+} from "@/lib/experiment-reports";
+import { formatDate } from "@/lib/utils";
 
 interface ExperimentReportCardProps {
   experimentId: string;
   experimentExecutionId: string;
   attemptNumber?: number;
-  report?: Report;
+  groups: ExperimentReportGroup[];
+  selection?: ExperimentReportSelection;
   structuredUrl?: string;
   isLoading?: boolean;
   error?: string;
   isProcessing?: boolean;
+  onReportTypeChange?: (typeKey: string) => void;
+  onReportVersionChange?: (reportId: string) => void;
   onRetry?: () => void;
 }
 
@@ -25,16 +40,20 @@ export function ExperimentReportCard({
   experimentId,
   experimentExecutionId,
   attemptNumber,
-  report,
+  groups,
+  selection,
   structuredUrl,
   isLoading,
   error,
   isProcessing,
+  onReportTypeChange,
+  onReportVersionChange,
   onRetry,
 }: ExperimentReportCardProps) {
+  const report = selection?.report;
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-4">
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4">
         <div>
           <CardTitle className="text-base">Reports</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -42,27 +61,84 @@ export function ExperimentReportCard({
             <span className="font-mono">{experimentExecutionId}</span>
           </p>
         </div>
-        {report && (
-          <div className="flex items-center gap-2">
-            <ReportStatusBadge status={report.status} />
-            {structuredUrl && (
-              <Button variant="outline" size="sm" asChild>
-                <a href={structuredUrl} download>
-                  <Download className="mr-1 h-3.5 w-3.5" />
-                  Structured JSON
-                </a>
-              </Button>
-            )}
-            <Button variant="outline" size="sm" asChild>
-              <Link
-                to={`/reports/${report._id}?experimentId=${encodeURIComponent(experimentId)}&experimentExecutionId=${encodeURIComponent(experimentExecutionId)}`}
+        <div className="flex flex-wrap items-end justify-end gap-2">
+          {groups.length > 1 && selection && (
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-muted-foreground">
+                Report type
+              </label>
+              <Select
+                value={selection.group.key}
+                onValueChange={onReportTypeChange}
               >
-                <ExternalLink className="mr-1 h-3.5 w-3.5" />
-                Direct link
-              </Link>
-            </Button>
-          </div>
-        )}
+                <SelectTrigger
+                  aria-label="Report type"
+                  className="w-[220px]"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  {groups.map((group) => (
+                    <SelectItem key={group.key} value={group.key}>
+                      {group.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {selection && selection.group.reports.length > 1 && (
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-muted-foreground">
+                Version
+              </label>
+              <Select
+                value={report?._id}
+                onValueChange={onReportVersionChange}
+              >
+                <SelectTrigger
+                  aria-label="Report version"
+                  className="w-[220px]"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  {selection.group.reports.map((version, index) => (
+                    <SelectItem key={version._id} value={version._id}>
+                      Version {selection.group.reports.length - index} ·{" "}
+                      {index === 0 ? "Latest" : "Historical"} ·{" "}
+                      {formatDate(version.createdAt)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {report && (
+            <>
+              <Badge variant={selection?.isLatest ? "default" : "secondary"}>
+                {selection?.isLatest ? "Latest" : "Historical"}
+              </Badge>
+              <ReportStatusBadge status={report.status} />
+              {structuredUrl && (
+                <Button variant="outline" size="sm" asChild>
+                  <a href={structuredUrl} download>
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    Structured JSON
+                  </a>
+                </Button>
+              )}
+              <Button variant="outline" size="sm" asChild>
+                <Link
+                  to={`/reports/${report._id}?experimentId=${encodeURIComponent(experimentId)}&experimentExecutionId=${encodeURIComponent(experimentExecutionId)}`}
+                >
+                  <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                  Direct link
+                </Link>
+              </Button>
+            </>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         {isLoading ? (
