@@ -265,7 +265,10 @@ The Portal provides `/experiments`, `/experiments/new`, and
 configuration and expansion count and adds Experiment metadata. No selected
 scenario creates an empty Experiment; selecting a scenario reveals the run
 composition controls and creates the expanded run count. The Portal navigates
-to Experiment Detail after creation. Detail selects the current processing
+to Experiment Detail after creation. The Experiments list uses the shared
+`ListLayout`, `FilterRail`, `DataTable`, column customization, and cursor-aware
+`Pagination` interaction model while retaining Experiment-specific status,
+revision, attempt, and run-count columns. Detail selects the current processing
 attempt by default and supports direct historical links via `?executionId=`.
 A header attempt selector renders exactly one current or historical execution
 at a time, including its state, blockers, and a shared
