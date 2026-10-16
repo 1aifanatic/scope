@@ -25,12 +25,26 @@ export function bsonSize(value: object): number {
   return BSON.calculateObjectSize(value);
 }
 
-function payloadBudgetBytes(): number {
+export function experimentPayloadBudgetBytes(): number {
   return Math.floor(
     (EXPERIMENT_STORAGE_PROFILE.targetDocumentBytes -
       EXPERIMENT_STORAGE_PROFILE.metadataReserveBytes) *
       EXPERIMENT_STORAGE_PROFILE.loadFactor,
   );
+}
+
+export function assertExperimentRequestEntryBudget(
+  entry: ExperimentRequestState,
+): void {
+  const bytes = bsonSize({
+    position: Number.MAX_SAFE_INTEGER,
+    state: entry,
+  });
+  if (bytes > EXPERIMENT_STORAGE_PROFILE.maxRequestEntryBytes) {
+    throw new Error(
+      `Experiment request ${entry.requestId} is ${bytes} bytes; maximum is ${EXPERIMENT_STORAGE_PROFILE.maxRequestEntryBytes}`,
+    );
+  }
 }
 
 export function selectFixedPayloadLayout(input: {
@@ -49,15 +63,7 @@ export function selectFixedPayloadLayout(input: {
       throw new Error(`Duplicate experiment requestId '${entry.requestId}'`);
     }
     ids.add(entry.requestId);
-    const bytes = bsonSize({
-      position: Number.MAX_SAFE_INTEGER,
-      state: entry,
-    });
-    if (bytes > EXPERIMENT_STORAGE_PROFILE.maxRequestEntryBytes) {
-      throw new Error(
-        `Experiment request ${entry.requestId} is ${bytes} bytes; maximum is ${EXPERIMENT_STORAGE_PROFILE.maxRequestEntryBytes}`,
-      );
-    }
+    assertExperimentRequestEntryBudget(entry);
   }
 
   const inlineBytes = bsonSize(input.inlineDocument(entries));
@@ -76,7 +82,7 @@ export function selectFixedPayloadLayout(input: {
     throw new Error("An empty fixed payload must be stored inline");
   }
 
-  const budget = payloadBudgetBytes();
+  const budget = experimentPayloadBudgetBytes();
   const maxEntriesPerBucket = Math.max(
     1,
     Math.floor(

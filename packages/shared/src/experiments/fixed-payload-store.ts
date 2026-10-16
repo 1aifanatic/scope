@@ -3,11 +3,17 @@
 
 import type { Collection, Document } from "mongodb";
 import { z } from "zod";
-import { selectFixedPayloadLayout } from "./layout.js";
+import {
+  assertExperimentRequestEntryBudget,
+  bsonSize,
+  experimentPayloadBudgetBytes,
+  selectFixedPayloadLayout,
+} from "./layout.js";
 import {
   ExperimentRequestStateSchema,
 } from "./schemas.js";
 import {
+  assignExperimentRequestBucket,
   computeExperimentChunkId,
   fingerprintExperimentPayload,
 } from "./routing.js";
@@ -30,8 +36,11 @@ interface ExperimentChunkDocument {
   storageProfileVersion: typeof EXPERIMENT_STORAGE_PROFILE_VERSION;
   assignmentVersion: typeof EXPERIMENT_REQUEST_BUCKET_ASSIGNMENT_VERSION;
   payloadFingerprint: string;
+  version: number;
   entries: Array<{ position: number; state: ExperimentRequestState }>;
   createdAt: Date;
+  updatedAt: Date;
+  frozenAt?: Date;
 }
 
 const ExperimentChunkDocumentSchema = z
@@ -49,6 +58,7 @@ const ExperimentChunkDocumentSchema = z
       EXPERIMENT_REQUEST_BUCKET_ASSIGNMENT_VERSION,
     ),
     payloadFingerprint: z.string().min(1),
+    version: z.number().int().positive(),
     entries: z.array(
       z
         .object({
@@ -58,6 +68,8 @@ const ExperimentChunkDocumentSchema = z
         .strict(),
     ),
     createdAt: z.coerce.date(),
+    updatedAt: z.coerce.date(),
+    frozenAt: z.coerce.date().optional(),
   })
   .strict();
 
@@ -84,6 +96,7 @@ function sameChunk(
     left.storageProfileVersion === right.storageProfileVersion &&
     left.assignmentVersion === right.assignmentVersion &&
     left.payloadFingerprint === right.payloadFingerprint &&
+    left.version === right.version &&
     fingerprintExperimentPayload(left.entries) ===
       fingerprintExperimentPayload(right.entries)
   );
@@ -117,6 +130,7 @@ export class FixedPayloadStore {
           storage: "inline",
           entryCount: inlineEntries.length,
           payloadFingerprint,
+          payloadVersion: 1,
           entries: inlineEntries,
         }),
       chunkDocument: (chunkIndex, bucketCount, bucketEntries) =>
@@ -129,6 +143,7 @@ export class FixedPayloadStore {
             state,
           })),
           payloadFingerprint,
+          version: 1,
           createdAt: input.now ?? new Date(0),
         }),
     });
@@ -137,6 +152,7 @@ export class FixedPayloadStore {
         storage: "inline",
         entryCount: entries.length,
         payloadFingerprint,
+        payloadVersion: 1,
         entries,
       };
     }
@@ -152,6 +168,7 @@ export class FixedPayloadStore {
           state,
         })),
         payloadFingerprint,
+        version: 1,
         createdAt,
       }),
     );
@@ -167,6 +184,7 @@ export class FixedPayloadStore {
       storage: "chunked",
       entryCount: entries.length,
       payloadFingerprint,
+      payloadVersion: 1,
       assignmentVersion: EXPERIMENT_REQUEST_BUCKET_ASSIGNMENT_VERSION,
       bucketCount: layout.bucketCount,
       chunkIds: documents.map((document) => document._id),
@@ -220,6 +238,208 @@ export class FixedPayloadStore {
     await this.readRequests(identity, payload);
   }
 
+  async casUpdateRequests(input: {
+    identity: FixedPayloadIdentity;
+    payload: FixedPayload<ExperimentRequestState>;
+    entries: readonly ExperimentRequestState[];
+    now?: Date;
+  }): Promise<
+    | {
+        status: "applied";
+        payload: FixedPayload<ExperimentRequestState>;
+        updatedChunkIds: string[];
+      }
+    | { status: "stale"; updatedChunkIds: string[] }
+    | { status: "invariant"; message: string; updatedChunkIds: string[] }
+    | {
+        status: "partial-failure";
+        message: string;
+        updatedChunkIds: string[];
+      }
+  > {
+    let entries: ExperimentRequestState[];
+    try {
+      entries = input.entries.map((entry) => {
+        const parsed = ExperimentRequestStateSchema.parse(entry);
+        assertExperimentRequestEntryBudget(parsed);
+        return parsed;
+      });
+      if (entries.length !== input.payload.entryCount) {
+        return {
+          status: "invariant",
+          message: "Request-state update cannot change entry count",
+          updatedChunkIds: [],
+        };
+      }
+    } catch (error) {
+      return {
+        status: "invariant",
+        message: error instanceof Error ? error.message : String(error),
+        updatedChunkIds: [],
+      };
+    }
+
+    const nextFingerprint = fingerprintExperimentPayload(entries);
+    const nextVersion = input.payload.payloadVersion + 1;
+    if (input.payload.storage === "inline") {
+      return {
+        status: "applied",
+        payload: {
+          ...input.payload,
+          payloadFingerprint: nextFingerprint,
+          payloadVersion: nextVersion,
+          entries,
+        },
+        updatedChunkIds: [],
+      };
+    }
+    const chunkedPayload = input.payload;
+
+    const positionedBuckets = Array.from(
+      { length: chunkedPayload.bucketCount },
+      () =>
+        [] as Array<{ position: number; state: ExperimentRequestState }>,
+    );
+    entries.forEach((state, position) => {
+      positionedBuckets[
+        assignExperimentRequestBucket(state.requestId, chunkedPayload.bucketCount)
+      ]!.push({ position, state });
+    });
+    const expectedChunkIds = positionedBuckets.map((_entries, chunkIndex) =>
+      computeExperimentChunkId({
+        ...input.identity,
+        kind: "requests",
+        chunkIndex,
+      }),
+    );
+    if (
+      expectedChunkIds.length !== chunkedPayload.chunkIds.length ||
+      expectedChunkIds.some(
+        (chunkId, index) => chunkId !== chunkedPayload.chunkIds[index],
+      )
+    ) {
+      return {
+        status: "invariant",
+        message: "Chunk topology does not match the immutable ownership tuple",
+        updatedChunkIds: [],
+      };
+    }
+
+    const now = input.now ?? new Date();
+    const desired = positionedBuckets.map((bucketEntries, chunkIndex) =>
+      this.chunkDocument({
+        identity: input.identity,
+        chunkIndex,
+        bucketCount: chunkedPayload.bucketCount,
+        entries: bucketEntries,
+        payloadFingerprint: nextFingerprint,
+        version: nextVersion,
+        createdAt: now,
+      }),
+    );
+    const budget = experimentPayloadBudgetBytes();
+    if (
+      desired.some(
+        (document) =>
+          bsonSize(document) > budget,
+      )
+    ) {
+      return {
+        status: "invariant",
+        message:
+          "Projection update exceeds the existing fixed bucket BSON budget",
+        updatedChunkIds: [],
+      };
+    }
+
+    const updatedChunkIds: string[] = [];
+    for (const document of desired) {
+      try {
+        const result = await this.chunks.updateOne(
+          {
+            _id: document._id,
+            projectId: input.identity.projectId,
+            experimentId: input.identity.experimentId,
+            kind: "requests",
+            ownerId: input.identity.ownerId,
+            generation: input.identity.generation,
+            chunkIndex: document.chunkIndex,
+            bucketCount: chunkedPayload.bucketCount,
+            assignmentVersion: chunkedPayload.assignmentVersion,
+            payloadFingerprint: chunkedPayload.payloadFingerprint,
+            version: chunkedPayload.payloadVersion,
+            frozenAt: { $exists: false },
+          } as Document,
+          {
+            $set: {
+              entries: document.entries,
+              payloadFingerprint: nextFingerprint,
+              version: nextVersion,
+              updatedAt: now,
+            },
+          } as Document,
+        );
+        if (result.modifiedCount === 1) {
+          updatedChunkIds.push(document._id);
+          continue;
+        }
+        const raw: unknown = await this.chunks.findOne({
+          _id: document._id,
+        } as Document);
+        if (!raw) {
+          return {
+            status: updatedChunkIds.length > 0 ? "partial-failure" : "invariant",
+            message: `Missing experiment chunk ${document._id}`,
+            updatedChunkIds,
+          };
+        }
+        const actual = ExperimentChunkDocumentSchema.parse(
+          raw,
+        ) as ExperimentChunkDocument;
+        if (
+          actual.version === nextVersion &&
+          actual.payloadFingerprint === nextFingerprint &&
+          sameChunk(actual, document)
+        ) {
+          updatedChunkIds.push(document._id);
+          continue;
+        }
+        try {
+          this.assertIdentity(actual, input.identity, chunkedPayload);
+        } catch (error) {
+          return {
+            status: updatedChunkIds.length > 0 ? "partial-failure" : "invariant",
+            message: error instanceof Error ? error.message : String(error),
+            updatedChunkIds,
+          };
+        }
+        if (updatedChunkIds.length > 0) {
+          return {
+            status: "partial-failure",
+            message: `Chunk ${document._id} lost its CAS`,
+            updatedChunkIds,
+          };
+        }
+        return { status: "stale", updatedChunkIds };
+      } catch (error) {
+        return {
+          status: "partial-failure",
+          message: error instanceof Error ? error.message : String(error),
+          updatedChunkIds,
+        };
+      }
+    }
+    return {
+      status: "applied",
+      payload: {
+        ...chunkedPayload,
+        payloadFingerprint: nextFingerprint,
+        payloadVersion: nextVersion,
+      },
+      updatedChunkIds,
+    };
+  }
+
   async discardUnpublished(
     payload: FixedPayload<ExperimentRequestState>,
   ): Promise<number> {
@@ -236,6 +456,7 @@ export class FixedPayloadStore {
     bucketCount: number;
     entries: Array<{ position: number; state: ExperimentRequestState }>;
     payloadFingerprint: string;
+    version: number;
     createdAt: Date;
   }): ExperimentChunkDocument {
     return {
@@ -251,8 +472,10 @@ export class FixedPayloadStore {
       storageProfileVersion: EXPERIMENT_STORAGE_PROFILE_VERSION,
       assignmentVersion: EXPERIMENT_REQUEST_BUCKET_ASSIGNMENT_VERSION,
       payloadFingerprint: input.payloadFingerprint,
+      version: input.version,
       entries: input.entries,
       createdAt: input.createdAt,
+      updatedAt: input.createdAt,
     };
   }
 
@@ -297,7 +520,8 @@ export class FixedPayloadStore {
       document.generation !== identity.generation ||
       document.bucketCount !== payload.bucketCount ||
       document.assignmentVersion !== payload.assignmentVersion ||
-      document.payloadFingerprint !== payload.payloadFingerprint
+      document.payloadFingerprint !== payload.payloadFingerprint ||
+      document.version !== payload.payloadVersion
     ) {
       throw new Error(`Experiment chunk ${document._id} identity mismatch`);
     }

@@ -12,6 +12,7 @@ export interface InlineFixedPayload<T> {
   storage: "inline";
   entryCount: number;
   payloadFingerprint: string;
+  payloadVersion: number;
   entries: T[];
 }
 
@@ -19,6 +20,7 @@ export interface ChunkedFixedPayload<T> {
   storage: "chunked";
   entryCount: number;
   payloadFingerprint: string;
+  payloadVersion: number;
   assignmentVersion: typeof EXPERIMENT_REQUEST_BUCKET_ASSIGNMENT_VERSION;
   bucketCount: number;
   chunkIds: string[];
@@ -101,6 +103,13 @@ export interface ExperimentRolloverClaim {
   claimedAt: Date;
 }
 
+export interface ExperimentRequestStateUpdateClaim {
+  updateId: string;
+  expectedPayloadFingerprint: string;
+  nextPayloadFingerprint: string;
+  claimedAt: Date;
+}
+
 export interface ExperimentExecution {
   experimentExecutionId: string;
   attemptNumber: number;
@@ -119,6 +128,7 @@ export interface ExperimentExecution {
   supersededAt?: Date;
   supersededByExperimentExecutionId?: string;
   supersededReason?: "rollover" | "retry";
+  requestStateUpdate?: ExperimentRequestStateUpdateClaim;
   rollover?: ExperimentRolloverClaim;
 }
 
@@ -150,3 +160,29 @@ export interface ExperimentPage {
   experiments: ExperimentDocument[];
   nextCursor?: string;
 }
+
+export type ExperimentRequestStateUpdateResult =
+  | {
+      status: "applied";
+      experiment: ExperimentDocument;
+      requests: ExperimentRequestState[];
+    }
+  | {
+      status: "stale";
+      reason: "experiment" | "execution" | "version" | "frozen";
+    }
+  | {
+      status: "contention";
+      activeUpdateId?: string;
+    }
+  | {
+      status: "invariant";
+      message: string;
+    }
+  | {
+      status: "partial-failure";
+      updateId: string;
+      updatedChunkIds: string[];
+      message: string;
+      retryable: true;
+    };

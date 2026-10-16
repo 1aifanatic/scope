@@ -64,6 +64,7 @@ describe("experiment schemas", () => {
             storage: "inline",
             entryCount: 0,
             payloadFingerprint: "f",
+            payloadVersion: 1,
             entries: [],
           },
           vectorFingerprint: "v",

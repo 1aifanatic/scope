@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { createHash } from "node:crypto";
+import type { ExperimentRequestState } from "./types.js";
 
 const REQUEST_BUCKET_HASH_PREFIX = "experiment-request-bucket:v1\0";
 
@@ -48,4 +49,12 @@ export function fingerprintExperimentPayload(value: unknown): string {
   return createHash("sha256")
     .update(JSON.stringify(value), "utf8")
     .digest("base64url");
+}
+
+export function fingerprintExperimentRequestVector(
+  requests: readonly Pick<ExperimentRequestState, "requestId" | "runId">[],
+): string {
+  return fingerprintExperimentPayload(
+    requests.map(({ requestId, runId }) => ({ requestId, runId })),
+  );
 }

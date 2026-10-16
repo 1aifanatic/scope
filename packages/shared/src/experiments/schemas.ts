@@ -83,6 +83,7 @@ export const ExperimentFixedRequestPayloadSchema = z.discriminatedUnion(
         storage: z.literal("inline"),
         entryCount: z.number().int().nonnegative(),
         payloadFingerprint: IdSchema,
+        payloadVersion: z.number().int().positive(),
         entries: z.array(ExperimentRequestStateSchema),
       })
       .strict()
@@ -94,6 +95,7 @@ export const ExperimentFixedRequestPayloadSchema = z.discriminatedUnion(
         storage: z.literal("chunked"),
         entryCount: z.number().int().positive(),
         payloadFingerprint: IdSchema,
+        payloadVersion: z.number().int().positive(),
         assignmentVersion: z.literal(
           EXPERIMENT_REQUEST_BUCKET_ASSIGNMENT_VERSION,
         ),
@@ -130,6 +132,15 @@ const ExperimentExecutionBaseSchema = z
     supersededAt: z.coerce.date().optional(),
     supersededByExperimentExecutionId: IdSchema.optional(),
     supersededReason: z.enum(["rollover", "retry"]).optional(),
+    requestStateUpdate: z
+      .object({
+        updateId: IdSchema,
+        expectedPayloadFingerprint: IdSchema,
+        nextPayloadFingerprint: IdSchema,
+        claimedAt: z.coerce.date(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

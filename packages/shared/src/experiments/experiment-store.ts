@@ -11,7 +11,10 @@ import {
   ExperimentRequestStateSchema,
   ExperimentRevisionSchema,
 } from "./schemas.js";
-import { fingerprintExperimentPayload } from "./routing.js";
+import {
+  fingerprintExperimentPayload,
+  fingerprintExperimentRequestVector,
+} from "./routing.js";
 import {
   EXPERIMENT_STORAGE_PROFILE_VERSION,
   type ExperimentDocument,
@@ -21,6 +24,7 @@ import {
   type ExperimentMetadata,
   type ExperimentPage,
   type ExperimentRequestState,
+  type ExperimentRequestStateUpdateResult,
   type ExperimentRevision,
   type FixedPayload,
 } from "./types.js";
@@ -128,7 +132,7 @@ export class ExperimentStore {
         attemptNumber: 1,
         version: 1,
         requests: payload,
-        vectorFingerprint: fingerprintExperimentPayload(requests),
+        vectorFingerprint: fingerprintExperimentRequestVector(requests),
         handlerSummary: input.handlerSummary ?? {},
         blocking: input.blocking ?? [],
         createdAt: now,
@@ -409,6 +413,7 @@ export class ExperimentStore {
         "execution.version": input.expectedExecutionVersion,
         "execution.frozenAt": { $exists: false },
         "execution.rollover": { $exists: false },
+        "execution.requestStateUpdate": { $exists: false },
       } as Document,
       {
         $set: {
@@ -421,6 +426,244 @@ export class ExperimentStore {
       { returnDocument: "after" },
     );
     return updated ? parseExperiment(updated) : null;
+  }
+
+  async casUpdateRequestStates(input: {
+    projectId: string;
+    experimentId: string;
+    experimentExecutionId: string;
+    expectedExecutionVersion: number;
+    updateId: string;
+    requests: readonly ExperimentRequestState[];
+    now?: Date;
+  }): Promise<ExperimentRequestStateUpdateResult> {
+    if (input.updateId.trim().length === 0 || input.updateId.length > 200) {
+      return {
+        status: "invariant",
+        message: "Request-state updateId must contain 1-200 characters",
+      };
+    }
+    let requests: ExperimentRequestState[];
+    try {
+      requests = input.requests.map((request) =>
+        ExperimentRequestStateSchema.parse(request),
+      ) as ExperimentRequestState[];
+    } catch (error) {
+      return {
+        status: "invariant",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+    if (
+      new Set(requests.map((request) => request.requestId)).size !==
+      requests.length
+    ) {
+      return {
+        status: "invariant",
+        message: "Request-state update contains duplicate request ids",
+      };
+    }
+    const nextPayloadFingerprint = fingerprintExperimentPayload(requests);
+    const nextVectorFingerprint =
+      fingerprintExperimentRequestVector(requests);
+    let experiment = await this.getRaw(input.projectId, input.experimentId);
+    if (!experiment) return { status: "stale", reason: "experiment" };
+    if (
+      experiment.execution.experimentExecutionId !==
+      input.experimentExecutionId
+    ) {
+      return { status: "stale", reason: "execution" };
+    }
+    if (experiment.execution.frozenAt) {
+      return { status: "stale", reason: "frozen" };
+    }
+    if (
+      experiment.execution.vectorFingerprint !== nextVectorFingerprint ||
+      experiment.execution.requests.entryCount !== requests.length
+    ) {
+      return {
+        status: "invariant",
+        message:
+          "Request-state update cannot change the immutable request/run vector",
+      };
+    }
+
+    const activeClaim = experiment.execution.requestStateUpdate;
+    if (activeClaim) {
+      if (activeClaim.updateId !== input.updateId) {
+        return {
+          status: "contention",
+          activeUpdateId: activeClaim.updateId,
+        };
+      }
+      if (
+        activeClaim.nextPayloadFingerprint !== nextPayloadFingerprint ||
+        activeClaim.expectedPayloadFingerprint !==
+          experiment.execution.requests.payloadFingerprint
+      ) {
+        return {
+          status: "invariant",
+          message: "Retried request-state update does not match its claim",
+        };
+      }
+      if (
+        experiment.execution.version !==
+        input.expectedExecutionVersion + 1
+      ) {
+        return { status: "stale", reason: "version" };
+      }
+    } else {
+      if (
+        experiment.execution.version !== input.expectedExecutionVersion
+      ) {
+        return { status: "stale", reason: "version" };
+      }
+      const claimedAt = input.now ?? new Date();
+      let claimed: ExperimentDocument | null;
+      try {
+        claimed = await this.collections.experiments.findOneAndUpdate(
+          {
+            _id: input.experimentId,
+            projectId: input.projectId,
+            "execution.experimentExecutionId":
+              input.experimentExecutionId,
+            "execution.version": input.expectedExecutionVersion,
+            "execution.frozenAt": { $exists: false },
+            "execution.rollover": { $exists: false },
+            "execution.requestStateUpdate": { $exists: false },
+          } as Document,
+          {
+            $set: {
+              "execution.requestStateUpdate": {
+                updateId: input.updateId,
+                expectedPayloadFingerprint:
+                  experiment.execution.requests.payloadFingerprint,
+                nextPayloadFingerprint,
+                claimedAt,
+              },
+              "execution.updatedAt": claimedAt,
+              updatedAt: claimedAt,
+            },
+            $inc: { "execution.version": 1, stateVersion: 1 },
+          } as Document,
+          { returnDocument: "after" },
+        );
+      } catch (error) {
+        return {
+          status: "partial-failure",
+          updateId: input.updateId,
+          updatedChunkIds: [],
+          message: error instanceof Error ? error.message : String(error),
+          retryable: true,
+        };
+      }
+      if (!claimed) {
+        const raced = await this.getRaw(
+          input.projectId,
+          input.experimentId,
+        );
+        if (raced?.execution.frozenAt) {
+          return { status: "stale", reason: "frozen" };
+        }
+        if (raced?.execution.requestStateUpdate) {
+          return {
+            status: "contention",
+            activeUpdateId:
+              raced.execution.requestStateUpdate.updateId,
+          };
+        }
+        return { status: "stale", reason: "version" };
+      }
+      experiment = parseExperiment(claimed);
+    }
+
+    const payloadResult = await this.payloads.casUpdateRequests({
+      identity: this.executionIdentity(experiment),
+      payload: experiment.execution.requests,
+      entries: requests,
+      now: input.now,
+    });
+    if (payloadResult.status !== "applied") {
+      if (
+        payloadResult.status !== "partial-failure" &&
+        payloadResult.updatedChunkIds.length === 0
+      ) {
+        try {
+          await this.abortRequestStateUpdate(experiment, input.updateId);
+        } catch (error) {
+          return {
+            status: "partial-failure",
+            updateId: input.updateId,
+            updatedChunkIds: [],
+            message: error instanceof Error ? error.message : String(error),
+            retryable: true,
+          };
+        }
+      }
+      if (payloadResult.status === "invariant") {
+        return {
+          status: "invariant",
+          message: payloadResult.message,
+        };
+      }
+      if (payloadResult.status === "stale") {
+        return { status: "stale", reason: "version" };
+      }
+      return {
+        status: "partial-failure",
+        updateId: input.updateId,
+        updatedChunkIds: payloadResult.updatedChunkIds,
+        message: payloadResult.message,
+        retryable: true,
+      };
+    }
+
+    const now = input.now ?? new Date();
+    try {
+      const finalized = await this.collections.experiments.findOneAndUpdate(
+        {
+          _id: input.experimentId,
+          projectId: input.projectId,
+          "execution.experimentExecutionId":
+            input.experimentExecutionId,
+          "execution.version": input.expectedExecutionVersion + 1,
+          "execution.frozenAt": { $exists: false },
+          "execution.requestStateUpdate.updateId": input.updateId,
+        } as Document,
+        {
+          $set: {
+            "execution.requests": payloadResult.payload,
+            "execution.updatedAt": now,
+            updatedAt: now,
+          },
+          $unset: { "execution.requestStateUpdate": "" },
+          $inc: { "execution.version": 1, stateVersion: 1 },
+        } as Document,
+        { returnDocument: "after" },
+      );
+      if (!finalized) {
+        return {
+          status: "partial-failure",
+          updateId: input.updateId,
+          updatedChunkIds: payloadResult.updatedChunkIds,
+          message: "Request-state payload updated but root publication CAS failed",
+          retryable: true,
+        };
+      }
+      return {
+        status: "applied",
+        experiment: parseExperiment(finalized),
+        requests,
+      };
+    } catch (error) {
+      return {
+        status: "partial-failure",
+        updateId: input.updateId,
+        updatedChunkIds: payloadResult.updatedChunkIds,
+        message: error instanceof Error ? error.message : String(error),
+        retryable: true,
+      };
+    }
   }
 
   async archiveCurrent(input: {
@@ -631,7 +874,7 @@ export class ExperimentStore {
       attemptNumber: current.attemptNumber + 1,
       version: 1,
       requests,
-      vectorFingerprint: fingerprintExperimentPayload(entries),
+      vectorFingerprint: fingerprintExperimentRequestVector(entries),
       handlerSummary: {},
       blocking: [],
       createdAt: now,
@@ -685,5 +928,26 @@ export class ExperimentStore {
       );
     }
     return persisted;
+  }
+
+  private async abortRequestStateUpdate(
+    experiment: ExperimentDocument,
+    updateId: string,
+  ): Promise<void> {
+    await this.collections.experiments.updateOne(
+      {
+        _id: experiment.experimentId,
+        projectId: experiment.projectId,
+        "execution.experimentExecutionId":
+          experiment.execution.experimentExecutionId,
+        "execution.version": experiment.execution.version,
+        "execution.requestStateUpdate.updateId": updateId,
+      } as Document,
+      {
+        $unset: { "execution.requestStateUpdate": "" },
+        $set: { updatedAt: new Date() },
+        $inc: { stateVersion: 1 },
+      } as Document,
+    );
   }
 }
