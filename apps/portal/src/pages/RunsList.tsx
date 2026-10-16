@@ -4,7 +4,7 @@
 import { useMemo, useState, useEffect, useCallback, Fragment, type Key, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams, useSearchParams } from "react-router-dom";
-import { Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow, ArrowUpDown, FileText, Download, Lock, Eye, FlaskConical, MoveRight } from "lucide-react";
+import { Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow, ArrowUpDown, FileText, Download, Lock, Eye } from "lucide-react";
 import { FaLinux } from "react-icons/fa";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -56,6 +56,7 @@ import { useStrictAgentCapabilities } from "@/hooks/useStrictAgentCapabilities";
 import { useModelCapabilities, ModelSelectItems } from "@/components/ReasoningEffortSelect";
 import { formatDate, formatId, formatDuration, truncate, cn } from "@/lib/utils";
 import { getExistingRunMembershipEligibility } from "@/lib/experiment-membership";
+import { ExperimentMembershipActions } from "@/components/ExperimentMembershipActions";
 import { isAgentAvailable, isAgentVersionAvailable, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, RunStatus, RunOutcome, IterationOp, BulkResubmitOverrides, RunSortField, RunFacetBucket } from "@/types";
 import { buildRunWorkerFilterOptions } from "./run-worker-filter-options";
@@ -2218,33 +2219,13 @@ export function RunsList() {
           </Button>
 
           <BulkGroupLabel>Runs</BulkGroupLabel>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            disabled={isBusy || !experimentMembershipEligibility.eligible}
-            onClick={() => setCreateExperimentDialogOpen(true)}
-            title={experimentMembershipEligibility.reason ?? "Create an Experiment from selected standalone runs"}
-          >
-            <FlaskConical className="h-3.5 w-3.5" /> Create experiment
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            disabled={isBusy || !experimentMembershipEligibility.eligible}
-            onClick={() => setMoveExperimentDialogOpen(true)}
-            title={experimentMembershipEligibility.reason ?? "Move selected standalone runs to an Experiment"}
-          >
-            <MoveRight className="h-3.5 w-3.5" /> Move to experiment
-          </Button>
-          {!experimentMembershipEligibility.eligible &&
-            experimentMembershipEligibility.reason &&
-            selectedIds.size > 0 && (
-              <span className="max-w-64 text-xs text-muted-foreground">
-                {experimentMembershipEligibility.reason}
-              </span>
-            )}
+          <ExperimentMembershipActions
+            eligibility={experimentMembershipEligibility}
+            selectedCount={selectedIds.size}
+            busy={isBusy}
+            onCreate={() => setCreateExperimentDialogOpen(true)}
+            onMove={() => setMoveExperimentDialogOpen(true)}
+          />
           <Button
             variant="outline"
             size="sm"
