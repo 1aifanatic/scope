@@ -1056,7 +1056,7 @@ export function SubmitRun({
               value={task}
               onChange={(e) => setTask(e.target.value)}
               rows={3}
-              required
+              required={!(mode === "experiment" && createEmptyExperiment)}
             />
             <div className="flex items-center justify-between">
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
