@@ -298,6 +298,64 @@ export class ExperimentMembershipCoordinator {
     return this.repair(input.projectId, input.experimentId);
   }
 
+  async add(input: {
+    projectId: string;
+    experimentId: string;
+    expectedExperimentRevisionId: string;
+    requestIds: readonly string[];
+  }): Promise<ReplaceMembershipResult> {
+    const selected = uniqueCanonicalRequestIds(input.requestIds);
+    const current = await this.currentMembership(input);
+    const currentIds = new Set(current.requestIds);
+    const conflicts = selected
+      .filter((requestId) => currentIds.has(requestId))
+      .map((requestId) => ({
+        requestId,
+        experimentId: input.experimentId,
+      }));
+    if (conflicts.length > 0) {
+      throw new ExperimentMembershipError(
+        "One or more requests are already members of the target Experiment",
+        409,
+        "request-selection-conflict",
+        conflicts,
+      );
+    }
+    return this.replace({
+      ...input,
+      requestIds: [...current.requestIds, ...selected],
+    });
+  }
+
+  async remove(input: {
+    projectId: string;
+    experimentId: string;
+    expectedExperimentRevisionId: string;
+    requestIds: readonly string[];
+  }): Promise<ReplaceMembershipResult> {
+    const selected = uniqueCanonicalRequestIds(input.requestIds);
+    const current = await this.currentMembership(input);
+    const selectedIds = new Set(selected);
+    const currentIds = new Set(current.requestIds);
+    const conflicts = selected
+      .filter((requestId) => !currentIds.has(requestId))
+      .map((requestId) => ({ requestId }));
+    if (conflicts.length > 0) {
+      throw new ExperimentMembershipError(
+        "One or more requests are not current members of the target Experiment",
+        409,
+        "request-selection-conflict",
+        conflicts,
+      );
+    }
+    return this.replace({
+      ...input,
+      requestIds: current.requestIds.filter(
+        (requestId) => !selectedIds.has(requestId),
+      ),
+    });
+  }
+
   async repair(
     projectId: string,
     experimentId: string,
@@ -509,5 +567,40 @@ export class ExperimentMembershipCoordinator {
       );
     }
     return byId;
+  }
+
+  private async currentMembership(input: {
+    projectId: string;
+    experimentId: string;
+    expectedExperimentRevisionId: string;
+  }): Promise<{ requestIds: string[] }> {
+    const current = await this.store.get(input.projectId, input.experimentId);
+    if (!current) {
+      throw new ExperimentMembershipError(
+        `Experiment ${input.experimentId} was not found`,
+        404,
+        "experiment-not-found",
+      );
+    }
+    if (
+      current.revision.experimentRevisionId !==
+      input.expectedExperimentRevisionId
+    ) {
+      throw new ExperimentMembershipError(
+        `Experiment revision is stale; current revision is ${current.revision.experimentRevisionId}`,
+        409,
+        "stale-experiment-revision",
+      );
+    }
+    const requests =
+      (await this.store.readExecutionRequests({
+        projectId: input.projectId,
+        experimentId: input.experimentId,
+        experimentExecutionId:
+          current.execution.experimentExecutionId,
+      })) ?? [];
+    return {
+      requestIds: requests.map(({ requestId }) => requestId),
+    };
   }
 }
