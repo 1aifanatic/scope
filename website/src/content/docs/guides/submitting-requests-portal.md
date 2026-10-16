@@ -33,8 +33,9 @@ sections above.
 **New Run** remains the permanent path for one request, whether it
 uses a profile or inline configuration. For named multi-run
 composition, open **Experiments** and select **New Experiment**. The
-Experiment form reuses this run configuration and adds metadata,
-composition preview, and an explicit empty option.
+Experiment form starts with metadata and scenario selection. Leaving
+the scenario empty creates an empty Experiment; selecting a scenario
+reveals the run configuration and an exact expanded-run count.
 
 ## 1. Write the task prompt
 

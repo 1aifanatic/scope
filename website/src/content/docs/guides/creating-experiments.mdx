@@ -14,8 +14,11 @@ supported workflow.
 
 ## Create from the Portal
 
-Open **Experiments**, then select **New Experiment**. The form reuses
-the same run configuration as **New Run**:
+Open **Experiments**, then select **New Experiment**. Add the
+Experiment name and optional description and tags first. With no
+scenario selected, the Portal creates an empty Experiment with zero
+runs. Enter or select a task to choose a scenario; the Portal then
+reveals the run-composition fields used by **New Run**:
 
 - task and criteria;
 - inline agent configuration or a saved profile;
@@ -23,16 +26,13 @@ the same run configuration as **New Run**:
 - MCP servers, skills, extensions, resources, and `AGENTS.md`;
 - gates, observations, model, reasoning effort, and agent version.
 
-The composition preview shows the expanded run count before creation.
-Add a name and optional description and tags. After creation, the
-Portal opens Experiment Detail, where you can inspect the current
-execution, linked runs, blockers, handler progress, and execution
-history.
-
-Select **Create explicitly empty** to create metadata without a
-request configuration. Empty Experiments have zero members and can be
-used as durable placeholders. This option cannot be combined with a
-request in the REST API.
+The primary action states the exact outcome: **Create empty
+experiment** while no scenario is selected, or **Create experiment
+with N runs** after the form can expand a complete run composition.
+After creation, the Portal opens Experiment Detail, where you can
+inspect the current execution, linked runs, blockers, handler
+progress, and execution history. Empty Experiments remain useful as
+durable placeholders.
 
 ## Create from the CLI
 
@@ -97,12 +97,13 @@ POST /api/v1/experiments?projectId=project-123&worker=coder-acp-copilot
 Content-Type: application/json
 
 {
+  "mode": "compose",
   "metadata": {
     "name": "Copilot authentication benchmark",
     "description": "Five independent occurrences",
     "tags": ["auth", "nightly"]
   },
-  "request": {
+  "requests": [{
     "scenario": {
       "task": "Add authentication to the API.",
       "criteria": ["auth-works", "auth-tests"]
@@ -110,49 +111,46 @@ Content-Type: application/json
     "model": "gpt-5.4",
     "maxIterations": 10,
     "count": 5
-  }
+  }]
 }
 ```
 
-The response is the public Experiment view and includes
-`createdRequestIds`. The view contains Experiment identity and
-metadata, its revision, the current execution, readiness and
-blockers, handler progress and supersession information, the current
-report when available, and linked request summaries when they fit in
-the response.
+The response contains the public Experiment view in `experiment` and
+the created request identifiers in `requestIds`.
 
-Create an empty Experiment by sending metadata with `empty: true` and
-no `request`:
+Create an empty Experiment with the explicit `empty` mode and an empty
+request vector:
 
 ```http
 POST /api/v1/experiments?projectId=project-123
 Content-Type: application/json
 
 {
+  "mode": "empty",
   "metadata": {
     "name": "Reserved nightly benchmark"
   },
-  "empty": true
+  "requests": []
 }
 ```
 
 ## Composition field mapping
 
-The nested `request` uses the existing request-creation fields.
+Each entry in `requests` uses the existing request-creation fields.
 Composition controls move with that configuration; they are not
 Experiment metadata.
 
 | Run configuration | Experiment create location |
 | --- | --- |
-| `scenario` | `request.scenario` |
-| `model`, `reasoningEffort`, `maxIterations` | Same names under `request` |
-| `profileId` | `request.profileId` |
-| `profileVariations` | `request.profileVariations` |
-| `count` | `request.count` |
-| `mcpServers`, `skills`, `extensions` | Same names under `request` |
-| `resources`, `codebase` | Same names under `request` |
-| `agentVersion`, `agentsMd` | Same names under `request` |
-| `gates`, `observations`, `priority` | Same names under `request` |
+| `scenario` | `requests[].scenario` |
+| `model`, `reasoningEffort`, `maxIterations` | Same names under `requests[]` |
+| `profileId` | `requests[].profileId` |
+| `profileVariations` | `requests[].profileVariations` |
+| `count` | `requests[].count` |
+| `mcpServers`, `skills`, `extensions` | Same names under `requests[]` |
+| `resources`, `codebase` | Same names under `requests[]` |
+| `agentVersion`, `agentsMd` | Same names under `requests[]` |
+| `gates`, `observations`, `priority` | Same names under `requests[]` |
 | `worker` query parameter | `worker` query parameter on `POST /experiments` |
 | — | `metadata.name` (required) |
 | — | `metadata.description`, `metadata.tags` (optional) |
