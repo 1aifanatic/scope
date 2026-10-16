@@ -59,6 +59,16 @@ export const ReportResponseSchema = z
     updatedAt: z.coerce.date().optional(),
     projectId: z.string(),
   })
+  .refine(
+    (report) =>
+      report.requestId !== undefined ||
+      (report.experimentId !== undefined &&
+        report.experimentExecutionId !== undefined),
+    {
+      message:
+        "Report must identify either a request or an exact Experiment execution",
+    },
+  )
   .openapi("ReportResponse");
 
 export const CreateReportInputSchema = z

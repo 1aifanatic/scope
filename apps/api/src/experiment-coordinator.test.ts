@@ -331,6 +331,8 @@ describe("ExperimentCoordinator", () => {
       vi.mocked(ExperimentStore.prototype.casUpdateRequestStates).mock
         .calls[0]?.[0].requests,
     ).toHaveLength(40);
+  });
+
   it.each([
     {
       name: "failed observations",

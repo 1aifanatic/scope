@@ -52,10 +52,10 @@ describe("parseHandlerDocument", () => {
     expect(() => parseHandlerDocument("nope")).toThrow(/mapping/);
   });
 
-  it("accepts the pp-readout submission handler contract", () => {
+  it("accepts the pp-readout Experiment handler contract", () => {
     const readout = {
       _id: "pp-readout",
-      type: "submission-handler",
+      type: "experiment-handler",
       version: 1,
       queue: "pp-readout-queue",
       selector: "readout",

@@ -248,7 +248,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
           : undefined;
       const docRunId = typeof (doc as any)?.run?._id === "string" ? (doc as any).run._id : undefined;
       const logRunId =
-        payloadRunId ?? payloadExperimentExecutionId ?? docRunId ?? documentId!;
+        payloadExperimentExecutionId ?? payloadRunId ?? docRunId ?? documentId!;
       runId = logRunId;
       // Capture this attempt's startedAt so the error-path failure write can
       // denormalize run.durationMs in a single $set (doc is out of scope there).

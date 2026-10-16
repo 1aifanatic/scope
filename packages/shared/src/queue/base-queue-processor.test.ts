@@ -207,8 +207,8 @@ describe("BaseQueueProcessor visibility heartbeat lifecycle", () => {
       protected override extractDocumentId(
         payload: Record<string, unknown>,
       ): string {
-        return typeof payload.submissionId === "string"
-          ? payload.submissionId
+        return typeof payload.experimentId === "string"
+          ? payload.experimentId
           : super.extractDocumentId(payload);
       }
 
@@ -248,22 +248,22 @@ describe("BaseQueueProcessor visibility heartbeat lifecycle", () => {
     expect(updateMessage).not.toHaveBeenCalled();
   });
 
-  it("persists submission worker logs under the exact submission attempt", async () => {
+  it("persists Experiment worker logs under the exact execution", async () => {
     const { proc, logPublisher } = setupProcessor(async (_heartbeat, log) => {
-      await log("info", "Submission processing started");
+      await log("info", "Experiment processing started");
     });
     await (proc as any).processMessage(
       makeMessage({
-        submissionId: "doc-1",
-        submissionRunId: "submission-run-1",
+        experimentId: "doc-1",
+        experimentExecutionId: "experiment-execution-1",
       }),
     );
 
     expect(logPublisher.publish).toHaveBeenCalledWith(
       "doc-1",
-      "submission-run-1",
+      "experiment-execution-1",
       "info",
-      "Submission processing started",
+      "Experiment processing started",
       undefined,
     );
   });
