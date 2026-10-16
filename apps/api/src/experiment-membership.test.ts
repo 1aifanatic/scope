@@ -5,6 +5,7 @@ import type { Collection } from "mongodb";
 import {
   EXPERIMENT_STORAGE_PROFILE_VERSION,
   ExperimentStore,
+  FixedPayloadStore,
   fingerprintExperimentPayload,
   type ExperimentDocument,
   type ExperimentExecutionHistoryDocument,
@@ -213,5 +214,85 @@ describe("ExperimentMembershipCoordinator complete-set operations", () => {
       attachedRequestIds: [],
       detachedRequestIds: [],
     });
+  });
+
+  it("aborts and replans once when a selected request retries before claim", async () => {
+    const current = experiment([request("request-1", "run-1")]);
+    current.execution.frozenAt = now;
+    current.execution.rollover = {
+      reason: "membership",
+      claimedAt: now,
+      nextRevision: {
+        ...current.revision,
+        experimentRevisionId: "revision-2",
+        revisionNumber: 2,
+        memberCount: 2,
+      },
+      nextExecution: {
+        ...current.execution,
+        experimentExecutionId: "execution-2",
+        requests: {
+          storage: "inline",
+          entryCount: 2,
+          payloadFingerprint: "next-payload",
+          payloadVersion: 1,
+          entries: [
+            request("request-1", "run-1"),
+            request("request-2", "run-old"),
+          ],
+        },
+      },
+    };
+    vi.spyOn(ExperimentStore.prototype, "get").mockResolvedValue(current);
+    vi.spyOn(
+      ExperimentStore.prototype,
+      "readExecutionRequests",
+    ).mockResolvedValue([request("request-1", "run-1")]);
+    vi.spyOn(
+      FixedPayloadStore.prototype,
+      "readRequests",
+    ).mockResolvedValue([
+      request("request-1", "run-1"),
+      request("request-2", "run-old"),
+    ]);
+    vi.spyOn(
+      ExperimentStore.prototype,
+      "abortMembershipReplacement",
+    ).mockResolvedValue(experiment([request("request-1", "run-1")]));
+    const updateMany = vi.fn().mockResolvedValue({ matchedCount: 1 });
+    const membership = new ExperimentMembershipCoordinator({
+      requests: {
+        updateOne: vi.fn().mockResolvedValue({ matchedCount: 0 }),
+        updateMany,
+        findOne: vi.fn().mockResolvedValue({
+          _id: "request-2",
+          projectId: "project-1",
+          run: { _id: "run-new" },
+        }),
+      } as unknown as Collection<RequestDocument>,
+      experiments: {} as Collection<ExperimentDocument>,
+      executions: {} as Collection<ExperimentExecutionHistoryDocument>,
+      chunks: {} as Collection,
+    });
+    const result = {
+      experiment: current,
+      attachedRequestIds: ["request-2"],
+      detachedRequestIds: [],
+    };
+    const replace = vi.spyOn(membership, "replace").mockResolvedValue(result);
+
+    await expect(
+      membership.repair("project-1", "experiment-1"),
+    ).resolves.toBe(result);
+    expect(replace).toHaveBeenCalledWith(
+      {
+        projectId: "project-1",
+        experimentId: "experiment-1",
+        expectedExperimentRevisionId: "revision-1",
+        requestIds: ["request-1", "request-2"],
+      },
+      false,
+    );
+    expect(updateMany).toHaveBeenCalledOnce();
   });
 });

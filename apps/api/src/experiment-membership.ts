@@ -206,7 +206,7 @@ export class ExperimentMembershipCoordinator {
     experimentId: string;
     expectedExperimentRevisionId: string;
     requestIds: readonly string[];
-  }): Promise<ReplaceMembershipResult> {
+  }, allowReplan = true): Promise<ReplaceMembershipResult> {
     const requestIds = uniqueCanonicalRequestIds(input.requestIds);
     const current = await this.store.get(input.projectId, input.experimentId);
     if (!current) {
@@ -327,7 +327,11 @@ export class ExperimentMembershipCoordinator {
           : undefined,
       );
     }
-    return this.repair(input.projectId, input.experimentId);
+    return this.repair(
+      input.projectId,
+      input.experimentId,
+      allowReplan,
+    );
   }
 
   async add(input: {
@@ -391,6 +395,7 @@ export class ExperimentMembershipCoordinator {
   async repair(
     projectId: string,
     experimentId: string,
+    allowReplan = true,
   ): Promise<ReplaceMembershipResult> {
     const experiment = await this.store.get(projectId, experimentId);
     const claim = experiment?.execution.rollover;
@@ -483,6 +488,33 @@ export class ExperimentMembershipCoordinator {
         experimentId,
         operationId,
       });
+      const aborted = await this.store.abortMembershipReplacement({
+        projectId,
+        experimentId,
+        expectedExperimentExecutionId:
+          experiment.execution.experimentExecutionId,
+        nextExperimentExecutionId:
+          claim.nextExecution.experimentExecutionId,
+        nextExperimentRevisionId: operationId,
+      });
+      if (
+        allowReplan &&
+        aborted &&
+        error instanceof ExperimentMembershipError &&
+        error.code === "request-membership-conflict" &&
+        error.conflicts?.every((conflict) => !conflict.experimentId)
+      ) {
+        return this.replace(
+          {
+            projectId,
+            experimentId,
+            expectedExperimentRevisionId:
+              aborted.revision.experimentRevisionId,
+            requestIds: [...nextIds],
+          },
+          false,
+        );
+      }
       throw error;
     }
 

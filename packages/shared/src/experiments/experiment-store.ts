@@ -918,10 +918,69 @@ export class ExperimentStore {
       } as Document,
       { returnDocument: "after" },
     );
-    if (!claimed) return null;
+    if (!claimed) {
+      await this.payloads.discardUnpublished(payload);
+      return null;
+    }
     return input.deferPublication
       ? parseExperiment(claimed)
       : this.repairRollover(input.projectId, input.experimentId);
+  }
+
+  async abortMembershipReplacement(input: {
+    projectId: string;
+    experimentId: string;
+    expectedExperimentExecutionId: string;
+    nextExperimentExecutionId: string;
+    nextExperimentRevisionId: string;
+    now?: Date;
+  }): Promise<ExperimentDocument | null> {
+    const experiment = await this.getRaw(input.projectId, input.experimentId);
+    const rollover = experiment?.execution.rollover;
+    if (
+      !experiment ||
+      rollover?.reason !== "membership" ||
+      rollover.nextRevision?.experimentRevisionId !==
+        input.nextExperimentRevisionId ||
+      rollover.nextExecution.experimentExecutionId !==
+        input.nextExperimentExecutionId ||
+      experiment.execution.experimentExecutionId !==
+        input.expectedExperimentExecutionId
+    ) {
+      return null;
+    }
+
+    const now = input.now ?? new Date();
+    const updated = await this.collections.experiments.findOneAndUpdate(
+      {
+        _id: input.experimentId,
+        projectId: input.projectId,
+        "execution.experimentExecutionId":
+          input.expectedExperimentExecutionId,
+        "execution.rollover.reason": "membership",
+        "execution.rollover.nextRevision.experimentRevisionId":
+          input.nextExperimentRevisionId,
+        "execution.rollover.nextExecution.experimentExecutionId":
+          input.nextExperimentExecutionId,
+      } as Document,
+      {
+        $set: {
+          "execution.updatedAt": now,
+          updatedAt: now,
+        },
+        $unset: {
+          "execution.frozenAt": "",
+          "execution.rollover": "",
+        },
+        $inc: { "execution.version": 1, stateVersion: 1 },
+      } as Document,
+      { returnDocument: "after" },
+    );
+    if (!updated) return null;
+    await this.payloads.discardUnpublished(
+      rollover.nextExecution.requests,
+    );
+    return parseExperiment(updated);
   }
 
   async discardStale(input: {

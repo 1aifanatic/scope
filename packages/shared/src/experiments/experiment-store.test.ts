@@ -182,6 +182,7 @@ function experiment(): ExperimentDocument {
 function chunkCollection() {
   const documents = new Map<string, Document>();
   return {
+    documents,
     async updateOne(
       filter: Document,
       update: { $setOnInsert?: Document; $set?: Document },
@@ -213,6 +214,13 @@ function chunkCollection() {
     },
     async findOne(filter: Document) {
       return documents.get(String(filter._id)) ?? null;
+    },
+    async deleteMany(filter: { _id: { $in: string[] } }) {
+      let deletedCount = 0;
+      for (const id of filter._id.$in) {
+        if (documents.delete(id)) deletedCount += 1;
+      }
+      return { deletedCount };
     },
   };
 }
@@ -444,6 +452,54 @@ describe("ExperimentStore CAS contracts", () => {
     expect(
       shrunk?.execution.rollover?.nextExecution.requests.storage,
     ).toBe("inline");
+  });
+
+  it("atomically aborts an unpublished membership claim and discards its chunks", async () => {
+    const experiments = atomicCollection(experiment());
+    const chunks = chunkCollection();
+    const store = new ExperimentStore({
+      experiments:
+        experiments as unknown as Collection<ExperimentDocument>,
+      executions:
+        historyCollection() as unknown as Collection<ExperimentExecutionHistoryDocument>,
+      chunks: chunks as unknown as Collection,
+    });
+    const nextRequests = requestVector(4_000);
+
+    const claimed = await store.replaceMembership({
+      projectId: "project-1",
+      experimentId: "experiment-1",
+      expectedExperimentRevisionId: "revision-1",
+      expectedRevisionNumber: 1,
+      expectedExperimentExecutionId: "execution-1",
+      expectedExecutionVersion: 1,
+      nextExperimentRevisionId: "revision-2",
+      nextExperimentExecutionId: "execution-2",
+      requests: nextRequests,
+      deferPublication: true,
+    });
+    const nextPayload = claimed?.execution.rollover?.nextExecution.requests;
+    expect(nextPayload?.storage).toBe("chunked");
+    expect(chunks.documents.size).toBeGreaterThan(0);
+
+    const aborted = await store.abortMembershipReplacement({
+      projectId: "project-1",
+      experimentId: "experiment-1",
+      expectedExperimentExecutionId: "execution-1",
+      nextExperimentExecutionId: "execution-2",
+      nextExperimentRevisionId: "revision-2",
+    });
+
+    expect(aborted).toMatchObject({
+      revision: { experimentRevisionId: "revision-1" },
+      execution: {
+        experimentExecutionId: "execution-1",
+        version: 3,
+      },
+    });
+    expect(aborted?.execution.rollover).toBeUndefined();
+    expect(aborted?.execution.frozenAt).toBeUndefined();
+    expect(chunks.documents.size).toBe(0);
   });
 
   it("allows exactly one winner in a writer-freezer race", async () => {
