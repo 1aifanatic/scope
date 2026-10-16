@@ -27,7 +27,7 @@ function consentStub() {
 	window.WcpConsent = {
 		consentCategories: { Analytics: 'Analytics' },
 		init(_language, placeholder, callback, onConsentChanged) {
-			placeholder.style.cssText = 'position:fixed;bottom:0;right:0;z-index:10000;background:white';
+			placeholder.style.cssText = 'background:white;color:black';
 			const accept = document.createElement('button');
 			accept.textContent = 'Accept analytics';
 			accept.onclick = () => {
@@ -128,7 +128,7 @@ test('analytics waits for consent and uses the Scope configuration', async ({ pa
 		instrumentationKey: 'd73f4c6d7bfd4f54ab769e2baaf3156b-3241346c-4fe3-4bd7-a8b6-7ca73da60140-7462',
 		disableCookiesUsage: true,
 		channelConfiguration: { eventsLimitInMem: 50 },
-		propertyConfiguration: { env: 'PROD' },
+		propertyConfiguration: { env: 'PROD', userConsented: true },
 		webAnalyticsConfiguration: {
 			urlCollectQuery: false,
 			urlCollectHash: false,
@@ -156,6 +156,16 @@ test('stored consent initializes once and can be withdrawn and granted again', a
 	expect(await page.evaluate(() => window.scopeAnalyticsTest.initializer?.())).toBe(false);
 	await page.getByRole('button', { name: 'Accept analytics' }).click();
 	await expect.poll(() => page.evaluate(() => window.scopeAnalyticsTest.configurations.length)).toBe(2);
+	expect(await page.evaluate(() => window.scopeAnalyticsTest.configurations)).toMatchObject([
+		{ propertyConfiguration: { userConsented: true } },
+		{ propertyConfiguration: { userConsented: true } },
+	]);
+
+	await page.goto('https://microsoft.github.io/scope/getting-started/access/');
+	await expect.poll(() => page.evaluate(() => window.scopeAnalyticsTest.configurations.length)).toBe(1);
+	expect(await page.evaluate(() => window.scopeAnalyticsTest.configurations[0])).toMatchObject({
+		propertyConfiguration: { userConsented: true },
+	});
 });
 
 test('consent UI follows Starlight theme changes', async ({ page }) => {
@@ -174,6 +184,49 @@ test('consent UI follows Starlight theme changes', async ({ page }) => {
 	await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, initialTheme);
 	await expect.poll(() => page.evaluate(() => window.scopeAnalyticsTest.appliedThemes)).toEqual([nextTheme, initialTheme]);
 });
+
+for (const path of ['/', '/introduction/what-is-scope/', '/community/articles-and-talks/', '/reference/api/']) {
+	test(`cookie banner stays above the header on ${path}`, async ({ page }) => {
+		await mockPublishedSite(page);
+		await page.goto(`https://microsoft.github.io/scope${path}`);
+		const banner = page.locator('#scope-cookie-banner');
+		await expect(banner.getByRole('button', { name: 'Accept analytics' })).toBeVisible();
+		expect(await page.evaluate(() => document.body.firstElementChild?.textContent?.trim())).toBe('Skip to content');
+		await page.keyboard.press('Tab');
+		await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();
+
+		const expectBannerLayout = async () => {
+			await expect.poll(() => page.evaluate(() => {
+				const banner = document.querySelector('#scope-cookie-banner')?.getBoundingClientRect();
+				const header = document.querySelector('header.header')?.getBoundingClientRect();
+				const main = document.querySelector('main')?.getBoundingClientRect();
+				return Boolean(banner && header && main && banner.height > 0 &&
+					Math.abs(banner.top) < 1 && Math.abs(header.top - banner.bottom) < 1 &&
+					main.top >= header.bottom - 1 &&
+					document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+			})).toBe(true);
+			const menu = page.locator('starlight-menu-button button');
+			if (await menu.isVisible()) {
+				const menuBox = await menu.boundingBox();
+				const headerBox = await page.locator('header.header').boundingBox();
+				expect(menuBox && headerBox && menuBox.y >= headerBox.y &&
+					menuBox.y + menuBox.height <= headerBox.y + headerBox.height).toBe(true);
+			}
+		};
+		await expectBannerLayout();
+		await banner.evaluate((element) => {
+			const message = document.createElement('p');
+			message.textContent = 'Review your optional cookie choices. '.repeat(10);
+			element.prepend(message);
+		});
+		await expectBannerLayout();
+
+		await banner.evaluate((element) => element.replaceChildren());
+		await expect.poll(() => page.locator('header.header').evaluate(
+			(element) => element.getBoundingClientRect().top,
+		)).toBe(0);
+	});
+}
 
 for (const options of [
 	{ globalPrivacyControl: true },
@@ -210,6 +263,11 @@ test('withdrawal while the SDK loads prevents initialization', async ({ page }) 
 	releaseSdk?.();
 	await page.waitForFunction(() => window.oneDS !== undefined);
 	expect(await page.evaluate(() => window.scopeAnalyticsTest.configurations)).toEqual([]);
+	await page.getByRole('button', { name: 'Accept analytics' }).click();
+	await expect.poll(() => page.evaluate(() => window.scopeAnalyticsTest.configurations.length)).toBe(1);
+	expect(await page.evaluate(() => window.scopeAnalyticsTest.configurations[0])).toMatchObject({
+		propertyConfiguration: { userConsented: true },
+	});
 });
 
 test('blocked consent scripts fail closed without breaking documentation', async ({ page }) => {

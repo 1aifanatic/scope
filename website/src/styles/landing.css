@@ -21,6 +21,9 @@
 	--scope-pass: #83dcb0;
 	--scope-fail: #ffa498;
 	--scope-shadow: 0 24px 70px -36px #0009;
+	--scope-header-height: 3.5rem;
+	--scope-cookie-banner-height: 0px;
+	--sl-nav-height: calc(var(--scope-header-height) + var(--scope-cookie-banner-height));
 }
 :root[data-theme='light'] {
 	--sl-color-accent-low: #eeedff;
@@ -40,8 +43,14 @@
 	--scope-shadow: 0 24px 70px -36px #30376240;
 }
 
+/* Keep Starlight's fixed navigation offsets aligned with the responsive consent banner. */
+header.header { --sl-nav-height: var(--scope-header-height); inset-block-start: var(--scope-cookie-banner-height); border-bottom-color: var(--scope-border); }
+starlight-menu-button button { top: calc(var(--scope-cookie-banner-height) + (var(--scope-header-height) - var(--sl-menu-button-size)) / 2); }
+#scope-cookie-banner { position: fixed; inset-block-start: 0; inset-inline: 0; z-index: calc(var(--sl-z-index-navbar) + 1); max-height: calc(100dvh - var(--scope-header-height)); overflow-y: auto; }
+@media (min-width: 50em) { :root { --scope-header-height: 4rem; } }
+@media print { :root { --scope-cookie-banner-height: 0px !important; } #scope-cookie-banner { display: none; } }
+
 /* Keep the reading experience native to Starlight, with shared brand accents. */
-header.header { border-bottom-color: var(--scope-border); }
 body:not(:has(.scope-home)) .sidebar-content a[aria-current='page'] { border-radius: 0.4rem; }
 body:not(:has(.scope-home)) .sl-markdown-content { line-height: 1.8; }
 body:not(:has(.scope-home)) .pagination-links a { border-radius: 0.75rem; }

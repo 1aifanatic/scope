@@ -264,8 +264,13 @@ local browser's consent choices; use **Manage cookies** to review them
 again after dismissing the banner.
 
 Microsoft WCP provides worldwide opt-in consent and a **Manage cookies**
-footer control. The consent placeholder is appended to the body so the
-existing skip link remains first. The banner follows Starlight's theme.
+footer control. The consent placeholder follows the skip link at the top
+of the body, keeping that link first in keyboard order. The banner sits
+above the fixed site header and follows Starlight's theme. Its measured
+height updates Starlight's navigation offsets as it wraps, resizes, or
+disappears, keeping the header, mobile menu, sidebars, and page content
+clear of the banner.
+
 The 1DS CDN script is requested only after explicit Analytics consent;
 implicit/non-required consent, Global Privacy Control, and Do Not Track
 do not enable analytics. Script or initialization failures log an error
@@ -282,6 +287,23 @@ cannot initialize it after withdrawal. Withdrawal pauses transmission
 channels before unloading, and telemetry initializers reject events
 without current consent. The SDK owns ingestion retries; the site does
 not add another retry layer.
+
+Each SDK instance receives `propertyConfiguration.userConsented` from the
+same current WCP Analytics consent gate before initialization, including
+stored consent on subsequent page visits and reinitialization after
+renewed consent. Delaying SDK initialization alone does not set
+`ext.web.userConsent`. In SDK 3.2.18, omitting this property with the SDK's
+cookie manager disabled produces `userConsent: false` even after accepting
+WCP. The `cookieEnabled` field describes browser cookie capability, not
+Analytics consent; enabling analytics cookies is not the fix.
+
+Keep the registered `scope` App ID and existing browser-ingestion
+identifier unchanged. After deployment, an opted-in `Ms.Web.PageView`
+should retain `iKey: "o:d73f4c6d7bfd4f54ab769e2baaf3156b"` and
+`ext.app.env: "PROD"`, with `ext.web.userConsent: true`. A successful
+collector response confirms delivery, not visibility in Customer Journey
+Analytics (CJA). Downstream processing and data-view configuration must
+be checked separately in CJA.
 
 This is not Scope application telemetry and does not modify the Portal,
 CLI, API, or workers. The
@@ -308,9 +330,10 @@ representative documentation, community and API pages, privacy links,
 landmarks, horizontal reflow, keyboard navigation, reduced motion,
 and absence of third-party requests on local previews. Published-origin
 analytics checks mock the Microsoft scripts to cover opt-in, withdrawal,
-stored consent, blocked scripts, privacy signals, and loading races without
-sending real analytics. CI runs the same
-browser suite against its existing production build before deployment.
+stored consent, explicit SDK consent metadata, blocked scripts, privacy
+signals, loading races, and responsive top-banner placement without
+sending real analytics. CI runs the same browser suite against its
+existing production build before deployment.
 
 Automated checks do not certify full accessibility or policy
 compliance. Retain manual keyboard, screen-reader, zoom, and
