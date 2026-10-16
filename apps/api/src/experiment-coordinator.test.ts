@@ -136,6 +136,7 @@ describe("ExperimentCoordinator", () => {
         },
       },
     });
+
     vi.spyOn(ExperimentStore.prototype, "get").mockResolvedValue(initial);
     vi.spyOn(FixedPayloadStore.prototype, "readRequests").mockResolvedValue([
       initialRequest,
@@ -217,6 +218,106 @@ describe("ExperimentCoordinator", () => {
         executionVersion: 3,
       },
     );
+  });
+
+  it("bounds aggregate execution blockers while retaining exact request projections", async () => {
+    const requests: ExperimentRequestState[] = Array.from(
+      { length: 40 },
+      (_, index) => ({
+        requestId: `request-${index}`,
+        runId: `run-${index}`,
+        dependencies: [],
+        blockers: [],
+      }),
+    );
+    const projectedRequests: ExperimentRequestState[] = requests.map(
+      (request) => ({
+        ...request,
+        dependencies: [
+          {
+            handlerId: "pp-observations",
+            state: "waiting",
+          },
+        ],
+        blockers: [
+          {
+            requestId: request.requestId,
+            runId: request.runId,
+            handlerId: "pp-observations",
+            reason: "dependency-not-ready",
+          },
+        ],
+      }),
+    );
+    const initial = experiment(requests);
+    const projected = experiment(projectedRequests, { version: 2 });
+    const bounded = experiment(projectedRequests, {
+      version: 3,
+      blocking: projectedRequests
+        .flatMap((request) => request.blockers)
+        .slice(0, 32),
+    });
+    vi.spyOn(ExperimentStore.prototype, "get")
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(bounded);
+    vi.spyOn(FixedPayloadStore.prototype, "readRequests").mockResolvedValue(
+      requests,
+    );
+    vi.spyOn(
+      ExperimentStore.prototype,
+      "casUpdateRequestStates",
+    ).mockResolvedValue({
+      status: "applied",
+      experiment: projected,
+      requests: projectedRequests,
+    });
+    const coordinatorCollections = collections({
+      requests: requests.map((request) => ({
+        _id: request.requestId,
+        projectId: "project-1",
+        scenario: { task: "task", criteria: [] },
+        workerType: "worker",
+        createdAt: now,
+        taskPromptId: "prompt-1",
+        priority: 0,
+        run: {
+          _id: request.runId,
+          attemptNumber: 1,
+          status: "done",
+          logsUrl: "https://logs",
+          handlerStatus: {},
+        },
+      })),
+      services: [
+        {
+          _id: "pp-observations",
+          type: "post-process-handler",
+          version: 1,
+          queue: "queue-pp-observations",
+          selector: "observations",
+          autoBackfill: false,
+          dependsOn: [],
+        },
+      ],
+      updatedExperiments: [bounded],
+    });
+    const coordinator = new ExperimentCoordinator(coordinatorCollections);
+
+    const result = await coordinator.reconcile("project-1", "experiment-1");
+
+    expect(result?.experiment.execution.blocking).toHaveLength(32);
+    expect(
+      vi.mocked(coordinatorCollections.experiments.findOneAndUpdate).mock
+        .calls[0]?.[1],
+    ).toMatchObject({
+      $set: {
+        "execution.blocking": bounded.execution.blocking,
+      },
+    });
+    expect(
+      vi.mocked(ExperimentStore.prototype.casUpdateRequestStates).mock
+        .calls[0]?.[0].requests,
+    ).toHaveLength(40);
   });
 
   it("re-enqueues a dropped notice without changing its exact identity", async () => {

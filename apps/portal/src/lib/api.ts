@@ -288,14 +288,17 @@ export const api = {
       {
         method: "POST",
         body: JSON.stringify({
+          mode: body.empty ? "empty" : "compose",
           metadata: body.metadata,
-          ...(requestBody ? { request: requestBody } : {}),
-          ...(body.empty ? { empty: true } : {}),
+          requests: requestBody ? [requestBody] : [],
         }),
       },
       { scoped: true },
     );
-    return parseExperiment(value);
+    if (!value || typeof value !== "object" || !("experiment" in value)) {
+      throw new Error("Invalid experiment create response from Scope");
+    }
+    return parseExperiment(value.experiment);
   },
 
   listExperiments: async (opts?: {
@@ -304,7 +307,7 @@ export const api = {
   }): Promise<ExperimentPageView> => {
     const value = await request<unknown>(
       `/experiments${qs({
-        cursor: opts?.cursor,
+        after: opts?.cursor,
         limit: opts?.limit ? String(opts.limit) : undefined,
       })}`,
       undefined,
@@ -328,7 +331,7 @@ export const api = {
   ): Promise<ExperimentExecutionPageView> => {
     const value = await request<unknown>(
       `/experiments/${encodeURIComponent(id)}/executions${qs({
-        cursor: opts?.cursor,
+        after: opts?.cursor,
         limit: opts?.limit ? String(opts.limit) : undefined,
       })}`,
       undefined,
@@ -352,7 +355,11 @@ export const api = {
   retryExperiment: async (
     id: string,
     experimentExecutionId: string,
-  ): Promise<ExperimentView> => {
+  ): Promise<{
+    experimentId: string;
+    experimentExecutionId: string;
+    attemptNumber: number;
+  }> => {
     const value = await request<unknown>(
       `/experiments/${encodeURIComponent(id)}/retry`,
       {
@@ -361,7 +368,23 @@ export const api = {
       },
       { scoped: true },
     );
-    return parseExperiment(value);
+    if (
+      !value ||
+      typeof value !== "object" ||
+      !("experimentId" in value) ||
+      typeof value.experimentId !== "string" ||
+      !("experimentExecutionId" in value) ||
+      typeof value.experimentExecutionId !== "string" ||
+      !("attemptNumber" in value) ||
+      typeof value.attemptNumber !== "number"
+    ) {
+      throw new Error("Invalid experiment retry response from Scope");
+    }
+    return {
+      experimentId: value.experimentId,
+      experimentExecutionId: value.experimentExecutionId,
+      attemptNumber: value.attemptNumber,
+    };
   },
 
   /** Soft-delete a run */

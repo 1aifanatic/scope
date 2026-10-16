@@ -231,7 +231,9 @@ export class ExperimentCoordinator {
           handlers,
         ),
       );
-      const blockers = projected.flatMap((request) => request.blockers);
+      const blockers = projected
+        .flatMap((request) => request.blockers)
+        .slice(0, 32);
       if (!sameProjection(requests, projected)) {
         const projectionFingerprint = fingerprintExperimentPayload(projected);
         const updated = await this.store.casUpdateRequestStates({

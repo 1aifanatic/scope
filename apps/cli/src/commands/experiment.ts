@@ -178,11 +178,15 @@ function parseExecution(value: unknown): ExperimentExecution {
           requests: entries,
         };
       })();
-  const blocking = Array.isArray(execution.blocking)
-    ? execution.blocking.map(parseBlocker)
+  const blockingValue = execution.blockers ?? execution.blocking;
+  const blocking = Array.isArray(blockingValue)
+    ? blockingValue.map(parseBlocker)
     : [];
   const progress = asRecord(
-    execution.handlerProgress ?? execution.handlerSummary ?? {},
+    execution.progress ??
+      execution.handlerProgress ??
+      execution.handlerSummary ??
+      {},
     "experiment handler progress",
   );
   const report = execution.currentReport === undefined
@@ -328,22 +332,24 @@ function parseExperiment(value: unknown): ExperimentView {
 
 function parsePage(value: unknown): ExperimentPage {
   const page = asRecord(value, "experiment page");
-  if (!Array.isArray(page.items)) {
+  const items = page.data ?? page.items;
+  if (!Array.isArray(items)) {
     throw new Error("Invalid experiment page items response from Scope");
   }
   return {
-    items: page.items.map(parseExperiment),
+    items: items.map(parseExperiment),
     nextCursor: stringField(page, "nextCursor", "experiment page", true),
   };
 }
 
 function parseExecutionPage(value: unknown): ExperimentExecutionPage {
   const page = asRecord(value, "experiment execution page");
-  if (!Array.isArray(page.items)) {
+  const items = page.data ?? page.items;
+  if (!Array.isArray(items)) {
     throw new Error("Invalid experiment execution page items response from Scope");
   }
   return {
-    items: page.items.map(parseExecution),
+    items: items.map(parseExecution),
     nextCursor: stringField(
       page,
       "nextCursor",
@@ -605,8 +611,12 @@ export function registerExperimentCommands(program: Command): void {
       }
       const built = options.empty ? undefined : buildRequest(options);
       const body = options.empty
-        ? { metadata, empty: true }
-        : { metadata, request: built!.request };
+        ? { mode: "empty" as const, metadata, requests: [] }
+        : {
+            mode: "compose" as const,
+            metadata,
+            requests: [built!.request],
+          };
       const expandedRunCount = built
         ? built.profileCount * built.occurrences
         : 0;
@@ -654,7 +664,8 @@ export function registerExperimentCommands(program: Command): void {
         },
       );
       if (!response.ok) await throwApiError(response);
-      const created = parseExperiment(await json(response));
+      const createResponse = asRecord(await json(response), "experiment create");
+      const created = parseExperiment(createResponse.experiment);
       const format = (options.output ?? "table") as OutputFormat;
       if (isMachineReadable(format)) {
         console.log(formatData([created], fields, format));
@@ -692,7 +703,7 @@ export function registerExperimentCommands(program: Command): void {
     try {
       const projectId = requireProjectId(options.project);
       const params = new URLSearchParams();
-      if (options.cursor) params.set("cursor", options.cursor);
+      if (options.cursor) params.set("after", options.cursor);
       if (options.limit) params.set("limit", String(options.limit));
       const response = await apiFetch(
         options.url,
@@ -805,7 +816,7 @@ export function registerExperimentCommands(program: Command): void {
         return;
       }
       const params = new URLSearchParams();
-      if (options.cursor) params.set("cursor", options.cursor);
+      if (options.cursor) params.set("after", options.cursor);
       if (options.limit) params.set("limit", String(options.limit));
       const response = await apiFetch(
         options.url,
@@ -865,10 +876,10 @@ export function registerExperimentCommands(program: Command): void {
         },
       );
       if (!response.ok) await throwApiError(response);
-      const item = parseExperiment(await json(response));
+      const item = asRecord(await json(response), "experiment retry");
       console.log(
         successText(
-          `Experiment retry started: attempt ${item.execution.attemptNumber} (${item.execution.experimentExecutionId})`,
+          `Experiment retry started: attempt ${numberField(item, "attemptNumber", "experiment retry")} (${stringField(item, "experimentExecutionId", "experiment retry")})`,
         ),
       );
     } catch (error) {

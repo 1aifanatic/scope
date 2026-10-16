@@ -174,10 +174,15 @@ export function parseExperimentExecution(
 ): ExperimentExecutionView {
   const execution = record(value, "experiment execution");
   const vector = parseRequestVector(execution.requests ?? []);
-  const blocking = Array.isArray(execution.blocking)
-    ? execution.blocking.map(parseBlocker)
+  const blockingValue = execution.blockers ?? execution.blocking;
+  const blocking = Array.isArray(blockingValue)
+    ? blockingValue.map(parseBlocker)
     : [];
-  const progressValue = execution.handlerProgress ?? execution.handlerSummary ?? {};
+  const progressValue =
+    execution.progress ??
+    execution.handlerProgress ??
+    execution.handlerSummary ??
+    {};
   const handlerProgress = record(progressValue, "experiment handler progress");
   const reportValue = execution.currentReport;
   const currentReport =
@@ -298,11 +303,12 @@ export function parseExperiment(value: unknown): ExperimentView {
 
 export function parseExperimentPage(value: unknown): ExperimentPageView {
   const page = record(value, "experiment page");
-  if (!Array.isArray(page.items)) {
+  const items = page.data ?? page.items;
+  if (!Array.isArray(items)) {
     throw new Error("Invalid experiment page items response from Scope");
   }
   return {
-    items: page.items.map(parseExperiment),
+    items: items.map(parseExperiment),
     nextCursor: optionalString(page, "nextCursor"),
   };
 }
@@ -311,11 +317,12 @@ export function parseExperimentExecutionPage(
   value: unknown,
 ): ExperimentExecutionPageView {
   const page = record(value, "experiment execution page");
-  if (!Array.isArray(page.items)) {
+  const items = page.data ?? page.items;
+  if (!Array.isArray(items)) {
     throw new Error("Invalid experiment execution page items response from Scope");
   }
   return {
-    items: page.items.map(parseExperimentExecution),
+    items: items.map(parseExperimentExecution),
     nextCursor: optionalString(page, "nextCursor"),
   };
 }

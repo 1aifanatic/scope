@@ -107,7 +107,10 @@ describe("experiment commands", () => {
   });
 
   it("creates an explicitly empty project-scoped experiment", async () => {
-    const { requests } = mockFetchWith(experiment);
+    const { requests } = mockFetchWith({
+      experiment,
+      requestIds: [],
+    });
     vi.spyOn(console, "log").mockImplementation(() => {});
 
     await makeProgram().parseAsync(
@@ -129,8 +132,9 @@ describe("experiment commands", () => {
     expect(requests[0]).toMatchObject({
       method: "POST",
       body: JSON.stringify({
+        mode: "empty",
         metadata: { name: "Empty" },
-        empty: true,
+        requests: [],
       }),
     });
     expect(requests[0]?.url).toBe(
@@ -163,12 +167,11 @@ describe("experiment commands", () => {
 
   it("retries with the current execution identifier", async () => {
     const { requests } = mockFetchWith({
-      ...experiment,
-      execution: {
-        ...experiment.execution,
-        experimentExecutionId: "execution-2",
-        attemptNumber: 2,
-      },
+      experimentId: "experiment-1",
+      experimentExecutionId: "execution-2",
+      attemptNumber: 2,
+      readiness: "ready",
+      blockers: [],
     });
     vi.spyOn(console, "log").mockImplementation(() => {});
 
