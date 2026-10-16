@@ -226,7 +226,6 @@ export function SubmitRun({
   const [experimentName, setExperimentName] = useState("");
   const [experimentDescription, setExperimentDescription] = useState("");
   const [experimentTags, setExperimentTags] = useState("");
-  const [createEmptyExperiment, setCreateEmptyExperiment] = useState(false);
 
   // Optional add-ons
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -297,6 +296,8 @@ export function SubmitRun({
     queryFn: () => api.listRuns({ limit: 3 }),
   });
   const recentRuns: Run[] = recentRunsResp?.data ?? [];
+  const hasScenario = task.trim().length > 0;
+  const showRunComposition = mode === "run" || hasScenario;
 
   // ─── Derived ────────────────────────────────────────────────────────────
   const activeMcpServers = mcpServers.filter((s: McpServerDocument) => !s.deletedAt);
@@ -702,7 +703,7 @@ export function SubmitRun({
                   }
                 : {}),
             },
-            ...(createEmptyExperiment ? { empty: true } : { request: request! }),
+            ...(request ? { request } : { empty: true }),
           })
         : api.submitRun(request!),
     onSuccess: (data) => {
@@ -721,7 +722,7 @@ export function SubmitRun({
   });
 
   const doSubmit = () => {
-    if (mode === "experiment" && createEmptyExperiment) {
+    if (mode === "experiment" && !hasScenario) {
       if (!experimentName.trim()) return;
       submitMutation.mutate({});
       return;
@@ -783,7 +784,7 @@ export function SubmitRun({
   });
 
   const canSubmit =
-    mode === "experiment" && createEmptyExperiment
+    mode === "experiment" && !hasScenario
       ? !!experimentName.trim() && !submitMutation.isPending
       : !!task.trim() &&
         (mode === "run" || !!experimentName.trim()) &&
@@ -858,7 +859,7 @@ export function SubmitRun({
   useCommandEnter(doSubmit, canSubmit);
 
   // ─── Render helpers ─────────────────────────────────────────────────────
-  const summaryChips: string[] = [
+  const configuredSummaryChips: string[] = [
     `${maxIterations} iteration${maxIterations === 1 ? "" : "s"}`,
     `${pickedCriteria.length} requirements criteri${pickedCriteria.length === 1 ? "on" : "a"}`,
     pickedObservations.length > 0 ? `${pickedObservations.length} observation${pickedObservations.length === 1 ? "" : "s"}` : "",
@@ -877,6 +878,10 @@ export function SubmitRun({
     agentsMd.trim() ? "AGENTS.md" : "",
     selectedExtensions.length > 0 ? `${selectedExtensions.length} ext` : "",
   ].filter(Boolean);
+  const summaryChips =
+    mode === "experiment" && !hasScenario
+      ? ["No scenario selected", "0 runs"]
+      : configuredSummaryChips;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6 pb-28">
@@ -902,11 +907,13 @@ export function SubmitRun({
           </p>
         </div>
 
-        <AdvancedModeToggle
-          checked={advanced}
-          onCheckedChange={setAdvanced}
-          className="ml-auto"
-        />
+        {showRunComposition && (
+          <AdvancedModeToggle
+            checked={advanced}
+            onCheckedChange={setAdvanced}
+            className="ml-auto"
+          />
+        )}
       </div>
 
       {mode === "experiment" && (
@@ -914,7 +921,8 @@ export function SubmitRun({
           <CardHeader>
             <CardTitle>Experiment metadata</CardTitle>
             <CardDescription>
-              Name this reproducible composition before configuring its runs.
+              Name this reproducible composition. Add a scenario below to
+              configure runs, or create it empty.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
@@ -938,7 +946,7 @@ export function SubmitRun({
                 placeholder="What this experiment compares and why"
               />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="experimentTags">Tags</Label>
               <Input
                 id="experimentTags"
@@ -947,15 +955,6 @@ export function SubmitRun({
                 placeholder="nightly, auth, regression"
               />
             </div>
-            <label className="flex items-center gap-2 self-end rounded-md border p-3 text-sm">
-              <Checkbox
-                checked={createEmptyExperiment}
-                onCheckedChange={(checked) =>
-                  setCreateEmptyExperiment(checked === true)
-                }
-              />
-              Create explicitly empty
-            </label>
           </CardContent>
         </Card>
       )}
@@ -979,7 +978,7 @@ export function SubmitRun({
       )}
 
       {/* Quick Start gallery (collapsible, default closed) */}
-      {(topProfiles.length > 0 || recentRuns.length > 0) && (
+      {showRunComposition && (topProfiles.length > 0 || recentRuns.length > 0) && (
         <CollapsibleCard
           icon={Sparkles}
           title="Quick start"
@@ -1043,7 +1042,9 @@ export function SubmitRun({
         <CardContent className="space-y-5">
           <div className="space-y-2">
             <div className="flex items-center gap-1.5">
-              <Label htmlFor="task">Task *</Label>
+              <Label htmlFor="task">
+                Task{mode === "run" ? " *" : ""}
+              </Label>
               <HelpTooltip
                 text="The natural-language instruction sent to the coding agent. Saved to the task prompt library so you can reuse it across runs."
                 docs="taskPrompts"
@@ -1056,7 +1057,7 @@ export function SubmitRun({
               value={task}
               onChange={(e) => setTask(e.target.value)}
               rows={3}
-              required={!(mode === "experiment" && createEmptyExperiment)}
+              required={mode === "run" || hasScenario}
             />
             <div className="flex items-center justify-between">
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -1121,6 +1122,8 @@ export function SubmitRun({
             )}
           </div>
 
+          {showRunComposition ? (
+            <>
           {/* ─── Codebase (optional, discreet) ───────────────────────────── */}
           {!(codebaseOpen || selectedCodebaseSpec) ? (
             <Button
@@ -1400,9 +1403,19 @@ export function SubmitRun({
               </div>
             </div>
           </AdvancedSection>
+            </>
+          ) : (
+            <div role="status" className="rounded-md border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+              No scenario selected. This will create an empty Experiment with
+              zero runs. Enter or select a task to configure its run
+              composition.
+            </div>
+          )}
         </CardContent>
       </Card>
 
+      {showRunComposition && (
+        <>
       {/* ─── Gates ─────────────────────────────────────────────────────── */}
       <Card>
         <CardHeader>
@@ -2084,6 +2097,8 @@ export function SubmitRun({
           <ExtensionPicker selected={selectedExtensions} onChange={setSelectedExtensions} disabled={profileLocked} />
         </CollapsibleCard>
       )}
+        </>
+      )}
       </div>
 
       <Dialog open={createProfileOpen} onOpenChange={setCreateProfileOpen}>
@@ -2126,7 +2141,7 @@ export function SubmitRun({
                     : "Run submission failed"}
               </p>
             )}
-            {!profileLocked && worker && model && (
+            {showRunComposition && !profileLocked && worker && model && (
               <Dialog open={saveProfileOpen} onOpenChange={setSaveProfileOpen}>
                 <DialogTrigger asChild>
                   <Button type="button" variant="outline" size="sm" className="gap-1.5">
@@ -2178,11 +2193,11 @@ export function SubmitRun({
                 <Send className="h-4 w-4" />
               )}
               {mode === "experiment"
-                ? createEmptyExperiment
-                  ? "Create Empty Experiment"
-                  : `Create Experiment · ${submitRunCount} ${
-                      submitRunCount === 1 ? "Run" : "Runs"
+                ? hasScenario
+                  ? `Create experiment with ${submitRunCount} ${
+                      submitRunCount === 1 ? "run" : "runs"
                     }`
+                  : "Create empty experiment"
                 : `Submit ${submitRunCount > 1 ? `${submitRunCount} Runs` : "Run"}`}
               <KbdBadge />
             </Button>
