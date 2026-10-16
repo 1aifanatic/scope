@@ -25,13 +25,12 @@ import * as tabs from "./tabs.stories";
 import * as textarea from "./textarea.stories";
 import * as tooltip from "./tooltip.stories";
 import * as sonner from "./sonner.stories";
-import * as submissionLink from "../SubmissionLink.stories";
-import * as submissionReports from "../SubmissionReports.stories";
+import * as experimentReports from "../ExperimentReportCard.stories";
 
 const modules: Record<string, Record<string, unknown>> = {
   alert, alertDialog, checkbox, dialog, dropdownMenu, label, popover, scrollArea,
   select, separator, sheet, skeleton, switch: sw, table, tabs, textarea,
-  tooltip, sonner, submissionLink, submissionReports,
+  tooltip, sonner, experimentReports,
 };
 
 afterEach(() => cleanup());

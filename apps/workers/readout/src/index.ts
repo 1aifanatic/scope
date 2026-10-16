@@ -13,7 +13,7 @@ const config: ReadoutQueueProcessorConfig = {
     process.env.AZURE_COSMOS_CONNECTION_STRING ||
     "mongodb://localhost:27017",
   mongoDatabase: process.env.MONGO_DATABASE || "requests-db",
-  mongoCollection: "submissions",
+  mongoCollection: "experiments",
   storageAccountName:
     process.env.AZURE_STORAGE_ACCOUNT_NAME || "devstoreaccount1",
   storageConnectionString:

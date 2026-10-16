@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, FileText, RotateCcw } from "lucide-react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { ExperimentReportCard } from "@/components/ExperimentReportCard";
 import { ExperimentStatusCard } from "@/components/ExperimentStatusCard";
 import { ShortId } from "@/components/ShortId";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiError, api } from "@/lib/api";
 import type { ExperimentExecutionView } from "@/lib/experiments";
 import { formatDate } from "@/lib/utils";
+
+function handlerStatus(value: unknown): string | undefined {
+  if (
+    value &&
+    typeof value === "object" &&
+    "status" in value &&
+    typeof value.status === "string"
+  ) {
+    return value.status;
+  }
+  return undefined;
+}
 
 function ExecutionSummary({
   execution,
@@ -51,7 +63,7 @@ function ExecutionSummary({
 export function ExperimentDetail() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
-  const [selectedExecutionId, setSelectedExecutionId] = useState<string>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const experimentQuery = useQuery({
     queryKey: ["experiment", id],
     queryFn: () => api.getExperiment(id!),
@@ -70,10 +82,25 @@ export function ExperimentDetail() {
     queryFn: () => api.listExperimentExecutions(id!, { limit: 50 }),
     enabled: Boolean(id) && experimentQuery.isSuccess,
   });
+  const selectedExecutionId =
+    searchParams.get("execution") ??
+    experimentQuery.data?.execution.experimentExecutionId;
   const selectedExecutionQuery = useQuery({
     queryKey: ["experiment-execution", id, selectedExecutionId],
     queryFn: () => api.getExperimentExecution(id!, selectedExecutionId!),
     enabled: Boolean(id && selectedExecutionId),
+  });
+  const reportsQuery = useQuery({
+    queryKey: ["experiment-reports", id, selectedExecutionId],
+    queryFn: () => api.listExperimentReports(id!, selectedExecutionId!),
+    enabled: Boolean(id && selectedExecutionId),
+    refetchInterval: (query) => {
+      const report = query.state.data?.[0];
+      if (report?.status === "completed" || report?.status === "failed") {
+        return false;
+      }
+      return 5_000;
+    },
   });
   const retry = useMutation({
     mutationFn: () =>
@@ -86,6 +113,9 @@ export function ExperimentDetail() {
       void queryClient.invalidateQueries({ queryKey: ["experiment", id] });
       void queryClient.invalidateQueries({
         queryKey: ["experiment-executions", id],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["experiment-reports", id],
       });
     },
     onError: (error) => {
@@ -147,6 +177,14 @@ export function ExperimentDetail() {
   }
 
   const experiment = experimentQuery.data;
+  const selectedExecution =
+    selectedExecutionQuery.data ??
+    (selectedExecutionId === experiment.execution.experimentExecutionId
+      ? experiment.execution
+      : undefined);
+  const readout = reportsQuery.data?.find(
+    (report) => report.reporter?.id === "pp-readout",
+  );
   const canRetry = !["waiting", "processing"].includes(
     experiment.readiness ?? "",
   );
@@ -198,6 +236,40 @@ export function ExperimentDetail() {
 
       <ExperimentStatusCard experiment={experiment} />
 
+      <ExperimentReportCard
+        experimentId={experiment.experimentId}
+        experimentExecutionId={selectedExecutionId!}
+        attemptNumber={selectedExecution?.attemptNumber}
+        report={readout}
+        structuredUrl={
+          readout?.structuredArtifact
+            ? api.experimentReportStructuredUrl(
+                experiment.experimentId,
+                selectedExecutionId!,
+                readout._id,
+              )
+            : undefined
+        }
+        isLoading={reportsQuery.isLoading}
+        error={
+          reportsQuery.isError
+            ? reportsQuery.error instanceof Error
+              ? reportsQuery.error.message
+              : "Report could not be loaded."
+            : undefined
+        }
+        isProcessing={
+          ["queued", "processing"].includes(
+            handlerStatus(
+              selectedExecution?.handlerProgress["pp-readout"],
+            ) ?? "",
+          ) &&
+          selectedExecution?.readiness !== "failed" &&
+          selectedExecution?.readiness !== "blocked"
+        }
+        onRetry={() => void reportsQuery.refetch()}
+      />
+
       {experiment.blocking.length > 0 && (
         <Card className="border-destructive/40">
           <CardHeader>
@@ -233,17 +305,17 @@ export function ExperimentDetail() {
           <CardTitle className="text-base">Current runs</CardTitle>
         </CardHeader>
         <CardContent className="divide-y">
-          {experiment.execution.requests.length === 0 ? (
+          {!selectedExecution || selectedExecution.requests.length === 0 ? (
             <p className="py-4 text-sm text-muted-foreground">
               {experiment.execution.requestCount === 0
                 ? "This experiment is empty."
                 : `${experiment.execution.requestCount} linked runs are stored outside the inline response.`}
             </p>
           ) : (
-            experiment.execution.requests.map((request) => (
+            selectedExecution.requests.map((request) => (
               <Link
                 key={request.requestId}
-                to={`/runs/${request.requestId}`}
+                to={`/runs/${request.requestId}?fromExperiment=${encodeURIComponent(experiment.experimentId)}&experimentExecution=${encodeURIComponent(selectedExecution.experimentExecutionId)}`}
                 className="flex items-center justify-between gap-4 py-4 hover:bg-muted/40"
               >
                 <div className="min-w-0">
@@ -286,7 +358,18 @@ export function ExperimentDetail() {
               key={execution.experimentExecutionId}
               type="button"
               onClick={() =>
-                setSelectedExecutionId(execution.experimentExecutionId)
+                setSearchParams(
+                  (current) => {
+                    const next = new URLSearchParams(current);
+                    next.set(
+                      "execution",
+                      execution.experimentExecutionId,
+                    );
+                    next.delete("report");
+                    return next;
+                  },
+                  { replace: false },
+                )
               }
               className="flex w-full items-center justify-between rounded-md border p-3 text-left hover:bg-muted/40"
             >
@@ -308,8 +391,8 @@ export function ExperimentDetail() {
       {selectedExecutionQuery.isLoading && (
         <p className="text-sm text-muted-foreground">Loading execution…</p>
       )}
-      {selectedExecutionQuery.data && (
-        <ExecutionSummary execution={selectedExecutionQuery.data} />
+      {selectedExecution && (
+        <ExecutionSummary execution={selectedExecution} />
       )}
     </div>
   );

@@ -3,8 +3,8 @@
 
 import { z } from "zod";
 
-export const SUBMISSION_READOUT_SCHEMA_ID = "scope.submission-readout";
-export const SUBMISSION_READOUT_SCHEMA_VERSION = "1.0";
+export const EXPERIMENT_READOUT_SCHEMA_ID = "scope.experiment-readout";
+export const EXPERIMENT_READOUT_SCHEMA_VERSION = "1.0";
 
 export const readoutObservationSchema = z.object({
   criterionId: z.string().min(1),
@@ -15,7 +15,7 @@ export const readoutObservationSchema = z.object({
 });
 
 export const readoutEvidenceSchema = z.object({
-  submissionRunId: z.string().min(1),
+  experimentExecutionId: z.string().min(1),
   requestId: z.string().min(1),
   runId: z.string().min(1),
   iteration: z.number().int().min(0).optional(),
@@ -53,13 +53,13 @@ export const readoutActionSchema = z.object({
   relatedFindingIds: z.array(z.string().min(1)),
 });
 
-export const submissionReadoutSchema = z.object({
+export const experimentReadoutSchema = z.object({
   meta: z.object({
-    schemaId: z.literal(SUBMISSION_READOUT_SCHEMA_ID),
-    schemaVersion: z.literal(SUBMISSION_READOUT_SCHEMA_VERSION),
+    schemaId: z.literal(EXPERIMENT_READOUT_SCHEMA_ID),
+    schemaVersion: z.literal(EXPERIMENT_READOUT_SCHEMA_VERSION),
     generatedAt: z.string().datetime({ offset: true }),
-    submissionId: z.string().min(1),
-    submissionRunId: z.string().min(1),
+    experimentId: z.string().min(1),
+    experimentExecutionId: z.string().min(1),
   }),
   summary: z.object({
     title: z.string().min(1),
@@ -80,5 +80,5 @@ export const submissionReadoutSchema = z.object({
   actions: z.array(readoutActionSchema),
 });
 
-export type SubmissionReadout = z.infer<typeof submissionReadoutSchema>;
+export type ExperimentReadout = z.infer<typeof experimentReadoutSchema>;
 export type ReadoutRun = z.infer<typeof readoutRunSchema>;

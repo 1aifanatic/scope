@@ -8,27 +8,27 @@ import {
   BlobStorage,
   type BaseQueueProcessorConfig,
   type CriteriaDocument,
+  EXPERIMENT_READOUT_SCHEMA_ID,
+  EXPERIMENT_READOUT_SCHEMA_VERSION,
+  type ExperimentDocument,
+  type ExperimentExecutionHistoryDocument,
+  type ExperimentQueueMessagePayload,
+  ExperimentStore,
   type LogEvent,
   type ReportDocument,
   type RequestDocument,
   type RunHistoryDocument,
-  type SubmissionDocument,
-  type SubmissionQueueMessagePayload,
+  type RunState,
   TokenManagerClient,
-  claimSubmissionHandler,
-  completeSubmissionHandler,
-  isCurrentSubmissionRun,
-  SUBMISSION_READOUT_SCHEMA_ID,
-  SUBMISSION_READOUT_SCHEMA_VERSION,
   type VisibilityHeartbeat,
   withRetry,
 } from "shared";
 import {
-  renderSubmissionReadoutMarkdown,
+  renderExperimentReadoutMarkdown,
   type ExactRunEvidence,
-  type SubmissionEvidence,
+  type ExperimentEvidence,
 } from "./readout-builder.js";
-import { generateSubmissionReadout } from "./readout-generator.js";
+import { generateExperimentReadout } from "./readout-generator.js";
 
 const HANDLER_ID = "pp-readout";
 const HANDLER_VERSION = 1;
@@ -39,15 +39,29 @@ export interface ReadoutQueueProcessorConfig extends BaseQueueProcessorConfig {
   tokenManagerUrl?: string;
 }
 
-function isReadoutMessage(
-  payload: Record<string, unknown> | undefined,
-): payload is Record<string, unknown> & SubmissionQueueMessagePayload {
-  return payload?.type === "readout" &&
-    typeof payload.submissionId === "string" &&
-    typeof payload.submissionRunId === "string";
+interface ReadoutQueueMessage extends ExperimentQueueMessagePayload {
+  type: "readout";
+  projectId: string;
+  handlerId: string;
+  handlerVersion: number;
+  claimToken: string;
+  executionVersion: number;
 }
 
-export class ReadoutQueueProcessor extends BaseQueueProcessor<SubmissionDocument> {
+function isReadoutMessage(
+  payload: Record<string, unknown> | undefined,
+): payload is Record<string, unknown> & ReadoutQueueMessage {
+  return payload?.type === "readout" &&
+    typeof payload.projectId === "string" &&
+    typeof payload.experimentId === "string" &&
+    typeof payload.experimentExecutionId === "string" &&
+    payload.handlerId === HANDLER_ID &&
+    payload.handlerVersion === HANDLER_VERSION &&
+    typeof payload.claimToken === "string" &&
+    typeof payload.executionVersion === "number";
+}
+
+export class ReadoutQueueProcessor extends BaseQueueProcessor<ExperimentDocument> {
   private readonly readoutConfig: ReadoutQueueProcessorConfig;
   private readonly tokenClient: TokenManagerClient;
   private readonly blobStorage: BlobStorage;
@@ -63,11 +77,11 @@ export class ReadoutQueueProcessor extends BaseQueueProcessor<SubmissionDocument
   }
 
   protected override extractDocumentId(payload: Record<string, unknown>): string {
-    return typeof payload.submissionId === "string" ? payload.submissionId : "";
+    return typeof payload.experimentId === "string" ? payload.experimentId : "";
   }
 
   protected override async handleRequest(
-    _submission: SubmissionDocument,
+    _experiment: ExperimentDocument,
     message: DequeuedMessageItem,
     heartbeat: VisibilityHeartbeat,
     log: (
@@ -78,63 +92,73 @@ export class ReadoutQueueProcessor extends BaseQueueProcessor<SubmissionDocument
     payload?: Record<string, unknown>,
   ): Promise<void> {
     if (!isReadoutMessage(payload)) {
-      await log("warn", "Discarding unsupported readout queue payload", { payload });
+      await log("warn", "Discarding unsupported readout queue payload", {
+        payload,
+      });
       await this.safeDeleteMessage(message.messageId, heartbeat.stop());
       return;
     }
-    const { submissionId, submissionRunId } = payload;
+
+    const store = this.experimentStore();
     const claimed = await withRetry(() =>
-      claimSubmissionHandler({
-        submissions: this.collection,
-        submissionId,
-        submissionRunId,
-        handlerId: HANDLER_ID,
-        version: HANDLER_VERSION,
+      store.claimHandler({
+        projectId: payload.projectId,
+        experimentId: payload.experimentId,
+        experimentExecutionId: payload.experimentExecutionId,
+        expectedExecutionVersion: payload.executionVersion,
+        handlerId: payload.handlerId,
+        handlerVersion: payload.handlerVersion,
+        claimToken: payload.claimToken,
       })
     );
     if (!claimed) {
       await log("info", "Discarding stale or duplicate readout message", {
-        submissionId,
-        submissionRunId,
+        experimentId: payload.experimentId,
+        experimentExecutionId: payload.experimentExecutionId,
       });
       await this.safeDeleteMessage(message.messageId, heartbeat.stop());
       return;
     }
 
     try {
-      if (!(await this.isCurrent(submissionId, submissionRunId))) return;
-      const evidence = await this.loadEvidence(claimed);
+      let completionVersion = await this.currentClaimVersion(payload);
+      if (completionVersion === null) return;
+      const evidence = await this.loadEvidence(payload);
 
-      if (!(await this.isCurrent(submissionId, submissionRunId))) return;
+      completionVersion = await this.currentClaimVersion(payload);
+      if (completionVersion === null) return;
       const githubToken = await this.tokenClient.acquireToken("copilot-sdk");
 
-      if (!(await this.isCurrent(submissionId, submissionRunId))) return;
-      const readout = await generateSubmissionReadout({
+      completionVersion = await this.currentClaimVersion(payload);
+      if (completionVersion === null) return;
+      const readout = await generateExperimentReadout({
         evidence,
         model: this.readoutConfig.model,
         githubToken,
         timeoutMs: this.readoutConfig.sessionTimeoutMs,
         log,
       });
-      const markdown = renderSubmissionReadoutMarkdown(readout);
+      const markdown = renderExperimentReadoutMarkdown(readout);
 
-      if (!(await this.isCurrent(submissionId, submissionRunId))) return;
+      completionVersion = await this.currentClaimVersion(payload);
+      if (completionVersion === null) return;
       const reportId = randomUUID();
       const structuredUrl = await this.blobStorage.uploadJson(
         `reports/${reportId}/structured.json`,
         readout,
       );
 
-      if (!(await this.isCurrent(submissionId, submissionRunId))) return;
+      completionVersion = await this.currentClaimVersion(payload);
+      if (completionVersion === null) return;
       const now = new Date();
       const report: ReportDocument = {
         _id: reportId,
-        projectId: claimed.projectId,
-        submissionId,
-        submissionRunId,
+        projectId: payload.projectId,
+        experimentId: payload.experimentId,
+        experimentExecutionId: payload.experimentExecutionId,
         reporter: {
           id: HANDLER_ID,
-          name: "Submission Readout",
+          name: "Experiment Readout",
           gitHash: process.env.GIT_COMMIT || "unknown",
           model: this.readoutConfig.model,
           agentId: "copilot-sdk",
@@ -142,8 +166,8 @@ export class ReadoutQueueProcessor extends BaseQueueProcessor<SubmissionDocument
         },
         content: markdown,
         structuredArtifact: {
-          schemaId: SUBMISSION_READOUT_SCHEMA_ID,
-          schemaVersion: SUBMISSION_READOUT_SCHEMA_VERSION,
+          schemaId: EXPERIMENT_READOUT_SCHEMA_ID,
+          schemaVersion: EXPERIMENT_READOUT_SCHEMA_VERSION,
           contentType: "application/json",
           url: structuredUrl,
         },
@@ -155,95 +179,136 @@ export class ReadoutQueueProcessor extends BaseQueueProcessor<SubmissionDocument
         this.db.collection<ReportDocument>("reports").insertOne(report)
       );
 
-      const completed = await withRetry(() =>
-        completeSubmissionHandler({
-          submissions: this.collection,
-          submissionId,
-          submissionRunId,
-          handlerId: HANDLER_ID,
-          version: HANDLER_VERSION,
-          status: "done",
-          report: {
-            reportId,
-            url: `/api/v1/reports/${reportId}`,
-            updatedAt: now,
-          },
-        })
-      );
+      completionVersion = await this.currentClaimVersion(payload);
+      const completed = completionVersion === null
+        ? null
+        : await withRetry(() =>
+          store.completeHandler({
+            projectId: payload.projectId,
+            experimentId: payload.experimentId,
+            experimentExecutionId: payload.experimentExecutionId,
+            expectedExecutionVersion: completionVersion,
+            handlerId: payload.handlerId,
+            handlerVersion: payload.handlerVersion,
+            claimToken: payload.claimToken,
+            status: "done",
+            report: {
+              reportId,
+              url: `/api/v1/reports/${reportId}`,
+              updatedAt: now,
+            },
+          })
+        );
       if (!completed) {
         await log("warn", "Readout report remained historical after supersession", {
-          submissionId,
-          submissionRunId,
+          experimentId: payload.experimentId,
+          experimentExecutionId: payload.experimentExecutionId,
           reportId,
         });
       } else {
-        await log("info", "Submission readout completed", {
-          submissionId,
-          submissionRunId,
+        await log("info", "Experiment readout completed", {
+          experimentId: payload.experimentId,
+          experimentExecutionId: payload.experimentExecutionId,
           reportId,
         });
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      if (await this.isCurrent(submissionId, submissionRunId)) {
+      const completionVersion = await this.currentClaimVersion(payload);
+      if (completionVersion !== null) {
         await withRetry(() =>
-          completeSubmissionHandler({
-            submissions: this.collection,
-            submissionId,
-            submissionRunId,
-            handlerId: HANDLER_ID,
-            version: HANDLER_VERSION,
+          store.completeHandler({
+            projectId: payload.projectId,
+            experimentId: payload.experimentId,
+            experimentExecutionId: payload.experimentExecutionId,
+            expectedExecutionVersion: completionVersion,
+            handlerId: payload.handlerId,
+            handlerVersion: payload.handlerVersion,
+            claimToken: payload.claimToken,
             status: "failed",
             error: errorMessage,
           })
         );
       }
-      await log("error", `Submission readout failed: ${errorMessage}`, {
-        submissionId,
-        submissionRunId,
+      await log("error", `Experiment readout failed: ${errorMessage}`, {
+        experimentId: payload.experimentId,
+        experimentExecutionId: payload.experimentExecutionId,
       });
     } finally {
       await this.safeDeleteMessage(message.messageId, heartbeat.stop());
     }
   }
 
-  private isCurrent(
-    submissionId: string,
-    submissionRunId: string,
-  ): Promise<boolean> {
-    return withRetry(() =>
-      isCurrentSubmissionRun({
-        submissions: this.collection,
-        submissionId,
-        submissionRunId,
-      })
+  private experimentStore(): ExperimentStore {
+    return new ExperimentStore({
+      experiments: this.collection,
+      executions: this.db.collection<ExperimentExecutionHistoryDocument>(
+        "experiment-executions",
+      ),
+      chunks: this.db.collection("experiment-chunks"),
+    });
+  }
+
+  private async currentClaimVersion(
+    payload: ReadoutQueueMessage,
+  ): Promise<number | null> {
+    const experiment = await withRetry(() =>
+      this.experimentStore().get(payload.projectId, payload.experimentId)
     );
+    const execution = experiment?.execution;
+    const handler = execution?.handlerSummary[payload.handlerId];
+    return execution?.experimentExecutionId === payload.experimentExecutionId &&
+        !execution.frozenAt &&
+        !execution.rollover &&
+        handler?.status === "processing" &&
+        handler.version === payload.handlerVersion &&
+        handler.claimToken === payload.claimToken
+      ? execution.version
+      : null;
   }
 
   private async loadEvidence(
-    submission: SubmissionDocument,
-  ): Promise<SubmissionEvidence> {
+    payload: ReadoutQueueMessage,
+  ): Promise<ExperimentEvidence> {
+    const refs = await withRetry(() =>
+      this.experimentStore().readExecutionRequests({
+        projectId: payload.projectId,
+        experimentId: payload.experimentId,
+        experimentExecutionId: payload.experimentExecutionId,
+      })
+    );
+    if (!refs) {
+      throw new Error(
+        `Experiment execution ${payload.experimentId}/${payload.experimentExecutionId} was not found`,
+      );
+    }
     const requests = await withRetry(() =>
       this.db.collection<RequestDocument>("requests").find({
-        _id: { $in: submission.run.requests.map((ref) => ref.requestId) },
-        projectId: submission.projectId,
+        _id: { $in: refs.map((ref) => ref.requestId) },
+        projectId: payload.projectId,
       }).toArray()
     );
     const requestById = new Map(requests.map((request) => [request._id, request]));
     const history = this.db.collection<RunHistoryDocument>("runs");
-    const exactRuns: Array<{ request: RequestDocument; run: RunHistoryDocument | RequestDocument["run"] }> = [];
-    for (const ref of submission.run.requests) {
+    const exactRuns: Array<{ request: RequestDocument; run: RunState }> = [];
+    for (const ref of refs) {
       const request = requestById.get(ref.requestId);
-      if (!request) throw new Error(`Exact-vector request ${ref.requestId} was not found`);
+      if (!request) {
+        throw new Error(`Exact-vector request ${ref.requestId} was not found`);
+      }
       const run = request.run?._id === ref.runId
         ? request.run
-        : await withRetry(() => history.findOne({
-          _id: ref.runId,
-          requestId: ref.requestId,
-          projectId: submission.projectId,
-        }));
+        : await withRetry(() =>
+          history.findOne({
+            _id: ref.runId,
+            requestId: ref.requestId,
+            projectId: payload.projectId,
+          })
+        );
       if (!run) {
-        throw new Error(`Exact-vector run ${ref.requestId}/${ref.runId} was not found`);
+        throw new Error(
+          `Exact-vector run ${ref.requestId}/${ref.runId} was not found`,
+        );
       }
       exactRuns.push({ request, run });
     }
@@ -253,8 +318,8 @@ export class ReadoutQueueProcessor extends BaseQueueProcessor<SubmissionDocument
         exactRuns.flatMap(({ request, run }) => [
           ...request.scenario.criteria,
           ...(request.observations ?? []),
-          ...(run?.observationResults ?? []).map((result) => result.criterionId),
-          ...(run?.turns ?? []).flatMap((turn) =>
+          ...(run.observationResults ?? []).map((result) => result.criterionId),
+          ...(run.turns ?? []).flatMap((turn) =>
             (turn.observationResults ?? []).map((result) => result.criterionId)
           ),
         ]),
@@ -264,15 +329,16 @@ export class ReadoutQueueProcessor extends BaseQueueProcessor<SubmissionDocument
       ? []
       : await withRetry(() =>
         this.db.collection<CriteriaDocument>("criteria").find({
-          projectId: submission.projectId,
+          projectId: payload.projectId,
           id: { $in: criterionIds },
         }).toArray()
       );
-    const criteriaById = new Map(criteria.map((criterion) => [criterion.id, criterion]));
+    const criteriaById = new Map(
+      criteria.map((criterion) => [criterion.id, criterion]),
+    );
 
     const runs: ExactRunEvidence[] = [];
     for (const { request, run } of exactRuns) {
-      if (!run) continue;
       const runCriterionIds = new Set([
         ...request.scenario.criteria,
         ...(request.observations ?? []),
@@ -284,13 +350,14 @@ export class ReadoutQueueProcessor extends BaseQueueProcessor<SubmissionDocument
       const trajectories = await Promise.all(
         (run.turns ?? []).flatMap((turn) =>
           turn.atifUrl
-            ? [withRetry(() =>
-              this.blobStorage.downloadJson(turn.atifUrl!)
-            ).then((trajectory) => ({
-              iteration: turn.iteration,
-              trajectory,
-            }))]
-            : [],
+            ? [
+                withRetry(() => this.blobStorage.downloadJson(turn.atifUrl!))
+                  .then((trajectory) => ({
+                    iteration: turn.iteration,
+                    trajectory,
+                  })),
+              ]
+            : []
         ),
       );
       runs.push({
@@ -304,8 +371,8 @@ export class ReadoutQueueProcessor extends BaseQueueProcessor<SubmissionDocument
       });
     }
     return {
-      submissionId: submission._id,
-      submissionRunId: submission.run._id,
+      experimentId: payload.experimentId,
+      experimentExecutionId: payload.experimentExecutionId,
       runs,
     };
   }

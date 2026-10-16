@@ -133,7 +133,18 @@ export function ReportDetail() {
               <ReportStatusBadge status={report.status} />
               {report.structuredArtifact && (
                 <Button variant="outline" size="sm" asChild>
-                  <a href={api.reportStructuredUrl(report._id)} download>
+                  <a
+                    href={
+                      report.experimentId && report.experimentExecutionId
+                        ? api.experimentReportStructuredUrl(
+                            report.experimentId,
+                            report.experimentExecutionId,
+                            report._id,
+                          )
+                        : api.reportStructuredUrl(report._id)
+                    }
+                    download
+                  >
                     <Download className="mr-1 h-3.5 w-3.5" />
                     Structured JSON
                   </a>
@@ -149,13 +160,13 @@ export function ReportDetail() {
                   </Badge>
                 </Link>
               )}
-              {report.submissionId ? (
+              {report.experimentId && report.experimentExecutionId ? (
                 <Link
-                  to={`/submissions/${report.submissionId}`}
+                  to={`/experiments/${report.experimentId}?execution=${encodeURIComponent(report.experimentExecutionId)}&report=${encodeURIComponent(report._id)}`}
                   className="flex items-center gap-1 hover:text-foreground transition-colors"
                 >
                   <span className="font-mono">
-                    Submission: {report.submissionId.slice(0, 8)}…
+                    Experiment: {report.experimentId.slice(0, 8)}…
                   </span>
                   <ExternalLink className="h-3 w-3" />
                 </Link>
@@ -351,14 +362,14 @@ export function ReportDetail() {
                 </div>
                 <div>
                   <span className="text-muted-foreground">
-                    {report.submissionId ? "Submission run:" : "Run ID:"}
+                    {report.experimentId ? "Experiment execution:" : "Run ID:"}
                   </span>{" "}
-                  {report.submissionId ? (
+                  {report.experimentId && report.experimentExecutionId ? (
                     <Link
-                      to={`/submissions/${report.submissionId}`}
+                      to={`/experiments/${report.experimentId}?execution=${encodeURIComponent(report.experimentExecutionId)}&report=${encodeURIComponent(report._id)}`}
                       className="font-mono text-primary hover:underline"
                     >
-                      {report.submissionRunId}
+                      {report.experimentExecutionId}
                     </Link>
                   ) : report.requestId ? (
                     <Link

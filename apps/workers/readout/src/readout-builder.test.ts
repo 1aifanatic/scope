@@ -8,12 +8,12 @@ import type {
   RunState,
 } from "shared";
 import {
-  composeSubmissionReadout,
-  renderSubmissionReadoutMarkdown,
-  type SubmissionEvidence,
+  composeExperimentReadout,
+  renderExperimentReadoutMarkdown,
+  type ExperimentEvidence,
 } from "./readout-builder.js";
 
-function evidence(): SubmissionEvidence {
+function evidence(): ExperimentEvidence {
   const criterion: CriteriaDocument = {
     id: "uses-current-api",
     projectId: "project-1",
@@ -60,16 +60,16 @@ function evidence(): SubmissionEvidence {
     }],
   } satisfies RunState;
   return {
-    submissionId: "submission-1",
-    submissionRunId: "submission-run-1",
+    experimentId: "experiment-1",
+    experimentExecutionId: "execution-1",
     runs: [{ request, run, criteria: [criterion], trajectories: [] }],
   };
 }
 
-describe("submission readout composition", () => {
+describe("experiment readout composition", () => {
   it("preserves mixed run/iteration observations, profiles, and provenance", () => {
-    const readout = composeSubmissionReadout(evidence(), {
-      title: "Submission readout",
+    const readout = composeExperimentReadout(evidence(), {
+      title: "Experiment readout",
       executiveSummary: "The run failed after mixed observation evidence.",
       profiles: [{
         profileId: "profile-1",
@@ -108,7 +108,7 @@ describe("submission readout composition", () => {
       expect.objectContaining({ subject: "iteration", passed: true }),
     ]);
     expect(readout.findings[0].evidence[0]).toMatchObject({
-      submissionRunId: "submission-run-1",
+      experimentExecutionId: "execution-1",
       requestId: "request-1",
       runId: "run-1",
     });
@@ -120,14 +120,14 @@ describe("submission readout composition", () => {
     expect(readout.summary.failedRuns).toBe(1);
     expect(readout.summary.passedObservations).toBe(1);
     expect(readout.summary.failedObservations).toBe(1);
-    expect(renderSubmissionReadoutMarkdown(readout)).toContain(
-      "Schema: `scope.submission-readout@1.0`",
+    expect(renderExperimentReadoutMarkdown(readout)).toContain(
+      "Schema: `scope.experiment-readout@1.0`",
     );
   });
 
   it("rejects evidence outside the exact vector", () => {
-    expect(() => composeSubmissionReadout(evidence(), {
-      title: "Submission readout",
+    expect(() => composeExperimentReadout(evidence(), {
+      title: "Experiment readout",
       executiveSummary: "Invalid evidence.",
       profiles: [{ requestIds: ["request-1"], summary: "One run." }],
       runs: [{
@@ -151,8 +151,8 @@ describe("submission readout composition", () => {
   });
 
   it("rejects findings that cite a missing iteration", () => {
-    expect(() => composeSubmissionReadout(evidence(), {
-      title: "Submission readout",
+    expect(() => composeExperimentReadout(evidence(), {
+      title: "Experiment readout",
       executiveSummary: "Invalid iteration evidence.",
       profiles: [],
       runs: [],
@@ -173,8 +173,8 @@ describe("submission readout composition", () => {
   });
 
   it("canonically retains every exact-vector profile when synthesis omits it", () => {
-    const readout = composeSubmissionReadout(evidence(), {
-      title: "Submission readout",
+    const readout = composeExperimentReadout(evidence(), {
+      title: "Experiment readout",
       executiveSummary: "Profile synthesis was omitted.",
       profiles: [],
       runs: [],

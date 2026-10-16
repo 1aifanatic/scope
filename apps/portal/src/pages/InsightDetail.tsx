@@ -215,12 +215,12 @@ export function InsightDetail() {
                       </Link>
                     </TableCell>
                     <TableCell>
-                      {report.submissionId ? (
+                      {report.experimentId && report.experimentExecutionId ? (
                         <Link
-                          to={`/submissions/${report.submissionId}`}
+                          to={`/experiments/${report.experimentId}?execution=${encodeURIComponent(report.experimentExecutionId)}`}
                           className="font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
                         >
-                          {formatId(report.submissionId)}
+                          {formatId(report.experimentId)}
                         </Link>
                       ) : report.requestId ? (
                         <Link

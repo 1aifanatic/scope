@@ -11,13 +11,13 @@ import type { Report } from "@/types";
 const report: Report = {
   _id: "report-1",
   id: "report-1",
-  submissionId: "submission-1",
-  submissionRunId: "submission-run-1",
+  experimentId: "experiment-1",
+  experimentExecutionId: "experiment-execution-1",
   status: "completed",
   content: "# Generated report",
   reporter: {
     id: "pp-readout",
-    name: "Submission Readout",
+    name: "Experiment Readout",
     gitHash: "development",
     model: "gpt-5.4",
     agentId: "unknown",
@@ -39,8 +39,8 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("ReportPreviewPanel submission reports", () => {
-  it("identifies a template-less report without using report-type terminology", async () => {
+describe("ReportPreviewPanel experiment reports", () => {
+  it("identifies the built-in report without exposing its handler identifier", async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -54,7 +54,7 @@ describe("ReportPreviewPanel submission reports", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("template-less")).toBeDefined();
+    expect(await screen.findByText("built-in")).toBeDefined();
     expect(screen.queryByText("default template")).toBeNull();
   });
 });

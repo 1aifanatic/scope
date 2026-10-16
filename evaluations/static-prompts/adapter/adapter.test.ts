@@ -71,7 +71,7 @@ describe("static prompt adapter registry", () => {
           "default",
           "append",
           "override-control",
-          "submission-readout",
+          "experiment-readout",
         ],
       },
     ]);
@@ -102,9 +102,9 @@ describe("static prompt adapter registry", () => {
       variant: "override-control",
     });
     expect(targets).toContainEqual({
-      adapterId: "run-report/submission-readout",
+      adapterId: "run-report/experiment-readout",
       family: "run-report",
-      variant: "submission-readout",
+      variant: "experiment-readout",
     });
     expect(JSON.parse(JSON.stringify(targets))).toEqual(targets);
   });
@@ -137,6 +137,7 @@ describe("API prompt production contracts", () => {
     expect(result.output).toEqual({
       prompt: "Use captured build output.",
       suggestedId: "builds_cleanly",
+      suggestedSubject: "run",
     });
   });
 
@@ -434,18 +435,18 @@ describe("session prompt adapters", () => {
     );
   });
 
-  it("composes the exact submission-readout prompt without tools", async () => {
+  it("composes the exact experiment-readout prompt without tools", async () => {
     const evidence = {
-      submissionId: "submission-1",
-      submissionRunId: "submission-run-1",
+      experimentId: "experiment-1",
+      experimentExecutionId: "execution-1",
       runs: [],
     };
     const result = await getPromptTarget(
       "run-report",
-      "submission-readout",
+      "experiment-readout",
     ).run(
       { evidence },
-      "submission-readout",
+      "experiment-readout",
       fakeContext(() => "{}"),
     );
 
@@ -454,7 +455,7 @@ describe("session prompt adapters", () => {
       {
         role: "user",
         content: [
-          "Generate the submission readout synthesis for this exact immutable evidence vector.",
+          "Generate the Experiment readout synthesis for this exact immutable execution evidence vector.",
           JSON.stringify(evidence),
         ].join("\n\n"),
       },

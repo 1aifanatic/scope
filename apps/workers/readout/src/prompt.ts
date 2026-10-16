@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { SubmissionEvidence } from "./readout-builder.js";
+import type { ExperimentEvidence } from "./readout-builder.js";
 
-export const READOUT_SYSTEM_PROMPT = `You synthesize a submission-level benchmark readout from an exact immutable vector of Scope runs.
+export const READOUT_SYSTEM_PROMPT = `You synthesize an Experiment benchmark readout from an exact immutable execution vector of Scope runs.
 
 The user message contains JSON evidence for every request/run pair in that vector: request metadata, coding outcome, profile metadata, criteria definitions, run-level and per-iteration observations, and ATIF trajectories.
 
@@ -55,9 +55,9 @@ Rules:
 - Ground every finding in at least one evidence reference.
 - Return no Markdown fences or commentary.`;
 
-export function composeReadoutUserPrompt(evidence: SubmissionEvidence): string {
+export function composeReadoutUserPrompt(evidence: ExperimentEvidence): string {
   return [
-    "Generate the submission readout synthesis for this exact immutable evidence vector.",
+    "Generate the Experiment readout synthesis for this exact immutable execution evidence vector.",
     JSON.stringify(evidence),
   ].join("\n\n");
 }

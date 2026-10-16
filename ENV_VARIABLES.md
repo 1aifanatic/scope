@@ -889,23 +889,23 @@ Timeout for the Copilot SDK session used by the report-generator worker. If the 
 
 Git commit hash embedded in reporter metadata. Automatically set during CI/CD builds. Used to track which version of the report-generator produced a given report.
 
-## Submission Readout Handler Configuration
+## Experiment Readout Handler Configuration
 
 ### AZURE_STORAGE_QUEUE_READOUT
 **Default:** `pp-readout-queue`
 **Type:** string
 
-Azure Storage Queue name for submission readout jobs. The scheduler enqueues
-`{ type: "readout", submissionId, submissionRunId }` only after
-`pp-observations` is done for every exact request/run pair in the current
-submission attempt.
+Azure Storage Queue name for Experiment readout jobs. The coordinator enqueues
+an exact execution message containing `projectId`, `experimentId`,
+`experimentExecutionId`, handler identity/version, claim token, and execution
+version only after `pp-observations` is done for every exact request/run pair.
 
 ### READOUT_MODEL
 **Default:** `gpt-5.4`
 **Type:** string
 
 The Copilot SDK model used by the dedicated `pp-readout` worker to synthesize a
-schema-validated structured submission readout. Markdown is derived from the
+schema-validated structured Experiment readout. Markdown is derived from the
 validated structured object.
 
 ### READOUT_SESSION_TIMEOUT_MS
@@ -913,8 +913,8 @@ validated structured object.
 **Type:** integer (milliseconds)
 
 Timeout for one readout-generation attempt. Exhausted generation or schema
-validation marks the exact current submission attempt's `pp-readout` handler as
-failed; historical and superseded attempts remain immutable.
+validation marks the exact current Experiment execution's `pp-readout` handler
+as failed; historical and superseded executions remain immutable.
 
 ## Scheduler Configuration
 

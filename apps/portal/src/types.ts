@@ -504,8 +504,8 @@ export interface Report {
   _id: string;
   id: string;
   requestId?: string;
-  submissionId?: string;
-  submissionRunId?: string;
+  experimentId?: string;
+  experimentExecutionId?: string;
   task?: string;
   reporter?: Reporter;
   content?: string;

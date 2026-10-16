@@ -147,7 +147,7 @@ Gate criteria are always `subject: "iteration"` (the API rejects `"run"` for gat
 Dimension grouping is **derived at read time** by joining each result's
 `criterionId` → criterion `taxonomyElementId` (the three R&A Readout
 dimensions; unset = unclassified). It never feeds back to the agent and never
-affects pass/fail. Submission report synthesis consumes these classifications
+affects pass/fail. Experiment readout synthesis consumes these classifications
 after every exact-vector dependency is ready.
 
 
@@ -266,27 +266,33 @@ flowchart LR
 
 Experiment handlers use the same `services` registration endpoint but declare
 `type: experiment-handler` and `dependencyMode: all-runs`. Their dependencies
-name run-level DAG handlers. The coordinator projects those dependencies for
-the current Experiment's exact request/run vector and dispatches only its
-embedded current execution. Built-in readout processing is not part of this
-foundation; see [Experiments](experiments.md) for the queue and rollover
-contracts.
+name run-level DAG handlers. The coordinator projects those dependencies for the current Experiment's exact
+request/run vector and dispatches only its embedded current execution.
 
-The public submission resource is generic:
-`GET /api/v1/submissions/:id/reports` returns current and historical reports in
-newest-first order, matching the run-level reports collection convention. The
-embedded current attempt's `reportId` is resolved through
-`GET /api/v1/reports/:reportId`; Structured JSON is downloaded through the
-report artifact proxy. Internal handler, queue, and schema identifiers retain
-`readout` because they identify this specific synthesis implementation rather
-than the public resource.
+The built-in `pp-readout` handler has `dependencyMode: all-runs` and depends on
+`pp-observations`. A `done` observation handler is evidence even when the
+coding outcome is `failed` or an observation has `passed: false`; failed or
+dependency-blocked observations prevent dispatch, while unrelated handler
+failures do not. Its queue message is attempt-scoped and includes the exact
+`experimentId`, `experimentExecutionId`, execution version, handler version,
+and claim token.
 
-Submission-handler logs are persisted under the exact submission attempt and
-streamed through
-`GET /api/v1/submissions/:id/runs/:submissionRunId/logs`. Queue processors use
-the message's `submissionRunId` as the log attempt key, so superseded attempts
-remain independently replayable and cannot inherit logs from a newer current
-attempt.
+The public surface remains generic:
+`GET /api/v1/experiments/:id/executions/:experimentExecutionId/reports` returns
+the exact execution's reports newest first. The global report endpoint resolves
+the same append-only document, and the nested `/structured` route proxies its
+schema-validated JSON artifact. The worker derives Markdown from that JSON and
+atomically publishes the execution report pointer with final handler completion.
+Internal handler, queue, and schema identifiers retain `readout` because they
+identify this synthesis implementation rather than a public report type.
+
+Experiment-handler logs are persisted under the exact execution and streamed
+through
+`GET /api/v1/experiments/:id/executions/:experimentExecutionId/logs`. Queue
+processors use `experimentExecutionId` as the log attempt key, so superseded
+executions remain independently replayable and cannot inherit logs from a newer
+current attempt. See [Experiments](experiments.md#built-in-readout) for the
+full stale-work, storage, and final compare-and-swap contract.
 
 To **add or change a handler**, edit its `handler.yaml` (bump `version`, adjust `dependsOn`, etc.) — no code or migration changes are needed for registration.
 

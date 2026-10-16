@@ -1,8 +1,8 @@
-# Submission handler registration metadata.
+# Experiment handler registration metadata.
 # Read by the generic register-handler script and POSTed to the
 # scheduler's POST /handlers/register endpoint on deploy.
 _id: pp-readout
-type: submission-handler
+type: experiment-handler
 version: 1
 queue: pp-readout-queue
 selector: readout

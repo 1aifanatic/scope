@@ -22,5 +22,4 @@ export * from "./account.js";
 export * from "./feature-flag.js";
 export * from "./profile.js";
 export * from "./project.js";
-export * from "./taxonomy.js";
 export * from "./readout.js";

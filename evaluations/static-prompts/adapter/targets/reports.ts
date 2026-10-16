@@ -217,7 +217,7 @@ export function composeReportRequest(
   variant: string,
   defaultModel: string,
 ): ComposedPromptRequest {
-  if (variant === "submission-readout") {
+  if (variant === "experiment-readout") {
     const value = record(input);
     const evidence = record(value.evidence, "input.evidence");
     return {
@@ -234,7 +234,7 @@ export function composeReportRequest(
         optionalString(value.model, "input.model") ?? defaultModel,
       tools: [],
       metadata: {
-        adapterId: "run-report/submission-readout",
+        adapterId: "run-report/experiment-readout",
         productionSources: [
           "apps/workers/readout/src/prompt.ts#READOUT_SYSTEM_PROMPT",
           "apps/workers/readout/src/readout-generator.ts#composeReadoutUserPrompt",
@@ -252,9 +252,9 @@ export function composeReportRequest(
 
 export const reportAdapter: PromptTargetAdapter<string> = {
   family: "run-report",
-  variants: ["default", "append", "override-control", "submission-readout"],
+  variants: ["default", "append", "override-control", "experiment-readout"],
   async run(input, variant, context) {
-    if (variant === "submission-readout") {
+    if (variant === "experiment-readout") {
       const request = composeReportRequest(input, variant, context.model);
       const completion = await context.complete(request);
       return {

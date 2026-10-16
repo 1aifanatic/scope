@@ -20,7 +20,7 @@ describe("report get", () => {
         ok: true,
         status: 200,
         json: async () => ({
-          meta: { schemaId: "scope.submission-readout" },
+          meta: { schemaId: "scope.experiment-readout" },
         }),
       };
     }));
@@ -47,17 +47,17 @@ describe("report get", () => {
     expect(urls).toEqual([
       "http://localhost:3100/api/v1/reports/report-1/structured",
     ]);
-    expect(output.join("\n")).toContain('"schemaId": "scope.submission-readout"');
+    expect(output.join("\n")).toContain('"schemaId": "scope.experiment-readout"');
   });
 
-  it("renders submission subject metadata through standard report retrieval", async () => {
+  it("renders experiment subject metadata through standard report retrieval", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true,
       status: 200,
       json: async () => ({
         id: "report-1",
-        submissionId: "submission-1",
-        submissionRunId: "submission-run-1",
+        experimentId: "experiment-1",
+        experimentExecutionId: "execution-1",
         status: "completed",
         createdAt: "2026-01-01T00:00:00.000Z",
       }),
@@ -83,15 +83,15 @@ describe("report get", () => {
       { from: "user" },
     );
 
-    expect(output.join("\n")).toContain('"submissionId": "submission-1"');
+    expect(output.join("\n")).toContain('"experimentId": "experiment-1"');
     expect(output.join("\n")).toContain(
-      '"submissionRunId": "submission-run-1"',
+      '"experimentExecutionId": "execution-1"',
     );
   });
 });
 
 describe("report list", () => {
-  it("passes submission filters to the global reports collection", async () => {
+  it("passes experiment filters to the global reports collection", async () => {
     const urls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
       urls.push(request.url);
@@ -109,10 +109,10 @@ describe("report list", () => {
       [
         "report",
         "list",
-        "--submission",
-        "submission-1",
-        "--submission-run",
-        "submission-run-1",
+        "--experiment",
+        "experiment-1",
+        "--experiment-execution",
+        "execution-1",
         "--project",
         "project-1",
         "-o",
@@ -124,7 +124,7 @@ describe("report list", () => {
     );
 
     expect(urls).toEqual([
-      "http://localhost:3100/api/v1/reports?submissionId=submission-1&submissionRunId=submission-run-1&projectId=project-1",
+      "http://localhost:3100/api/v1/reports?experimentId=experiment-1&experimentExecutionId=execution-1&projectId=project-1",
     ]);
   });
 });

@@ -424,7 +424,11 @@ export function RunDetail() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const selectedRunId = searchParams.get("runId");
-  const fromSubmissionId = searchParams.get("fromSubmission");
+  const fromExperimentId = searchParams.get("fromExperiment");
+  const fromExperimentExecutionId = searchParams.get("experimentExecution");
+  const experimentHref = fromExperimentId
+    ? `/experiments/${fromExperimentId}${fromExperimentExecutionId ? `?execution=${encodeURIComponent(fromExperimentExecutionId)}` : ""}`
+    : undefined;
   const [copied, setCopied] = useState(false);
   const [reportsView, setReportsView] = useState<"grid" | "list">("grid");
   const [reportsFilter, setReportsFilter] = useState<"latest" | "all">("latest");
@@ -706,10 +710,10 @@ export function RunDetail() {
   if (error || !run) {
     return (
       <div className="space-y-4">
-        <Link to={fromSubmissionId ? `/submissions/${fromSubmissionId}` : "/runs"}>
+        <Link to={experimentHref ?? "/runs"}>
           <Button variant="ghost" className="gap-1.5">
             <ArrowLeft className="h-4 w-4" />{" "}
-            {fromSubmissionId ? "Back to submission" : "Back to runs"}
+            {experimentHref ? "Back to experiment" : "Back to runs"}
           </Button>
         </Link>
         <div className="text-center py-12 text-destructive">
@@ -808,16 +812,12 @@ export function RunDetail() {
       <div>
         <Link
           to={
-            fromSubmissionId || run.submissionId
-              ? `/submissions/${fromSubmissionId ?? run.submissionId}`
-              : "/runs"
+            experimentHref ?? "/runs"
           }
         >
           <Button variant="ghost" size="sm" className="gap-1.5 mb-2">
             <ArrowLeft className="h-4 w-4" />{" "}
-            {fromSubmissionId || run.submissionId
-              ? "Back to submission"
-              : "Back to runs"}
+            {experimentHref ? "Back to experiment" : "Back to runs"}
           </Button>
         </Link>
 

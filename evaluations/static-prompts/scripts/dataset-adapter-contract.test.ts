@@ -57,10 +57,10 @@ function fakeResponse(row: QualityCaseRow, request: ComposedPromptRequest): stri
     case "developer-feedback":
       return "Implement the missing requirement and rerun the relevant check.";
     case "run-report":
-      if (row.variant === "submission-readout") {
+      if (row.variant === "experiment-readout") {
         expect(request.tools).toEqual([]);
         return JSON.stringify({
-          title: "Submission readout",
+          title: "Experiment readout",
           executiveSummary: "The exact vector was reviewed.",
           profiles: [],
           runs: [],

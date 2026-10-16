@@ -119,15 +119,17 @@ export function ReportsList() {
       header: "Subject",
       width: "120px",
       hidden: columnVisibility.isHidden("runId"),
-      cell: (r) => r.submissionId ? (
+      cell: (r) => r.experimentId && r.experimentExecutionId ? (
         <span
           className="font-mono text-xs text-muted-foreground hover:text-foreground cursor-pointer"
           onClick={(event) => {
             event.stopPropagation();
-            navigate(`/submissions/${r.submissionId}`);
+            navigate(
+              `/experiments/${r.experimentId}?execution=${encodeURIComponent(r.experimentExecutionId!)}`,
+            );
           }}
         >
-          Submission {formatId(r.submissionId)}
+          Experiment {formatId(r.experimentId)}
         </span>
       ) : r.requestId ? (
         <span
@@ -164,7 +166,7 @@ export function ReportsList() {
           </Badge>
         ) : (
           <span className="text-xs text-muted-foreground">
-            {r.submissionId ? "template-less" : "default"}
+            {r.experimentId ? "built-in" : "default"}
           </span>
         ),
     },
@@ -205,7 +207,7 @@ export function ReportsList() {
       <div className="min-h-0 flex-1">
         <ListLayout
           title="Reports"
-          description="Generated analysis reports for benchmark runs and submissions"
+          description="Generated analysis reports for benchmark runs and experiments"
           railStorageKey="reports"
           filterRail={
             <FilterRail

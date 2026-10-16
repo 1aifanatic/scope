@@ -3,23 +3,23 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  SUBMISSION_READOUT_SCHEMA_ID,
-  SUBMISSION_READOUT_SCHEMA_VERSION,
-  submissionReadoutSchema,
+  EXPERIMENT_READOUT_SCHEMA_ID,
+  EXPERIMENT_READOUT_SCHEMA_VERSION,
+  experimentReadoutSchema,
 } from "./readout.js";
 
-describe("submissionReadoutSchema", () => {
+describe("experimentReadoutSchema", () => {
   it("accepts a one-request readout with empty selected observations", () => {
-    expect(submissionReadoutSchema.parse({
+    expect(experimentReadoutSchema.parse({
       meta: {
-        schemaId: SUBMISSION_READOUT_SCHEMA_ID,
-        schemaVersion: SUBMISSION_READOUT_SCHEMA_VERSION,
+        schemaId: EXPERIMENT_READOUT_SCHEMA_ID,
+        schemaVersion: EXPERIMENT_READOUT_SCHEMA_VERSION,
         generatedAt: "2026-10-13T12:00:00.000Z",
-        submissionId: "submission-1",
-        submissionRunId: "submission-run-1",
+        experimentId: "experiment-1",
+        experimentExecutionId: "execution-1",
       },
       summary: {
-        title: "Submission readout",
+        title: "Experiment readout",
         executiveSummary: "The single run completed without selected observations.",
         totalRuns: 1,
         succeededRuns: 1,

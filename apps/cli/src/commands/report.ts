@@ -137,8 +137,8 @@ report
       const report = await response.json() as {
         id: string;
         requestId?: string;
-        submissionId?: string;
-        submissionRunId?: string;
+        experimentId?: string;
+        experimentExecutionId?: string;
         status: string;
         reporter?: { id: string; name: string; model: string; agentId: string; agentVersion: string };
         content?: string;
@@ -156,8 +156,8 @@ report
         const fields: DisplayField[] = [
           { key: 'id', label: 'ID' },
           { key: 'requestId', label: 'Run' },
-          { key: 'submissionId', label: 'Submission' },
-          { key: 'submissionRunId', label: 'Submission Run' },
+          { key: 'experimentId', label: 'Experiment' },
+          { key: 'experimentExecutionId', label: 'Experiment Execution' },
           { key: 'status', label: 'Status' },
           { key: 'reporter', label: 'Reporter', formatter: (r: any) => r.reporter ? `${r.reporter.name} (${r.reporter.agentId}@${r.reporter.agentVersion})` : '' },
           { key: 'model', label: 'Model', formatter: (r: any) => r.reporter?.model || '' },
@@ -174,11 +174,11 @@ report
       if (report.requestId) {
         console.log(`${label('Run:')}       ${value(report.requestId)}`);
       }
-      if (report.submissionId) {
-        console.log(`${label('Submission:')} ${value(report.submissionId)}`);
+      if (report.experimentId) {
+        console.log(`${label('Experiment:')} ${value(report.experimentId)}`);
       }
-      if (report.submissionRunId) {
-        console.log(`${label('Attempt:')}    ${value(report.submissionRunId)}`);
+      if (report.experimentExecutionId) {
+        console.log(`${label('Execution:')}  ${value(report.experimentExecutionId)}`);
       }
       console.log(`${label('Status:')}    ${colorLevel(report.status === "completed" ? "info" : report.status === "failed" ? "error" : "warn")} ${report.status}`);
       console.log(`${label('Created:')}   ${dimTimestamp(new Date(report.createdAt).toLocaleString())}`);
@@ -210,8 +210,8 @@ report
   .command("list")
   .description("List all reports")
   .option("-r, --run <requestId>", "Filter by run ID")
-  .option("-s, --submission <submissionId>", "Filter by submission ID")
-  .option("--submission-run <submissionRunId>", "Filter by submission run ID")
+  .option("-e, --experiment <experimentId>", "Filter by experiment ID")
+  .option("--experiment-execution <experimentExecutionId>", "Filter by experiment execution ID")
   .option("-u, --url <url>", "API base URL", getDefaultApiUrl())
 ))
   .action(async (options) => {
@@ -220,9 +220,9 @@ report
     try {
       const params = new URLSearchParams();
       if (options.run) params.set("requestId", options.run);
-      if (options.submission) params.set("submissionId", options.submission);
-      if (options.submissionRun) {
-        params.set("submissionRunId", options.submissionRun);
+      if (options.experiment) params.set("experimentId", options.experiment);
+      if (options.experimentExecution) {
+        params.set("experimentExecutionId", options.experimentExecution);
       }
       const qs = params.toString();
       const response = await apiFetch(options.url, `/reports${qs ? `?${qs}` : ""}`, { projectId });
@@ -236,8 +236,8 @@ report
       const reports = await response.json() as Array<{
         id: string;
         requestId?: string;
-        submissionId?: string;
-        submissionRunId?: string;
+        experimentId?: string;
+        experimentExecutionId?: string;
         status: string;
         reporter?: { model: string };
         createdAt: string;
@@ -259,11 +259,11 @@ report
         { key: 'requestId', label: 'Run ID',
           tableFormatter: (r: any) => r.requestId ? dimTimestamp(r.requestId) : 'N/A',
         },
-        { key: 'submissionId', label: 'Submission',
-          tableFormatter: (r: any) => r.submissionId ? dimTimestamp(r.submissionId) : 'N/A',
+        { key: 'experimentId', label: 'Experiment',
+          tableFormatter: (r: any) => r.experimentId ? dimTimestamp(r.experimentId) : 'N/A',
         },
-        { key: 'submissionRunId', label: 'Submission Run',
-          tableFormatter: (r: any) => r.submissionRunId ? dimTimestamp(r.submissionRunId) : 'N/A',
+        { key: 'experimentExecutionId', label: 'Experiment Execution',
+          tableFormatter: (r: any) => r.experimentExecutionId ? dimTimestamp(r.experimentExecutionId) : 'N/A',
         },
         { key: 'status', label: 'Status',
           tableFormatter: (r: any) => {

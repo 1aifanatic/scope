@@ -3,64 +3,94 @@
 
 import type { DequeuedMessageItem } from "@azure/storage-queue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-  CriteriaDocument,
-  SubmissionDocument,
-  VisibilityHeartbeat,
+import {
+  EXPERIMENT_STORAGE_PROFILE_VERSION,
+  ExperimentStore,
+  type CriteriaDocument,
+  type ExperimentDocument,
+  type RequestDocument,
+  type RunHistoryDocument,
+  type VisibilityHeartbeat,
 } from "shared";
-import type { RequestDocument, RunHistoryDocument } from "shared";
 
-const coordination = vi.hoisted(() => ({
-  claim: vi.fn(),
-  complete: vi.fn(),
-  isCurrent: vi.fn(),
-}));
 const generate = vi.hoisted(() => vi.fn());
-
-vi.mock("shared", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("shared")>()),
-  claimSubmissionHandler: coordination.claim,
-  completeSubmissionHandler: coordination.complete,
-  isCurrentSubmissionRun: coordination.isCurrent,
-}));
 vi.mock("./readout-generator.js", () => ({
-  generateSubmissionReadout: generate,
+  generateExperimentReadout: generate,
 }));
 
 import { ReadoutQueueProcessor } from "./readout-queue-processor.js";
 
-const submission: SubmissionDocument = {
-  _id: "submission-1",
-  submissionId: "submission-1",
+const now = new Date("2026-10-13T12:00:00.000Z");
+const experiment: ExperimentDocument = {
+  _id: "experiment-1",
+  experimentId: "experiment-1",
   projectId: "project-1",
-  requestIds: ["request-1"],
-  run: {
-    _id: "submission-run-1",
+  metadata: { name: "Experiment" },
+  storageProfileVersion: EXPERIMENT_STORAGE_PROFILE_VERSION,
+  stateVersion: 1,
+  revision: {
+    experimentRevisionId: "revision-1",
+    revisionNumber: 1,
+    memberCount: 1,
+    membershipFingerprint: "membership",
+    definitionFingerprint: "definition",
+    createdAt: now,
+  },
+  execution: {
+    experimentExecutionId: "execution-1",
     attemptNumber: 1,
-    vectorFingerprint: "request-1:run-1",
-    requests: [{ requestId: "request-1", runId: "run-1" }],
-    dependencyProjection: [],
-    handlerStatus: {
+    version: 2,
+    requests: {
+      storage: "inline",
+      entryCount: 1,
+      payloadFingerprint: "payload",
+      payloadVersion: 1,
+      entries: [{
+        requestId: "request-1",
+        runId: "run-1",
+        dependencies: [{ handlerId: "pp-observations", state: "ready" }],
+        blockers: [],
+      }],
+    },
+    vectorFingerprint: "vector",
+    handlerSummary: {
       "pp-readout": {
-        version: 1,
         status: "processing",
-        updatedAt: new Date("2026-10-13T12:00:00.000Z"),
+        version: 1,
+        claimToken: "claim-1",
+        updatedAt: now,
       },
     },
     blocking: [],
-    createdAt: new Date("2026-10-13T12:00:00.000Z"),
-    startedAt: new Date("2026-10-13T12:00:00.000Z"),
-    updatedAt: new Date("2026-10-13T12:00:00.000Z"),
+    createdAt: now,
+    updatedAt: now,
   },
-  createdAt: new Date("2026-10-13T12:00:00.000Z"),
-  updatedAt: new Date("2026-10-13T12:00:00.000Z"),
+  createdAt: now,
+  updatedAt: now,
 };
+
+const payload = {
+  type: "readout",
+  projectId: experiment.projectId,
+  experimentId: experiment.experimentId,
+  experimentExecutionId: experiment.execution.experimentExecutionId,
+  handlerId: "pp-readout",
+  handlerVersion: 1,
+  claimToken: "claim-1",
+  executionVersion: 1,
+};
+type ReadoutPayload = typeof payload;
+
+const message = { messageId: "message-1" } as DequeuedMessageItem;
+const heartbeat = {
+  stop: vi.fn().mockResolvedValue(undefined),
+} as unknown as VisibilityHeartbeat;
 
 function processor() {
   const instance = new ReadoutQueueProcessor({
     mongoUri: "mongodb://localhost:27017",
     mongoDatabase: "scope",
-    mongoCollection: "submissions",
+    mongoCollection: "experiments",
     storageAccountName: "devstoreaccount1",
     storageConnectionString: "UseDevelopmentStorage=true",
     queueName: "pp-readout-queue",
@@ -73,6 +103,10 @@ function processor() {
     sessionTimeoutMs: 1_000,
   });
   const insertOne = vi.fn().mockResolvedValue({ acknowledged: true });
+  const uploadJson = vi.fn().mockResolvedValue(
+    "https://storage.example/reports/report/structured.json",
+  );
+  const safeDeleteMessage = vi.fn().mockResolvedValue(undefined);
   Object.assign(instance as object, {
     collection: {},
     db: {
@@ -81,67 +115,51 @@ function processor() {
       ),
     },
     loadEvidence: vi.fn().mockResolvedValue({
-      submissionId: submission._id,
-      submissionRunId: submission.run._id,
+      experimentId: experiment.experimentId,
+      experimentExecutionId: experiment.execution.experimentExecutionId,
       runs: [],
     }),
     tokenClient: {
       acquireToken: vi.fn().mockResolvedValue("token"),
     },
-    blobStorage: {
-      uploadJson: vi.fn().mockImplementation((path: string) =>
-        Promise.resolve(`https://storage.example/${path}`)
-      ),
-    },
-    safeDeleteMessage: vi.fn().mockResolvedValue(undefined),
+    blobStorage: { uploadJson },
+    safeDeleteMessage,
   });
-  return { instance, insertOne };
+  return { instance, insertOne, uploadJson, safeDeleteMessage };
 }
 
-const message = { messageId: "message-1" } as DequeuedMessageItem;
-const heartbeat = {
-  stop: vi.fn().mockResolvedValue(undefined),
-} as unknown as VisibilityHeartbeat;
-const payload = {
-  type: "readout",
-  submissionId: submission._id,
-  submissionRunId: submission.run._id,
-};
-type LogFn = ReturnType<typeof vi.fn>;
-type ReadoutPayload = typeof payload;
-
-async function handle(instance: ReadoutQueueProcessor, log: LogFn = vi.fn()) {
+async function handle(instance: ReadoutQueueProcessor, log = vi.fn()) {
   await (instance as unknown as {
     handleRequest(
-      submission: SubmissionDocument,
+      experiment: ExperimentDocument,
       message: DequeuedMessageItem,
       heartbeat: VisibilityHeartbeat,
-      log: LogFn,
+      log: ReturnType<typeof vi.fn>,
       payload: ReadoutPayload,
     ): Promise<void>;
-  }).handleRequest(submission, message, heartbeat, log, payload);
+  }).handleRequest(experiment, message, heartbeat, log, payload);
 }
 
 describe("readout queue orchestration", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    coordination.isCurrent.mockResolvedValue(true);
+    vi.restoreAllMocks();
+    generate.mockReset();
     generate.mockResolvedValue({
       meta: {
-        schemaId: "scope.submission-readout",
+        schemaId: "scope.experiment-readout",
         schemaVersion: "1.0",
-        generatedAt: "2026-10-13T12:00:00.000Z",
-        submissionId: submission._id,
-        submissionRunId: submission.run._id,
+        generatedAt: now.toISOString(),
+        experimentId: experiment.experimentId,
+        experimentExecutionId: experiment.execution.experimentExecutionId,
       },
       summary: {
-        title: "Submission readout",
+        title: "Experiment readout",
         executiveSummary: "Summary",
-        totalRuns: 0,
+        totalRuns: 1,
         succeededRuns: 0,
-        failedRuns: 0,
+        failedRuns: 1,
         passedObservations: 0,
-        failedObservations: 0,
+        failedObservations: 1,
       },
       profiles: [],
       runs: [],
@@ -150,78 +168,86 @@ describe("readout queue orchestration", () => {
     });
   });
 
-  it("discards stale or duplicate exact-run messages before generation", async () => {
-    coordination.claim.mockResolvedValue(null);
-    const { instance, insertOne } = processor();
+  it("discards stale or duplicate exact-execution messages before generation", async () => {
+    vi.spyOn(ExperimentStore.prototype, "claimHandler").mockResolvedValue(null);
+    const { instance, insertOne, safeDeleteMessage } = processor();
 
     await handle(instance);
 
     expect(generate).not.toHaveBeenCalled();
     expect(insertOne).not.toHaveBeenCalled();
-    expect((instance as unknown as { safeDeleteMessage: ReturnType<typeof vi.fn> })
-      .safeDeleteMessage).toHaveBeenCalledOnce();
+    expect(safeDeleteMessage).toHaveBeenCalledOnce();
   });
 
-  it("keeps superseded completions historical and uses new report ids on retry", async () => {
-    coordination.claim.mockResolvedValue(submission);
-    coordination.complete.mockResolvedValue(false);
-    const { instance, insertOne } = processor();
-    const log = vi.fn().mockResolvedValue(undefined);
-
-    await handle(instance, log);
-    await handle(instance, log);
-
-    expect(insertOne).toHaveBeenCalledTimes(2);
-    const reports = insertOne.mock.calls.map(([report]) => report);
-    expect(reports[0]._id).not.toBe(reports[1]._id);
-    expect(reports).toEqual([
-      expect.objectContaining({
-        submissionId: submission._id,
-        submissionRunId: submission.run._id,
-      }),
-      expect.objectContaining({
-        submissionId: submission._id,
-        submissionRunId: submission.run._id,
-      }),
-    ]);
-    expect(coordination.complete).toHaveBeenCalledTimes(2);
-    expect(log).toHaveBeenCalledWith(
-      "warn",
-      "Readout report remained historical after supersession",
-      expect.objectContaining({
-        submissionId: submission._id,
-        submissionRunId: submission.run._id,
-      }),
-    );
-  });
-
-  it("does not publish when the submission is superseded during upload", async () => {
-    coordination.claim.mockResolvedValue(submission);
-    coordination.isCurrent
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false);
+  it("publishes the report reference with final handler completion in one CAS", async () => {
+    vi.spyOn(ExperimentStore.prototype, "claimHandler").mockResolvedValue(experiment);
+    vi.spyOn(ExperimentStore.prototype, "get").mockResolvedValue(experiment);
+    const complete = vi
+      .spyOn(ExperimentStore.prototype, "completeHandler")
+      .mockResolvedValue(experiment);
     const { instance, insertOne } = processor();
 
     await handle(instance);
 
-    expect(generate).toHaveBeenCalledOnce();
-    expect(insertOne).not.toHaveBeenCalled();
-    expect(coordination.complete).not.toHaveBeenCalled();
+    expect(insertOne).toHaveBeenCalledWith(expect.objectContaining({
+      experimentId: experiment.experimentId,
+      experimentExecutionId: experiment.execution.experimentExecutionId,
+      status: "completed",
+    }));
+    expect(complete).toHaveBeenCalledOnce();
+    expect(complete).toHaveBeenCalledWith(expect.objectContaining({
+      expectedExecutionVersion: experiment.execution.version,
+      status: "done",
+      report: expect.objectContaining({
+        reportId: expect.any(String),
+      }),
+    }));
   });
 
-  it("loads the archived run named by the immutable exact vector", async () => {
+  it("keeps an inserted report historical when work is superseded in flight", async () => {
+    vi.spyOn(ExperimentStore.prototype, "claimHandler").mockResolvedValue(experiment);
+    vi.spyOn(ExperimentStore.prototype, "get")
+      .mockResolvedValueOnce(experiment)
+      .mockResolvedValueOnce(experiment)
+      .mockResolvedValueOnce(experiment)
+      .mockResolvedValueOnce(experiment)
+      .mockResolvedValueOnce(experiment)
+      .mockResolvedValueOnce(null);
+    const complete = vi.spyOn(ExperimentStore.prototype, "completeHandler");
+    const { instance, insertOne } = processor();
+    const log = vi.fn().mockResolvedValue(undefined);
+
+    await handle(instance, log);
+
+    expect(insertOne).toHaveBeenCalledOnce();
+    expect(complete).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(
+      "warn",
+      "Readout report remained historical after supersession",
+      expect.objectContaining({
+        experimentId: experiment.experimentId,
+        experimentExecutionId: experiment.execution.experimentExecutionId,
+      }),
+    );
+  });
+
+  it("loads the archived run named by the immutable exact execution vector", async () => {
     const { instance } = processor();
     delete (instance as unknown as Record<string, unknown>).loadEvidence;
-    const currentRequest = {
+    vi.spyOn(ExperimentStore.prototype, "readExecutionRequests")
+      .mockResolvedValue([{
+        requestId: "request-1",
+        runId: "run-1",
+        dependencies: [{ handlerId: "pp-observations", state: "ready" }],
+        blockers: [],
+      }]);
+    const request = {
       _id: "request-1",
       projectId: "project-1",
       workerType: "coder-acp-copilot",
       observations: ["observation-criterion"],
       scenario: { task: "Task", criteria: ["task-criterion"] },
-      createdAt: new Date("2026-10-13T12:00:00.000Z"),
+      createdAt: now,
       priority: 0,
       run: {
         _id: "run-newer",
@@ -244,27 +270,27 @@ describe("readout queue orchestration", () => {
         feedback: "Archived evidence",
       }],
     } satisfies RunHistoryDocument;
-    const historyFindOne = vi.fn().mockResolvedValue(archivedRun);
     const criteria = [
       {
         id: "task-criterion",
         prompt: "Task criterion",
         projectId: "project-1",
-        createdAt: new Date("2026-10-13T12:00:00.000Z"),
+        createdAt: now,
       },
       {
         id: "observation-criterion",
         prompt: "Configured observation",
         projectId: "project-1",
-        createdAt: new Date("2026-10-13T12:00:00.000Z"),
+        createdAt: now,
       },
       {
         id: "result-criterion",
         prompt: "Archived observation result",
         projectId: "project-1",
-        createdAt: new Date("2026-10-13T12:00:00.000Z"),
+        createdAt: now,
       },
     ] satisfies CriteriaDocument[];
+    const historyFindOne = vi.fn().mockResolvedValue(archivedRun);
     const criteriaFind = vi.fn(() => ({
       toArray: vi.fn().mockResolvedValue(criteria),
     }));
@@ -274,48 +300,33 @@ describe("readout queue orchestration", () => {
           if (name === "requests") {
             return {
               find: vi.fn(() => ({
-                toArray: vi.fn().mockResolvedValue([currentRequest]),
+                toArray: vi.fn().mockResolvedValue([request]),
               })),
             };
           }
           if (name === "runs") return { findOne: historyFindOne };
-          if (name === "criteria") {
-            return { find: criteriaFind };
-          }
+          if (name === "criteria") return { find: criteriaFind };
           return {};
         }),
       },
     });
 
     const evidence = await (instance as unknown as {
-      loadEvidence(value: SubmissionDocument): Promise<{
-        runs: Array<{
-          run: RunHistoryDocument | RequestDocument["run"];
-          criteria: CriteriaDocument[];
-        }>;
+      loadEvidence(value: typeof payload): Promise<{
+        runs: Array<{ run: RunHistoryDocument }>;
       }>;
-    }).loadEvidence(submission);
+    }).loadEvidence(payload);
 
     expect(historyFindOne).toHaveBeenCalledWith({
       _id: "run-1",
       requestId: "request-1",
       projectId: "project-1",
     });
-    expect(evidence.runs[0].run?._id).toBe("run-1");
-    expect(evidence.runs[0].criteria.map((criterion) => criterion.id)).toEqual([
-      "task-criterion",
-      "observation-criterion",
-      "result-criterion",
-    ]);
-    expect(criteriaFind).toHaveBeenCalledWith({
-      projectId: "project-1",
-      id: {
-        $in: expect.arrayContaining([
-          "task-criterion",
-          "observation-criterion",
-          "result-criterion",
-        ]),
-      },
+    expect(evidence.runs[0]?.run._id).toBe("run-1");
+    expect(evidence.runs[0]?.run.outcome).toBe("failed");
+    expect(evidence.runs[0]?.run.observationResults?.[0]).toMatchObject({
+      passed: false,
+      feedback: "Archived evidence",
     });
   });
 });

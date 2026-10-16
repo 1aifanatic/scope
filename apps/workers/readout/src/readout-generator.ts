@@ -4,9 +4,9 @@
 import { CopilotClient, type PermissionHandler, SessionEvent } from "@github/copilot-sdk";
 import type { LogEvent } from "shared";
 import {
-  composeSubmissionReadout,
+  composeExperimentReadout,
   readoutSynthesisSchema,
-  type SubmissionEvidence,
+  type ExperimentEvidence,
 } from "./readout-builder.js";
 import {
   READOUT_SYSTEM_PROMPT,
@@ -24,8 +24,8 @@ type ReadoutLog = (
   data?: Record<string, unknown>,
 ) => Promise<void> | void;
 
-export async function generateSubmissionReadout(input: {
-  evidence: SubmissionEvidence;
+export async function generateExperimentReadout(input: {
+  evidence: ExperimentEvidence;
   model: string;
   githubToken: string;
   timeoutMs: number;
@@ -59,7 +59,7 @@ export async function generateSubmissionReadout(input: {
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       streamedResponse = "";
       latestMessage = "";
-      await input.log("info", `Generating submission readout (${attempt}/3)`);
+      await input.log("info", `Generating Experiment readout (${attempt}/3)`);
       const response = await session.sendAndWait({ prompt }, input.timeoutMs);
       const text =
         response?.data.content?.trim() ||
@@ -79,7 +79,7 @@ export async function generateSubmissionReadout(input: {
       }
       const result = readoutSynthesisSchema.safeParse(parsed);
       if (result.success) {
-        return composeSubmissionReadout(input.evidence, result.data);
+        return composeExperimentReadout(input.evidence, result.data);
       }
       if (attempt === 3) {
         throw new Error(

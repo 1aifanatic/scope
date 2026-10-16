@@ -3,14 +3,14 @@
 
 import { z } from "zod";
 import {
-  SUBMISSION_READOUT_SCHEMA_ID,
-  SUBMISSION_READOUT_SCHEMA_VERSION,
-  submissionReadoutSchema,
+  EXPERIMENT_READOUT_SCHEMA_ID,
+  EXPERIMENT_READOUT_SCHEMA_VERSION,
+  experimentReadoutSchema,
   type CriteriaDocument,
   type CriterionResult,
+  type ExperimentReadout,
   type RequestDocument,
   type RunState,
-  type SubmissionReadout,
 } from "shared";
 
 export interface ExactRunEvidence {
@@ -20,9 +20,9 @@ export interface ExactRunEvidence {
   trajectories: Array<{ iteration: number; trajectory: unknown }>;
 }
 
-export interface SubmissionEvidence {
-  submissionId: string;
-  submissionRunId: string;
+export interface ExperimentEvidence {
+  experimentId: string;
+  experimentExecutionId: string;
   runs: ExactRunEvidence[];
 }
 
@@ -94,11 +94,11 @@ function observationsForRun(evidence: ExactRunEvidence) {
   ];
 }
 
-export function composeSubmissionReadout(
-  evidence: SubmissionEvidence,
+export function composeExperimentReadout(
+  evidence: ExperimentEvidence,
   synthesis: ReadoutSynthesis,
   generatedAt = new Date(),
-): SubmissionReadout {
+): ExperimentReadout {
   const exactRuns = new Map(
     evidence.runs.map((entry) => [
       `${entry.request._id}:${entry.run._id}`,
@@ -188,13 +188,13 @@ export function composeSubmissionReadout(
     }
   }
 
-  return submissionReadoutSchema.parse({
+  return experimentReadoutSchema.parse({
     meta: {
-      schemaId: SUBMISSION_READOUT_SCHEMA_ID,
-      schemaVersion: SUBMISSION_READOUT_SCHEMA_VERSION,
+      schemaId: EXPERIMENT_READOUT_SCHEMA_ID,
+      schemaVersion: EXPERIMENT_READOUT_SCHEMA_VERSION,
       generatedAt: generatedAt.toISOString(),
-      submissionId: evidence.submissionId,
-      submissionRunId: evidence.submissionRunId,
+      experimentId: evidence.experimentId,
+      experimentExecutionId: evidence.experimentExecutionId,
     },
     summary: {
       title: synthesis.title,
@@ -210,7 +210,7 @@ export function composeSubmissionReadout(
     findings: synthesis.findings.map((finding) => ({
       ...finding,
       evidence: finding.evidence.map((reference) => ({
-        submissionRunId: evidence.submissionRunId,
+        experimentExecutionId: evidence.experimentExecutionId,
         ...reference,
       })),
     })),
@@ -218,7 +218,7 @@ export function composeSubmissionReadout(
   });
 }
 
-export function renderSubmissionReadoutMarkdown(readout: SubmissionReadout): string {
+export function renderExperimentReadoutMarkdown(readout: ExperimentReadout): string {
   const lines = [
     `# ${readout.summary.title}`,
     "",
@@ -297,7 +297,7 @@ export function renderSubmissionReadoutMarkdown(readout: SubmissionReadout): str
   lines.push(
     "---",
     `Schema: \`${readout.meta.schemaId}@${readout.meta.schemaVersion}\``,
-    `Submission run: \`${readout.meta.submissionRunId}\``,
+    `Experiment execution: \`${readout.meta.experimentExecutionId}\``,
   );
   return lines.join("\n");
 }

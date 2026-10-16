@@ -181,7 +181,7 @@ function validateFamilyContract(row: DatasetCase, prefix: string, errors: string
       assert(typeof input.includeDescendantGuard === "boolean", `${prefix}: input.includeDescendantGuard must be boolean`, errors);
       break;
     case "run-report":
-      if (row.variant === "submission-readout") {
+      if (row.variant === "experiment-readout") {
         assert(isRecord(input.evidence), `${prefix}: input.evidence is required`, errors);
       } else {
         assert(stringField(input, "requestId"), `${prefix}: input.requestId is required`, errors);
@@ -352,10 +352,10 @@ export async function validateDataset(
       || (row.family === "run-report" && (
         row.variant === "default"
         || row.variant === "override-control"
-        || row.variant === "submission-readout"
+        || row.variant === "experiment-readout"
       ))
       || (row.family === "developer-feedback" && row.variant === "persona")),
-    "synthetic cases are only permitted for unavailable judge evidence, feedback persona, report override controls, and submission readouts",
+    "synthetic cases are only permitted for unavailable judge evidence, feedback persona, report override controls, and experiment readouts",
     errors,
   );
   const hasTag = (family: QualityFamily, tag: string): boolean =>

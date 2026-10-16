@@ -111,27 +111,38 @@ apiRoute(ctx.app, ctx.registry, {
   summary: "List reports",
   query: z.object({
     requestId: z.string().optional(),
-    submissionId: z.string().optional(),
-    submissionRunId: z.string().optional(),
+    experimentId: z.string().optional(),
+    experimentExecutionId: z.string().optional(),
     projectId: z.string().optional(),
+  }).superRefine((value, ctx) => {
+    if (value.experimentExecutionId && !value.experimentId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["experimentId"],
+        message: "experimentId is required with experimentExecutionId",
+      });
+    }
   }),
   response: z.array(ReportResponseSchema),
   handler: async (req, res, next) => {
     try {
       const requestIdFilter = req.query.requestId as string;
-      const submissionIdFilter = req.query.submissionId as string;
-      const submissionRunIdFilter = req.query.submissionRunId as string;
+      const experimentIdFilter = req.query.experimentId as string;
+      const experimentExecutionIdFilter =
+        req.query.experimentExecutionId as string;
       const filter: Record<string, unknown> = {};
       if (requestIdFilter) {
         // Parent-scoped: the run id already pins the project.
         filter.requestId = requestIdFilter;
-      } else if (submissionIdFilter) {
-        filter.submissionId = submissionIdFilter;
-        if (submissionRunIdFilter) filter.submissionRunId = submissionRunIdFilter;
+      } else if (experimentIdFilter) {
+        filter.projectId = getQueryProjectId(req);
+        filter.experimentId = experimentIdFilter;
+        if (experimentExecutionIdFilter) {
+          filter.experimentExecutionId = experimentExecutionIdFilter;
+        }
       } else {
         // Top-level reports list requires an explicit project (400 if absent).
         filter.projectId = getQueryProjectId(req);
-        if (submissionRunIdFilter) filter.submissionRunId = submissionRunIdFilter;
       }
 
       const reports = await ctx.reportCollection
