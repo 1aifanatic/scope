@@ -43,6 +43,17 @@ const historicalReport: Report = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
+const failedReport: Report = {
+  ...report,
+  _id: "report-failed",
+  id: "report-failed",
+  status: "failed",
+  content: undefined,
+  structuredArtifact: undefined,
+  error: "The readout worker stopped before publishing an artifact.",
+  createdAt: "2026-01-04T00:00:00.000Z",
+};
+
 const qualityReport: Report = {
   ...report,
   _id: "report-quality",
@@ -87,6 +98,12 @@ export const Completed: Story = {
       canvas.getByRole("link", { name: "Structured JSON" }),
     ).toBeVisible();
     await expect(canvas.queryByRole("combobox")).toBeNull();
+    await expect(
+      canvasElement.querySelector('[data-slot="experiment-report-toolbar"]'),
+    ).not.toBeNull();
+    await expect(
+      canvasElement.querySelector('[data-slot="experiment-report-body"]'),
+    ).not.toBeNull();
   },
 };
 
@@ -97,6 +114,17 @@ export const Processing: Story = {
     structuredUrl: undefined,
     isProcessing: true,
   },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Report processing")).toBeVisible();
+    await expect(canvas.getByText("Processing")).toBeVisible();
+    await expect(
+      canvasElement.querySelector('[data-slot="experiment-report-toolbar"]'),
+    ).not.toBeNull();
+    await expect(
+      canvasElement.querySelector('[data-slot="experiment-report-body"]'),
+    ).not.toBeNull();
+  },
 };
 
 export const ErrorWithRetry: Story = {
@@ -106,6 +134,84 @@ export const ErrorWithRetry: Story = {
     structuredUrl: undefined,
     error: "Report service unavailable",
     onRetry: () => undefined,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Report unavailable")).toBeVisible();
+    await expect(canvas.getByRole("button", { name: "Retry" })).toBeVisible();
+    await expect(
+      canvasElement.querySelector('[data-slot="experiment-report-toolbar"]'),
+    ).not.toBeNull();
+    await expect(
+      canvasElement.querySelector('[data-slot="experiment-report-body"]'),
+    ).not.toBeNull();
+  },
+};
+
+export const FailedVersion: Story = {
+  args: {
+    groups: groupExperimentReports([failedReport]),
+    selection: resolveExperimentReportSelection(
+      groupExperimentReports([failedReport]),
+    ),
+    structuredUrl: undefined,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Report generation failed")).toBeVisible();
+    await expect(
+      canvas.getByRole("button", { name: "Structured JSON" }).hasAttribute(
+        "disabled",
+      ),
+    ).toBe(true);
+    await expect(
+      canvas.getByRole("link", { name: "Direct link" }),
+    ).toBeVisible();
+    await expect(
+      canvasElement.querySelector('[data-slot="experiment-report-toolbar"]'),
+    ).not.toBeNull();
+    await expect(
+      canvasElement.querySelector('[data-slot="experiment-report-body"]'),
+    ).not.toBeNull();
+  },
+};
+
+export const NoArtifact: Story = {
+  args: {
+    groups: [],
+    selection: undefined,
+    structuredUrl: undefined,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("No report available")).toBeVisible();
+    await expect(canvas.getByText("No report")).toBeVisible();
+    await expect(
+      canvasElement.querySelector('[data-slot="experiment-report-toolbar"]'),
+    ).not.toBeNull();
+    await expect(
+      canvasElement.querySelector('[data-slot="experiment-report-body"]'),
+    ).not.toBeNull();
+  },
+};
+
+export const Blocked: Story = {
+  args: {
+    groups: [],
+    selection: undefined,
+    structuredUrl: undefined,
+    isBlocked: true,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Report blocked")).toBeVisible();
+    await expect(canvas.getByText("Blocked")).toBeVisible();
+    await expect(
+      canvasElement.querySelector('[data-slot="experiment-report-toolbar"]'),
+    ).not.toBeNull();
+    await expect(
+      canvasElement.querySelector('[data-slot="experiment-report-body"]'),
+    ).not.toBeNull();
   },
 };
 

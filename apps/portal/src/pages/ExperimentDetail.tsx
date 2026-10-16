@@ -872,6 +872,7 @@ export function ExperimentDetail() {
                 activeExecution.readiness !== "failed" &&
                 activeExecution.readiness !== "blocked"
               }
+              isBlocked={activeExecution.readiness === "blocked"}
               onReportTypeChange={selectReportType}
               onReportVersionChange={selectReportVersion}
               onRetry={() => void reportsQuery.refetch()}
