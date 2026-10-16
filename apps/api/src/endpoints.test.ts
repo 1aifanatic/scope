@@ -1137,6 +1137,10 @@ describe("API Endpoints", () => {
 
   describe("DELETE /api/v1/requests/:id", () => {
     it("returns 200 when request is soft-deleted", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "r1",
+        projectId: TEST_PROJECT_ID,
+      });
       (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
 
       const res = await request(testServer()).delete("/api/v1/requests/r1");
