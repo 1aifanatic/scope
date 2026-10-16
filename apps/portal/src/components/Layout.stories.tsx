@@ -51,6 +51,12 @@ export const Expanded: Story = {
     await expect(canvas.getByRole("button", { name: "Collapse sidebar" })).toBeVisible();
     // With a project selected, scoped nav is present.
     await expect(canvas.getByRole("link", { name: "Runs" })).toBeVisible();
+    const experimentsLink = canvas.getByRole("link", { name: "Experiments" });
+    const criteriaLink = canvas.getByRole("link", { name: "Criteria" });
+    await expect(experimentsLink.querySelector(".lucide-atom")).not.toBeNull();
+    await expect(
+      criteriaLink.querySelector(".lucide-flask-conical"),
+    ).not.toBeNull();
   },
 };
 

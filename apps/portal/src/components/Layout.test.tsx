@@ -168,6 +168,14 @@ describe("Layout", () => {
     expect(within(sidebar).getByRole("link", { name: "New Run" })).toBeTruthy();
     expect(within(sidebar).getByText("Activity")).toBeTruthy();
     expect(within(sidebar).getByRole("link", { name: "Runs" })).toBeTruthy();
+    const experimentsLink = within(sidebar).getByRole("link", {
+      name: "Experiments",
+    });
+    const criteriaLink = within(sidebar).getByRole("link", {
+      name: "Criteria",
+    });
+    expect(experimentsLink.querySelector(".lucide-atom")).toBeTruthy();
+    expect(criteriaLink.querySelector(".lucide-flask-conical")).toBeTruthy();
     expect(within(sidebar).getByRole("link", { name: "MCP" })).toBeTruthy();
     // The Integrations group holds Resources alongside MCP and Extensions; the
     // group and its Resources item deliberately no longer share a label.
