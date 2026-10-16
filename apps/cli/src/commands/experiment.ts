@@ -23,7 +23,6 @@ import type { DisplayField, OutputFormat } from "../utils/types.js";
 interface ExperimentMetadata {
   name: string;
   description?: string;
-  tags?: string[];
 }
 
 interface ExperimentExecution {
@@ -267,15 +266,6 @@ function parseExperiment(value: unknown): ExperimentView {
         return id;
       })
     : [];
-  const tags = Array.isArray(metadata.tags)
-    ? metadata.tags.map((tag) => {
-        if (typeof tag !== "string") {
-          throw new Error("Invalid experiment metadata tag response from Scope");
-        }
-        return tag;
-      })
-    : undefined;
-
   return {
     experimentId: stringField(experiment, "experimentId", "experiment")!,
     projectId: stringField(experiment, "projectId", "experiment")!,
@@ -287,7 +277,6 @@ function parseExperiment(value: unknown): ExperimentView {
         "experiment metadata",
         true,
       ),
-      tags,
     },
     revision: {
       experimentRevisionId: stringField(
@@ -574,7 +563,6 @@ export function registerExperimentCommands(program: Command): void {
           .description("Create an experiment from a run configuration")
           .requiredOption("--name <name>", "Experiment name")
           .option("--description <text>", "Experiment description")
-          .option("--tags <tags...>", "Experiment tags")
           .option("--empty", "Create an explicit empty experiment")
           .option(
             "--preview",
@@ -591,7 +579,6 @@ export function registerExperimentCommands(program: Command): void {
       const metadata: ExperimentMetadata = {
         name: options.name,
         ...(options.description ? { description: options.description } : {}),
-        ...(options.tags?.length ? { tags: options.tags } : {}),
       };
       if (options.empty) {
         const conflicting = [

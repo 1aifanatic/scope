@@ -15,7 +15,7 @@ supported workflow.
 ## Create from the Portal
 
 Open **Experiments**, then select **New Experiment**. Add the
-Experiment name and optional description and tags first. With no
+Experiment name and optional description first. With no
 scenario selected, the Portal creates an empty Experiment with zero
 runs. Enter or select a task to choose a scenario; the Portal then
 reveals the run-composition fields used by **New Run**:
@@ -44,7 +44,6 @@ scope experiment create \
   --project "$SCOPE_PROJECT" \
   --name "Profile comparison" \
   --description "Compare two pinned agent profiles" \
-  --tags nightly regression \
   --message "Add authentication to the API." \
   --criteria auth-works auth-tests \
   --profile copilot-profile@3 \
@@ -71,7 +70,6 @@ Create an explicit empty Experiment:
 scope experiment create \
   --project "$SCOPE_PROJECT" \
   --name "Reserved nightly benchmark" \
-  --tags nightly \
   --empty
 ```
 
@@ -100,8 +98,7 @@ Content-Type: application/json
   "mode": "compose",
   "metadata": {
     "name": "Copilot authentication benchmark",
-    "description": "Five independent occurrences",
-    "tags": ["auth", "nightly"]
+    "description": "Five independent occurrences"
   },
   "requests": [{
     "scenario": {
@@ -153,7 +150,7 @@ Experiment metadata.
 | `gates`, `observations`, `priority` | Same names under `requests[]` |
 | `worker` query parameter | `worker` query parameter on `POST /experiments` |
 | — | `metadata.name` (required) |
-| — | `metadata.description`, `metadata.tags` (optional) |
+| — | `metadata.description` (optional) |
 
 For before-and-after examples and compatibility behavior, see
 [Migrate request composition to Experiments](/guides/migrating-to-experiments/).

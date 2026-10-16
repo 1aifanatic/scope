@@ -30,8 +30,7 @@ const PageQuerySchema = ProjectIdQuerySchema.extend({
 const ExperimentMetadataInputSchema = z.object({
   name: z.string().trim().min(1).max(256),
   description: z.string().max(4_096).optional(),
-  tags: z.array(z.string().trim().min(1).max(64)).max(32).optional(),
-});
+}).strict();
 
 const ExperimentRequestInputSchema = CreateRequestInputSchema.omit({
   profileVariations: true,
@@ -265,7 +264,11 @@ function experimentResponse(experiment: ExperimentDocument) {
   return {
     experimentId: experiment.experimentId,
     projectId: experiment.projectId,
-    metadata: experiment.metadata,
+    metadata: {
+      name: experiment.metadata.name,
+      description: experiment.metadata.description,
+      createdBy: experiment.metadata.createdBy,
+    },
     revision: {
       experimentRevisionId: experiment.revision.experimentRevisionId,
       revisionNumber: experiment.revision.revisionNumber,

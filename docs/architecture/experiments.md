@@ -234,9 +234,9 @@ All routes require `?projectId=`:
 | `GET` | `/api/v1/experiments/:id/executions/:experimentExecutionId` | Read one exact current or archived execution |
 | `POST` | `/api/v1/experiments/:id/retry` | Start a new processing attempt for the current exact vector |
 
-Creation metadata requires `name` and accepts optional `description` and
-`tags`. Compose mode requires one or more complete request definitions and
-empty mode requires an empty request array.
+Creation metadata requires `name` and accepts an optional `description`.
+Compose mode requires one or more complete request definitions and empty mode
+requires an empty request array.
 
 The public view exposes identity, project, metadata, revision, current
 execution, readiness, blockers, handler progress, supersession, current report,

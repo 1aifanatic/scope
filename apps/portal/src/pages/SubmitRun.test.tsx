@@ -112,6 +112,7 @@ describe("SubmitRun Experiment composition", () => {
     expect(
       await screen.findByRole("button", { name: /Create empty experiment/ }),
     ).toBeTruthy();
+    expect(screen.queryByLabelText("Tags")).toBeNull();
     expect(screen.queryByText("Gate pipeline")).toBeNull();
     expect(
       screen.queryByRole("switch", { name: "Toggle advanced options" }),

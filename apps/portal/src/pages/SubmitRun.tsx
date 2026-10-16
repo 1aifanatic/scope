@@ -225,7 +225,6 @@ export function SubmitRun({
   const [agentsMd, setAgentsMd] = useState<string>("");
   const [experimentName, setExperimentName] = useState("");
   const [experimentDescription, setExperimentDescription] = useState("");
-  const [experimentTags, setExperimentTags] = useState("");
 
   // Optional add-ons
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -694,14 +693,6 @@ export function SubmitRun({
               ...(experimentDescription.trim()
                 ? { description: experimentDescription.trim() }
                 : {}),
-              ...(experimentTags.trim()
-                ? {
-                    tags: experimentTags
-                      .split(",")
-                      .map((tag) => tag.trim())
-                      .filter(Boolean),
-                  }
-                : {}),
             },
             ...(request ? { request } : { empty: true }),
           })
@@ -944,15 +935,6 @@ export function SubmitRun({
                   setExperimentDescription(event.target.value)
                 }
                 placeholder="What this experiment compares and why"
-              />
-            </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="experimentTags">Tags</Label>
-              <Input
-                id="experimentTags"
-                value={experimentTags}
-                onChange={(event) => setExperimentTags(event.target.value)}
-                placeholder="nightly, auth, regression"
               />
             </div>
           </CardContent>

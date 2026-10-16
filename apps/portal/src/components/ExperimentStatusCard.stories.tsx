@@ -8,7 +8,7 @@ import { ExperimentStatusCard } from "./ExperimentStatusCard";
 const experiment: ExperimentView = {
   experimentId: "experiment-123",
   projectId: "project-123",
-  metadata: { name: "Profile comparison", tags: ["nightly"] },
+  metadata: { name: "Profile comparison" },
   revision: {
     experimentRevisionId: "revision-1",
     revisionNumber: 1,
