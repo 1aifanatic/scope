@@ -324,7 +324,11 @@ scopes all three tabs:
   and newest version are the defaults, and exactly one version is rendered.
   Markdown, structured JSON, the global report-detail link, loading/error
   retry, and status use the exact
-  `experimentId + experimentExecutionId + reportId` identity.
+  `experimentId + experimentExecutionId + reportId` identity. Completed,
+  processing, failed, blocked, and no-artifact states share one stable panel
+  shell: identity, selectors, badges, and actions keep their positions while
+  only the content region changes. Artifact-only actions are disabled when no
+  artifact exists, while addressable report versions retain their direct link.
 - **Processing** owns handler progress, blockers, errors, execution metadata,
   and processing retry/recovery. Retry remains current-attempt-only.
 
