@@ -42,9 +42,9 @@ export function parseHandlerDocument(raw: unknown): ServiceHandlerDocument {
   if (!isNonEmptyString(doc._id)) {
     throw new Error("handler.yaml: '_id' is required");
   }
-  if (doc.type !== "post-process-handler" && doc.type !== "submission-handler") {
+  if (doc.type !== "post-process-handler" && doc.type !== "experiment-handler") {
     throw new Error(
-      "handler.yaml: 'type' must be 'post-process-handler' or 'submission-handler'",
+      "handler.yaml: 'type' must be 'post-process-handler' or 'experiment-handler'",
     );
   }
   if (typeof doc.version !== "number" || !Number.isFinite(doc.version)) {
@@ -72,15 +72,15 @@ export function parseHandlerDocument(raw: unknown): ServiceHandlerDocument {
     autoBackfill: doc.autoBackfill,
     dependsOn: dependsOn as string[],
   };
-  if (doc.type === "submission-handler") {
+  if (doc.type === "experiment-handler") {
     if (doc.dependencyMode !== "all-runs") {
       throw new Error(
-        "handler.yaml: submission handlers require dependencyMode: 'all-runs'",
+        "handler.yaml: experiment handlers require dependencyMode: 'all-runs'",
       );
     }
     return {
       ...common,
-      type: "submission-handler",
+      type: "experiment-handler",
       dependencyMode: "all-runs",
     };
   }

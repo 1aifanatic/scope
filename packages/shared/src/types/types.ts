@@ -384,19 +384,17 @@ export interface RequestDocument {
   agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
   profileId?: string;             // FK → ProfileDocument._id (the profile lineage)
   profileVersionId?: string;      // FK → ProfileVersionDocument._id (exact version used)
-  submissionId?: string;           // FK → SubmissionDocument._id
-  /** Expected native request count for interrupted SubmissionDocument finalization.
-   * Historical/imported requests omit it and remain view-only if their parent
-   * submission document is missing. */
-  submissionExpectedRequestCount?: number;
-  /** Stable position within the native submission's immutable request vector. */
-  submissionRequestIndex?: number;
-  /** Run id minted for the submission's first attempt. It remains unchanged
-   * across request retries so recovery can rebuild the exact initial vector. */
-  submissionInitialRunId?: string;
-  /** Set after the parent SubmissionDocument has been idempotently finalized.
-   * Missing on interrupted native writes so the scheduler can recover them. */
-  submissionFinalizedAt?: Date;
+  experimentId?: string;
+  experimentRevisionId?: string;
+  experimentExecutionId?: string;
+  /** Expected request count for interrupted Experiment finalization. */
+  experimentExpectedRequestCount?: number;
+  /** Stable position within the Experiment's immutable request vector. */
+  experimentRequestIndex?: number;
+  /** Initial run id retained so recovery can rebuild the exact first vector. */
+  experimentInitialRunId?: string;
+  /** Set only after the parent Experiment has been published. */
+  experimentFinalizedAt?: Date;
   /** Scheduling priority. Higher = processed first. Default: 0. */
   priority: number;
   /**
@@ -579,9 +577,9 @@ export interface HandlerServiceDocument {
   dependsOn: string[];
 }
 
-export interface SubmissionHandlerServiceDocument {
+export interface ExperimentHandlerServiceDocument {
   _id: string;
-  type: "submission-handler";
+  type: "experiment-handler";
   version: number;
   queue: string;
   selector: string;
@@ -592,104 +590,7 @@ export interface SubmissionHandlerServiceDocument {
 
 export type ServiceHandlerDocument =
   | HandlerServiceDocument
-  | SubmissionHandlerServiceDocument;
-
-export interface SubmissionRequestRef {
-  requestId: string;
-  runId: string;
-}
-
-export type SubmissionHandlerState = "waiting" | "ready" | "failed" | "blocked";
-
-export interface SubmissionDependencyProjection {
-  requestId: string;
-  runId: string;
-  handlerId: string;
-  state: SubmissionHandlerState;
-  version?: number;
-  updatedAt?: Date;
-  error?: string;
-}
-
-export interface SubmissionBlockingDetail {
-  requestId: string;
-  runId: string;
-  handlerId: string;
-  reason:
-    | "request-missing"
-    | "run-changed"
-    | "dependency-not-ready"
-    | "dependency-failed"
-    | "dependency-blocked";
-  error?: string;
-}
-
-export interface SubmissionReportPointer {
-  reportId?: string;
-  url?: string;
-  updatedAt?: Date;
-}
-
-export interface SubmissionRolloverClaim {
-  nextSubmissionRunId: string;
-  vectorFingerprint: string;
-  requests: SubmissionRequestRef[];
-  reason: "request-vector-changed" | "manual-retry";
-  claimedAt: Date;
-}
-
-export interface SubmissionRunState {
-  _id: string;
-  attemptNumber: number;
-  vectorFingerprint: string;
-  requests: SubmissionRequestRef[];
-  createdAt: Date;
-  updatedAt?: Date;
-  startedAt?: Date;
-  finishedAt?: Date;
-  dependencyProjection: SubmissionDependencyProjection[];
-  handlerStatus?: Record<string, HandlerRunStatus>;
-  blocking: SubmissionBlockingDetail[];
-  report?: SubmissionReportPointer;
-  /** Internal scheduler hold used by bulk request retry so one completed
-   * replacement batch produces one vector rollover. Expiry self-heals crashes. */
-  reconcileAfter?: Date;
-  /** Internal resumable rollover claim. Its CAS winner exclusively determines
-   * the immutable archive's successor metadata. */
-  rollover?: SubmissionRolloverClaim;
-  supersededAt?: Date;
-  supersededBySubmissionRunId?: string;
-  supersededReason?: "request-vector-changed" | "manual-retry";
-}
-
-export interface SubmissionDocument {
-  _id: string;
-  submissionId: string;
-  projectId: string;
-  requestIds: string[];
-  createdAt: Date;
-  updatedAt?: Date;
-  run: SubmissionRunState;
-}
-
-export interface SubmissionRunHistoryDocument extends SubmissionRunState {
-  submissionId: string;
-  projectId: string;
-}
-
-export type SubmissionReadiness =
-  | "waiting"
-  | "ready"
-  | "blocked"
-  | "processing"
-  | "done"
-  | "failed";
-
-export interface SubmissionQueueMessagePayload {
-  type: string;
-  submissionId: string;
-  submissionRunId: string;
-}
+  | ExperimentHandlerServiceDocument;
 
 /**
  * Field names whose values move from `RequestDocument` (top-level, legacy
@@ -824,7 +725,7 @@ export interface QueueProcessorConfig extends BaseQueueProcessorConfig {
 
 // --- Runs grouping types (shared between API and portal) ---
 
-export type GroupByKey = "none" | "task" | "submissionId" | "profile";
+export type GroupByKey = "none" | "task" | "experimentId" | "profile";
 
 export interface AggregateStats {
   min: number;
@@ -842,7 +743,7 @@ export interface GroupUniformValues {
   skillRevisions?: string[];
   extensions?: string[];
   status?: "pending" | "processing" | "done";
-  submissionId?: string;
+  experimentId?: string;
   task?: string;
 }
 
