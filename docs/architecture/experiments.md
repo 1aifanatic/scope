@@ -81,11 +81,12 @@ for that member. Request IDs are unique within the vector. Each dependency and
 blocker list is bounded to 32 entries, and each serialized request state is
 limited to 4 KiB.
 
-The vector is immutable after publication. Its SHA-256 fingerprint is stored
-both on the execution (`vectorFingerprint`) and on its `FixedPayload`
-descriptor (`payloadFingerprint`). Reads reconstruct the original position
-order and reject missing positions, duplicates, count mismatches, identity
-mismatches, or fingerprint mismatches.
+The exact `{requestId, runId}` identity vector is immutable after publication
+and covered by `vectorFingerprint`. Dependency projections and blockers are
+mutable bounded state covered by the `FixedPayload` descriptor's
+`payloadFingerprint`. Reads reconstruct the original position order and reject
+missing positions, duplicates, count mismatches, identity mismatches, or
+fingerprint mismatches.
 
 ## FixedPayload storage
 
@@ -207,13 +208,26 @@ intentionally leaves removal to a manual operation in `down()`.
 Every lookup includes `projectId` in addition to the entity ID. An Experiment
 ID is never resolved globally.
 
+## Runtime ownership
+
+The API owns `ExperimentCoordinator`, including authoritative run projection,
+readiness, rollover, retry, publication repair, and Experiment-handler
+dispatch policy. Its polling loop repairs missed notifications, vector drift,
+dropped queue notices, and interrupted publication or rollover.
+
+The scheduler continues to own coding-agent and per-run handler dispatch. For
+Experiment handlers it only applies exact claim and completion messages
+through shared `ExperimentStore` compare-and-swap primitives. Storage layout,
+routing, fingerprinting, and state transitions remain reusable typed modules
+under `packages/shared/src/experiments`; they do not own workflow policy.
+
 ## Public API
 
 All routes require `?projectId=`:
 
 | Method | Route | Behavior |
 | --- | --- | --- |
-| `POST` | `/api/v1/experiments` | Create from `{ metadata, request }` or `{ metadata, empty: true }`; optional worker selection remains a query parameter |
+| `POST` | `/api/v1/experiments` | Create from `{ mode: "compose", metadata, requests }` or `{ mode: "empty", metadata, requests: [] }` |
 | `GET` | `/api/v1/experiments` | Cursor-page finalized Experiments |
 | `GET` | `/api/v1/experiments/:id` | Read the public Experiment and current execution |
 | `GET` | `/api/v1/experiments/:id/executions` | List current and archived execution summaries |
@@ -221,14 +235,14 @@ All routes require `?projectId=`:
 | `POST` | `/api/v1/experiments/:id/retry` | Start a new processing attempt for the current exact vector |
 
 Creation metadata requires `name` and accepts optional `description` and
-`tags`. Unless `empty: true`, `request` uses the existing request-creation
-configuration and composition controls. `empty: true` forbids `request`.
+`tags`. Compose mode requires one or more complete request definitions and
+empty mode requires an empty request array.
 
 The public view exposes identity, project, metadata, revision, current
 execution, readiness, blockers, handler progress, supersession, current report,
 and linked request summaries when available. Creation additionally returns
-`createdRequestIds`. List responses and execution-list responses use
-`{ items, nextCursor? }`.
+`requestIds`. List responses and execution-list responses use
+`{ data, nextCursor? }`.
 
 ## CLI and Portal
 
@@ -288,8 +302,8 @@ The following are explicitly outside PR A:
 | PR D | Report-template attachment or template-driven report orchestration |
 | PR E | Cascading lifecycle operations across an Experiment and its member requests/runs |
 
-PR A must not imply these capabilities through storage methods, client actions,
-or API contracts.
+GEPA restacking is also excluded. PR A must not imply these capabilities
+through storage methods, client actions, or API contracts.
 
 ## Key files
 
@@ -302,6 +316,8 @@ or API contracts.
 | `packages/shared/src/experiments/fixed-payload-store.ts` | Deterministic chunk publication and verified reads |
 | `packages/shared/src/experiments/experiment-store.ts` | Creation, CAS processing, freeze, archive, rollover, retry, and repair |
 | `packages/db-migrations/src/migrations/034-create-experiment-storage-indexes.ts` | Collection index ownership |
+| `apps/api/src/experiment-coordinator.ts` | API-owned workflow policy and repair |
+| `apps/api/src/experiment-dispatcher.ts` | Durable polling and queue delivery |
 | `apps/cli/src/commands/experiment.ts` | Project-scoped CLI surface |
 | `apps/portal/src/lib/experiments.ts` | Public response parsing |
 | `apps/portal/src/pages/ExperimentsList.tsx` | Experiment list |
