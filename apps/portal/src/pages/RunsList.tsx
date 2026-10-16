@@ -4,7 +4,7 @@
 import { useMemo, useState, useEffect, useCallback, Fragment, type Key, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Link, useNavigate, useOutlet, useParams, useSearchParams } from "react-router-dom";
-import { Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow, ArrowUpDown, FileText, Download, Lock, Eye } from "lucide-react";
+import { Trash2, Repeat, RotateCcw, Pause, Play, ChevronDown, ChevronRight, Apple, AppWindow, ArrowUpDown, FileText, Download, Lock, Eye, FlaskConical, MoveRight } from "lucide-react";
 import { FaLinux } from "react-icons/fa";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -14,6 +14,9 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,6 +55,7 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { useStrictAgentCapabilities } from "@/hooks/useStrictAgentCapabilities";
 import { useModelCapabilities, ModelSelectItems } from "@/components/ReasoningEffortSelect";
 import { formatDate, formatId, formatDuration, truncate, cn } from "@/lib/utils";
+import { getExistingRunMembershipEligibility } from "@/lib/experiment-membership";
 import { isAgentAvailable, isAgentVersionAvailable, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, RunStatus, RunOutcome, IterationOp, BulkResubmitOverrides, RunSortField, RunFacetBucket } from "@/types";
 import { buildRunWorkerFilterOptions } from "./run-worker-filter-options";
@@ -524,6 +528,10 @@ export function RunsList() {
   const [resubmitDialogOpen, setResubmitDialogOpen] = useState(false);
   const [resubmitCount, setResubmitCount] = useState<number>(1);
   const [resubmitOverrides, setResubmitOverrides] = useState<BulkResubmitOverrides>({});
+  const [createExperimentDialogOpen, setCreateExperimentDialogOpen] = useState(false);
+  const [moveExperimentDialogOpen, setMoveExperimentDialogOpen] = useState(false);
+  const [experimentName, setExperimentName] = useState("");
+  const [targetExperimentId, setTargetExperimentId] = useState("");
 
   // Reset stack whenever filters or page size change.
   const filtersKey = useMemo(
@@ -702,6 +710,12 @@ export function RunsList() {
     queryKey: ["profiles", "runs-list-grouping"],
     queryFn: () => api.listProfiles(),
     staleTime: 60_000,
+  });
+  const experimentsQuery = useQuery({
+    queryKey: ["experiments", "runs-membership"],
+    queryFn: () => api.listExperiments({ limit: 100 }),
+    enabled: moveExperimentDialogOpen,
+    staleTime: 30_000,
   });
   // Registry data also supplies worker labels for filters and historical values.
   const { data: agentsData = [] } = useQuery({
@@ -901,9 +915,17 @@ export function RunsList() {
   const bulkDeleteMutation = useMutation({
     mutationFn: (ids: string[]) => api.bulkDeleteRuns(ids),
     onSuccess: (res) => {
-      toast.success(`Deleted ${res.deleted} run${res.deleted !== 1 ? "s" : ""}`);
+      const revision = res.membershipRevision;
+      toast.success(
+        `Deleted ${res.deleted} run${res.deleted !== 1 ? "s" : ""}` +
+        (revision ? ` · Experiment revision ${revision.revisionNumber} (${formatId(revision.experimentRevisionId)})` : ""),
+      );
       setSelectedIds(new Set());
       invalidateRuns();
+      if (revision) {
+        void queryClient.invalidateQueries({ queryKey: ["experiment", revision.experimentId] });
+        void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+      }
     },
     onError: (err: Error) => toast.error(`Failed to delete: ${err.message}`),
   });
@@ -1041,6 +1063,63 @@ export function RunsList() {
     () => allRuns.filter((r) => selectedIds.has(r._id)),
     [allRuns, selectedIds],
   );
+  const experimentMembershipEligibility = useMemo(
+    () => getExistingRunMembershipEligibility(selectedIds, selectedRunsList),
+    [selectedIds, selectedRunsList],
+  );
+  const selectedExperimentMemberCount = useMemo(
+    () => selectedRunsList.filter((run) => Boolean(run.experimentId)).length,
+    [selectedRunsList],
+  );
+
+  const createExperimentMutation = useMutation({
+    mutationFn: () =>
+      api.createExperimentFromRuns({
+        metadata: { name: experimentName.trim() },
+        requestIds: [...selectedIds],
+      }),
+    onSuccess: ({ experiment }) => {
+      toast.success(
+        `Created ${experiment.metadata.name} · revision ${experiment.revision.revisionNumber}`,
+      );
+      setSelectedIds(new Set());
+      setExperimentName("");
+      setCreateExperimentDialogOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+      navigate(
+        `/experiments/${encodeURIComponent(experiment.experimentId)}?revision=${encodeURIComponent(experiment.revision.experimentRevisionId)}&execution=${encodeURIComponent(experiment.execution.experimentExecutionId)}`,
+      );
+    },
+    onError: (error: Error) => toast.error(`Failed to create Experiment: ${error.message}`),
+  });
+
+  const moveToExperimentMutation = useMutation({
+    mutationFn: () => {
+      const target = experimentsQuery.data?.items.find(
+        (experiment) => experiment.experimentId === targetExperimentId,
+      );
+      if (!target) throw new Error("Choose an Experiment");
+      return api.updateExperimentRequests("POST", target.experimentId, {
+        expectedExperimentRevisionId: target.revision.experimentRevisionId,
+        requestIds: [...selectedIds],
+      });
+    },
+    onSuccess: ({ experiment, attachedRequestIds }) => {
+      toast.success(
+        `Moved ${attachedRequestIds.length} run${attachedRequestIds.length === 1 ? "" : "s"} · revision ${experiment.revision.revisionNumber}`,
+      );
+      setSelectedIds(new Set());
+      setTargetExperimentId("");
+      setMoveExperimentDialogOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+      navigate(
+        `/experiments/${encodeURIComponent(experiment.experimentId)}?revision=${encodeURIComponent(experiment.revision.experimentRevisionId)}&execution=${encodeURIComponent(experiment.execution.experimentExecutionId)}`,
+      );
+    },
+    onError: (error: Error) => toast.error(`Failed to move runs: ${error.message}`),
+  });
 
   // Capability counts so action buttons can disable cleanly.
   const selectionCaps = useMemo(() => {
@@ -1211,6 +1290,8 @@ export function RunsList() {
 
   const isBusy =
     bulkDeleteMutation.isPending ||
+    createExperimentMutation.isPending ||
+    moveToExperimentMutation.isPending ||
     bulkRetryMutation.isPending ||
     bulkResubmitMutation.isPending ||
     bulkPauseMutation.isPending ||
@@ -2137,6 +2218,33 @@ export function RunsList() {
           </Button>
 
           <BulkGroupLabel>Runs</BulkGroupLabel>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={isBusy || !experimentMembershipEligibility.eligible}
+            onClick={() => setCreateExperimentDialogOpen(true)}
+            title={experimentMembershipEligibility.reason ?? "Create an Experiment from selected standalone runs"}
+          >
+            <FlaskConical className="h-3.5 w-3.5" /> Create experiment
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={isBusy || !experimentMembershipEligibility.eligible}
+            onClick={() => setMoveExperimentDialogOpen(true)}
+            title={experimentMembershipEligibility.reason ?? "Move selected standalone runs to an Experiment"}
+          >
+            <MoveRight className="h-3.5 w-3.5" /> Move to experiment
+          </Button>
+          {!experimentMembershipEligibility.eligible &&
+            experimentMembershipEligibility.reason &&
+            selectedIds.size > 0 && (
+              <span className="max-w-64 text-xs text-muted-foreground">
+                {experimentMembershipEligibility.reason}
+              </span>
+            )}
           <Button
             variant="outline"
             size="sm"
@@ -3241,6 +3349,109 @@ export function RunsList() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <Dialog
+        open={createExperimentDialogOpen}
+        onOpenChange={(open) => {
+          setCreateExperimentDialogOpen(open);
+          if (!open) setExperimentName("");
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create experiment</DialogTitle>
+            <DialogDescription>
+              Create an Experiment containing the {selectedIds.size} selected standalone run
+              {selectedIds.size === 1 ? "" : "s"}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="experiment-name">Name</Label>
+            <Input
+              id="experiment-name"
+              value={experimentName}
+              onChange={(event) => setExperimentName(event.target.value)}
+              placeholder="Experiment name"
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateExperimentDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => createExperimentMutation.mutate()}
+              disabled={
+                createExperimentMutation.isPending ||
+                experimentName.trim().length === 0 ||
+                !experimentMembershipEligibility.eligible
+              }
+            >
+              {createExperimentMutation.isPending ? "Creating…" : "Create experiment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={moveExperimentDialogOpen}
+        onOpenChange={(open) => {
+          setMoveExperimentDialogOpen(open);
+          if (!open) setTargetExperimentId("");
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Move to experiment</DialogTitle>
+            <DialogDescription>
+              Add the {selectedIds.size} selected standalone run
+              {selectedIds.size === 1 ? "" : "s"} to the target&apos;s current revision.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="target-experiment">Experiment</Label>
+            <Select value={targetExperimentId} onValueChange={setTargetExperimentId}>
+              <SelectTrigger id="target-experiment">
+                <SelectValue placeholder={experimentsQuery.isLoading ? "Loading…" : "Choose an Experiment"} />
+              </SelectTrigger>
+              <SelectContent>
+                {experimentsQuery.data?.items.map((experiment) => (
+                  <SelectItem key={experiment.experimentId} value={experiment.experimentId}>
+                    {experiment.metadata.name} · revision {experiment.revision.revisionNumber}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {experimentsQuery.isError && (
+              <p className="text-sm text-destructive">
+                {experimentsQuery.error instanceof Error
+                  ? experimentsQuery.error.message
+                  : "Experiments could not be loaded."}
+              </p>
+            )}
+            {experimentsQuery.data?.items.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                No target Experiments are available.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMoveExperimentDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => moveToExperimentMutation.mutate()}
+              disabled={
+                moveToExperimentMutation.isPending ||
+                !targetExperimentId ||
+                !experimentMembershipEligibility.eligible
+              }
+            >
+              {moveToExperimentMutation.isPending ? "Moving…" : "Move runs"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -3250,6 +3461,14 @@ export function RunsList() {
             <AlertDialogDescription>
               This permanently removes the selected runs along with their logs,
               turns, and report associations. This action cannot be undone.
+              {selectedExperimentMemberCount > 0 && (
+                <span className="mt-2 block font-medium text-destructive">
+                  {selectedExperimentMemberCount} selected run
+                  {selectedExperimentMemberCount === 1 ? " is" : "s are"} an Experiment
+                  member. Deleting {selectedExperimentMemberCount === 1 ? "it" : "them"} will
+                  publish a new Experiment revision without those runs.
+                </span>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

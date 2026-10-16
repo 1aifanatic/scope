@@ -1,8 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, FileText, RotateCcw } from "lucide-react";
+import { ArrowLeft, FileText, RotateCcw, Unlink } from "lucide-react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ExperimentReportCard } from "@/components/ExperimentReportCard";
@@ -10,7 +11,12 @@ import { ExperimentStatusCard } from "@/components/ExperimentStatusCard";
 import { ShortId } from "@/components/ShortId";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ApiError, api } from "@/lib/api";
 import type { ExperimentExecutionView } from "@/lib/experiments";
 import { formatDate } from "@/lib/utils";
@@ -64,6 +70,8 @@ export function ExperimentDetail() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedRequestIds, setSelectedRequestIds] = useState<Set<string>>(new Set());
+  const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
   const experimentQuery = useQuery({
     queryKey: ["experiment", id],
     queryFn: () => api.getExperiment(id!),
@@ -120,6 +128,38 @@ export function ExperimentDetail() {
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Retry failed");
+    },
+  });
+  const removeMembers = useMutation({
+    mutationFn: () =>
+      api.updateExperimentRequests("DELETE", experimentQuery.data!.experimentId, {
+        expectedExperimentRevisionId:
+          experimentQuery.data!.revision.experimentRevisionId,
+        requestIds: [...selectedRequestIds],
+      }),
+    onSuccess: ({ experiment: nextExperiment, detachedRequestIds }) => {
+      toast.success(
+        `Removed ${detachedRequestIds.length} run${detachedRequestIds.length === 1 ? "" : "s"} · revision ${nextExperiment.revision.revisionNumber}`,
+      );
+      setSelectedRequestIds(new Set());
+      setRemoveDialogOpen(false);
+      queryClient.setQueryData(["experiment", id], nextExperiment);
+      void queryClient.invalidateQueries({ queryKey: ["experiment-executions", id] });
+      void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      setSearchParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          next.set("revision", nextExperiment.revision.experimentRevisionId);
+          next.set("execution", nextExperiment.execution.experimentExecutionId);
+          next.delete("report");
+          return next;
+        },
+        { replace: false },
+      );
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Runs could not be removed");
     },
   });
 
@@ -236,6 +276,16 @@ export function ExperimentDetail() {
 
       <ExperimentStatusCard experiment={experiment} />
 
+      {searchParams.get("revision") && (
+        <p className="text-sm text-muted-foreground">
+          Viewing revision {experiment.revision.revisionNumber}{" "}
+          <ShortId
+            id={experiment.revision.experimentRevisionId}
+            label="experiment revision ID"
+          />
+        </p>
+      )}
+
       <ExperimentReportCard
         experimentId={experiment.experimentId}
         experimentExecutionId={selectedExecutionId!}
@@ -301,47 +351,106 @@ export function ExperimentDetail() {
       )}
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Current runs</CardTitle>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <div>
+            <CardTitle className="text-base">Current runs</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Revision {experiment.revision.revisionNumber} · {experiment.revision.memberCount} members
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={selectedRequestIds.size === 0 || removeMembers.isPending}
+            onClick={() => setRemoveDialogOpen(true)}
+          >
+            <Unlink className="mr-2 h-4 w-4" />
+            Remove from experiment
+            {selectedRequestIds.size > 0 ? ` (${selectedRequestIds.size})` : ""}
+          </Button>
         </CardHeader>
         <CardContent className="divide-y">
-          {!selectedExecution || selectedExecution.requests.length === 0 ? (
+          {experiment.execution.requests.length === 0 ? (
             <p className="py-4 text-sm text-muted-foreground">
               {experiment.execution.requestCount === 0
                 ? "This experiment is empty."
                 : `${experiment.execution.requestCount} linked runs are stored outside the inline response.`}
             </p>
           ) : (
-            selectedExecution.requests.map((request) => (
-              <Link
+            experiment.execution.requests.map((request) => (
+              <div
                 key={request.requestId}
-                to={`/runs/${request.requestId}?fromExperiment=${encodeURIComponent(experiment.experimentId)}&experimentExecution=${encodeURIComponent(selectedExecution.experimentExecutionId)}`}
-                className="flex items-center justify-between gap-4 py-4 hover:bg-muted/40"
+                className="flex items-center gap-3 py-4"
               >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate font-medium">
-                      {request.task ?? request.requestId}
-                    </span>
+                <Checkbox
+                  aria-label={`Select ${request.task ?? request.requestId}`}
+                  checked={selectedRequestIds.has(request.requestId)}
+                  onCheckedChange={(checked) =>
+                    setSelectedRequestIds((current) => {
+                      const next = new Set(current);
+                      if (checked) next.add(request.requestId);
+                      else next.delete(request.requestId);
+                      return next;
+                    })
+                  }
+                />
+                <Link
+                  to={`/runs/${request.requestId}?fromExperiment=${encodeURIComponent(experiment.experimentId)}&experimentExecution=${encodeURIComponent(experiment.execution.experimentExecutionId)}`}
+                  className="flex min-w-0 flex-1 items-center justify-between gap-4 rounded py-1 hover:bg-muted/40"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="truncate font-medium">
+                        {request.task ?? request.requestId}
+                      </span>
+                    </div>
+                    <div className="mt-1 font-mono text-xs text-muted-foreground">
+                      {request.requestId} · {request.runId}
+                    </div>
                   </div>
-                  <div className="mt-1 font-mono text-xs text-muted-foreground">
-                    {request.requestId} · {request.runId}
+                  <div className="flex shrink-0 items-center gap-2">
+                    {request.status && (
+                      <Badge variant="outline">{request.status}</Badge>
+                    )}
+                    {request.outcome && (
+                      <Badge variant="secondary">{request.outcome}</Badge>
+                    )}
                   </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {request.status && (
-                    <Badge variant="outline">{request.status}</Badge>
-                  )}
-                  {request.outcome && (
-                    <Badge variant="secondary">{request.outcome}</Badge>
-                  )}
-                </div>
-              </Link>
+                </Link>
+              </div>
             ))
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Remove {selectedRequestIds.size} run
+              {selectedRequestIds.size === 1 ? "" : "s"} from this Experiment?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              One membership request will publish a new immutable revision based on
+              revision {experiment.revision.revisionNumber}. The runs themselves will
+              not be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                removeMembers.mutate();
+              }}
+              disabled={removeMembers.isPending || selectedRequestIds.size === 0}
+            >
+              {removeMembers.isPending ? "Removing…" : "Remove runs"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Card>
         <CardHeader>

@@ -15,6 +15,7 @@ const apiMocks = vi.hoisted(() => ({
   getExperimentExecution: vi.fn(),
   listExperimentReports: vi.fn(),
   retryExperiment: vi.fn(),
+  updateExperimentRequests: vi.fn(),
   experimentReportStructuredUrl: vi.fn(
     () => "/api/v1/experiments/experiment-1/executions/execution-1/reports/report-1/structured?projectId=project-1",
   ),
@@ -168,5 +169,53 @@ describe("ExperimentDetail reports", () => {
     expect(
       await screen.findByText("No built-in report is available for this execution."),
     ).toBeDefined();
+  });
+
+  it("removes selected current members in one revision-guarded request", async () => {
+    apiMocks.getExperiment.mockResolvedValue(experiment);
+    apiMocks.listExperimentExecutions.mockResolvedValue({
+      items: [currentExecution],
+    });
+    apiMocks.getExperimentExecution.mockResolvedValue(currentExecution);
+    apiMocks.listExperimentReports.mockResolvedValue([]);
+    const nextExperiment: ExperimentView = {
+      ...experiment,
+      revision: {
+        experimentRevisionId: "revision-2",
+        revisionNumber: 2,
+        memberCount: 0,
+      },
+      execution: {
+        ...currentExecution,
+        experimentExecutionId: "execution-3",
+        requestCount: 0,
+        requests: [],
+      },
+    };
+    apiMocks.updateExperimentRequests.mockResolvedValue({
+      experiment: nextExperiment,
+      attachedRequestIds: [],
+      detachedRequestIds: ["request-2"],
+    });
+
+    renderPage("/experiments/experiment-1");
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select request-2" }));
+    fireEvent.click(screen.getByRole("button", { name: /Remove from experiment/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Remove runs/ }));
+
+    await waitFor(() => {
+      expect(apiMocks.updateExperimentRequests).toHaveBeenCalledTimes(1);
+    });
+    expect(apiMocks.updateExperimentRequests).toHaveBeenCalledWith(
+      "DELETE",
+      "experiment-1",
+      {
+        expectedExperimentRevisionId: "revision-1",
+        requestIds: ["request-2"],
+      },
+    );
+    expect(await screen.findByText("This experiment is empty.")).toBeDefined();
+    expect(screen.getByText(/Viewing revision 2/)).toBeDefined();
   });
 });
