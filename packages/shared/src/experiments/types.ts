@@ -99,7 +99,8 @@ export interface ExperimentHandlerSummary {
 
 export interface ExperimentRolloverClaim {
   nextExecution: ExperimentExecution;
-  reason: "rollover" | "retry";
+  nextRevision?: ExperimentRevision;
+  reason: "rollover" | "retry" | "membership";
   claimedAt: Date;
 }
 
@@ -134,7 +135,7 @@ export interface ExperimentExecution {
   discardReason?: string;
   supersededAt?: Date;
   supersededByExperimentExecutionId?: string;
-  supersededReason?: "rollover" | "retry";
+  supersededReason?: "rollover" | "retry" | "membership";
   requestStateUpdate?: ExperimentRequestStateUpdateClaim;
   rollover?: ExperimentRolloverClaim;
 }
