@@ -93,44 +93,53 @@ export class ExperimentMembershipCoordinator {
         blockers: [],
       } satisfies ExperimentRequestState;
     });
-    for (const [index, request] of requests.entries()) {
-      const result = await this.collections.requests.updateOne(
-        {
-          _id: request.requestId,
-          projectId: input.projectId,
-          "run._id": request.runId,
-          deletedAt: { $exists: false },
-          experimentId: { $exists: false },
-        } as Document,
-        {
-          $set: {
-            experimentId: input.experimentId,
-            experimentExpectedRequestCount: requests.length,
-            experimentRequestIndex: index,
-            experimentInitialRunId: request.runId,
-            experimentMembershipOperationId:
-              input.experimentRevisionId,
-            experimentMembershipRevisionId:
-              input.experimentRevisionId,
-          },
-        } as Document,
-      );
-      if (result.matchedCount === 0) {
-        const conflict = await this.collections.requests.findOne(
-          { _id: request.requestId } as Document,
+    try {
+      for (const [index, request] of requests.entries()) {
+        const result = await this.collections.requests.updateOne(
+          {
+            _id: request.requestId,
+            projectId: input.projectId,
+            "run._id": request.runId,
+            deletedAt: { $exists: false },
+            experimentId: { $exists: false },
+          } as Document,
+          {
+            $set: {
+              experimentId: input.experimentId,
+              experimentExpectedRequestCount: requests.length,
+              experimentRequestIndex: index,
+              experimentInitialRunId: request.runId,
+              experimentMembershipOperationId:
+                input.experimentRevisionId,
+              experimentMembershipRevisionId:
+                input.experimentRevisionId,
+            },
+          } as Document,
         );
-        throw new ExperimentMembershipError(
-          `Request ${request.requestId} could not be claimed`,
-          409,
-          "request-membership-conflict",
-          [{
-            requestId: request.requestId,
-            ...(conflict?.experimentId
-              ? { experimentId: conflict.experimentId }
-              : {}),
-          }],
-        );
+        if (result.matchedCount === 0) {
+          const conflict = await this.collections.requests.findOne(
+            { _id: request.requestId } as Document,
+          );
+          throw new ExperimentMembershipError(
+            `Request ${request.requestId} could not be claimed`,
+            409,
+            "request-membership-conflict",
+            [{
+              requestId: request.requestId,
+              ...(conflict?.experimentId
+                ? { experimentId: conflict.experimentId }
+                : {}),
+            }],
+          );
+        }
       }
+    } catch (error) {
+      await this.releaseUnpublishedClaims({
+        projectId: input.projectId,
+        experimentId: input.experimentId,
+        operationId: input.experimentRevisionId,
+      });
+      throw error;
     }
     const pending = await this.store.createPending({
       experimentId: input.experimentId,
@@ -337,42 +346,54 @@ export class ExperimentMembershipCoordinator {
     );
     const operationId = claim.nextRevision.experimentRevisionId;
 
-    for (const request of nextRequests) {
-      const result = await this.collections.requests.updateOne(
-        {
-          _id: request.requestId,
-          projectId,
-          "run._id": request.runId,
-          deletedAt: { $exists: false },
-          $or: [
-            { experimentId: { $exists: false } },
-            { experimentId },
-          ],
-        } as Document,
-        {
-          $set: {
-            experimentId,
-            experimentMembershipOperationId: operationId,
-            experimentMembershipRevisionId: operationId,
-          },
-        } as Document,
-      );
-      if (result.matchedCount === 0) {
-        const conflict = await this.collections.requests.findOne(
-          { _id: request.requestId } as Document,
+    try {
+      for (const request of nextRequests) {
+        if (currentIds.has(request.requestId)) continue;
+        const result = await this.collections.requests.updateOne(
+          {
+            _id: request.requestId,
+            projectId,
+            "run._id": request.runId,
+            deletedAt: { $exists: false },
+            $or: [
+              { experimentId: { $exists: false } },
+              {
+                experimentId,
+                experimentMembershipOperationId: operationId,
+              },
+            ],
+          } as Document,
+          {
+            $set: {
+              experimentId,
+              experimentMembershipOperationId: operationId,
+            },
+          } as Document,
         );
-        throw new ExperimentMembershipError(
-          `Request ${request.requestId} could not be claimed`,
-          409,
-          "request-membership-conflict",
-          [{
-            requestId: request.requestId,
-            ...(conflict?.experimentId
-              ? { experimentId: conflict.experimentId }
-              : {}),
-          }],
-        );
+        if (result.matchedCount === 0) {
+          const conflict = await this.collections.requests.findOne(
+            { _id: request.requestId } as Document,
+          );
+          throw new ExperimentMembershipError(
+            `Request ${request.requestId} could not be claimed`,
+            409,
+            "request-membership-conflict",
+            [{
+              requestId: request.requestId,
+              ...(conflict?.experimentId
+                ? { experimentId: conflict.experimentId }
+                : {}),
+            }],
+          );
+        }
       }
+    } catch (error) {
+      await this.releaseUnpublishedClaims({
+        projectId,
+        experimentId,
+        operationId,
+      });
+      throw error;
     }
 
     const published = await this.store.repairRollover(
@@ -412,7 +433,6 @@ export class ExperimentMembershipCoordinator {
           _id: { $in: nextRequests.map(({ requestId }) => requestId) },
           projectId,
           experimentId,
-          experimentMembershipOperationId: operationId,
         } as Document,
         {
           $set: {
@@ -424,6 +444,31 @@ export class ExperimentMembershipCoordinator {
       );
     }
     return { experiment: published, attachedRequestIds, detachedRequestIds };
+  }
+
+  private async releaseUnpublishedClaims(input: {
+    projectId: string;
+    experimentId: string;
+    operationId: string;
+  }): Promise<void> {
+    await this.collections.requests.updateMany(
+      {
+        projectId: input.projectId,
+        experimentId: input.experimentId,
+        experimentMembershipOperationId: input.operationId,
+      } as Document,
+      {
+        $unset: {
+          experimentId: "",
+          experimentMembershipOperationId: "",
+          experimentMembershipRevisionId: "",
+          experimentExpectedRequestCount: "",
+          experimentRequestIndex: "",
+          experimentInitialRunId: "",
+          experimentFinalizedAt: "",
+        },
+      } as Document,
+    );
   }
 
   private async loadRequestDocuments(
