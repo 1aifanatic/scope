@@ -12,7 +12,6 @@ const run = (id: string, experimentId?: string): Run => ({
   createdAt: "2026-10-16T00:00:00.000Z",
   experimentId,
 });
-
 describe("existing-run Experiment eligibility", () => {
   it("allows a fully loaded standalone selection", () => {
     expect(
@@ -34,4 +33,3 @@ describe("existing-run Experiment eligibility", () => {
     expect(result.reason).toContain("already assigned");
   });
 });
-
