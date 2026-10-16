@@ -230,7 +230,6 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--resources",
           "--scenario",
           "--skills",
-          "--tags",
           "--traits",
           "--url",
           "--worker",
