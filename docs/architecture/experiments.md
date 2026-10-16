@@ -262,9 +262,15 @@ requires project scope.
 
 The Portal provides `/experiments`, `/experiments/new`, and
 `/experiments/:id`. The shared creation form retains the established run
-configuration and expansion count, adds Experiment metadata and an empty
-option, and navigates to Experiment Detail after creation. Detail shows current
-state, linked runs, blockers, exact execution history, and retry. Run list and
+configuration and expansion count and adds Experiment metadata. No selected
+scenario creates an empty Experiment; selecting a scenario reveals the run
+composition controls and creates the expanded run count. The Portal navigates
+to Experiment Detail after creation. Detail selects the current processing
+attempt by default and supports direct historical links via `?executionId=`.
+A header attempt selector renders exactly one current or historical execution
+at a time, including its state, blockers, and a shared
+sortable/customizable/paginated Runs `DataTable`. Run rows link to the exact
+stored request/run pair. Retry remains current-attempt-only. Run list and
 detail views link `experimentId` back to the Experiment. A historical
 correlation that has no Experiment document is view-only and cannot trigger
 retry.
