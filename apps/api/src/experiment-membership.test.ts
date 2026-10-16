@@ -183,4 +183,35 @@ describe("ExperimentMembershipCoordinator complete-set operations", () => {
       code: "stale-experiment-revision",
     });
   });
+
+  it("returns the already-published deterministic revision on idempotent replay", async () => {
+    const requests = [request("request-1", "run-1")];
+    const replayFingerprint = fingerprintExperimentPayload({
+      experimentId: "experiment-1",
+      expectedExperimentRevisionId: "revision-1",
+      requestIds: ["request-1"],
+      runIds: [{ requestId: "request-1", runId: "run-1" }],
+    });
+    const published = experiment(requests);
+    published.revision.experimentRevisionId = `er_v1_${replayFingerprint}`;
+    published.revision.revisionNumber = 2;
+    vi.spyOn(ExperimentStore.prototype, "get").mockResolvedValue(published);
+    vi.spyOn(
+      ExperimentStore.prototype,
+      "readExecutionRequests",
+    ).mockResolvedValue(requests);
+
+    await expect(
+      coordinator().replace({
+        projectId: "project-1",
+        experimentId: "experiment-1",
+        expectedExperimentRevisionId: "revision-1",
+        requestIds: ["request-1"],
+      }),
+    ).resolves.toEqual({
+      experiment: published,
+      attachedRequestIds: [],
+      detachedRequestIds: [],
+    });
+  });
 });

@@ -220,6 +220,38 @@ export class ExperimentMembershipCoordinator {
       current.revision.experimentRevisionId !==
       input.expectedExperimentRevisionId
     ) {
+      const publishedRequests =
+        (await this.store.readExecutionRequests({
+          projectId: input.projectId,
+          experimentId: input.experimentId,
+          experimentExecutionId:
+            current.execution.experimentExecutionId,
+        })) ?? [];
+      const publishedIds = publishedRequests
+        .map(({ requestId }) => requestId)
+        .sort();
+      const replayFingerprint = fingerprintExperimentPayload({
+        experimentId: input.experimentId,
+        expectedExperimentRevisionId: input.expectedExperimentRevisionId,
+        requestIds,
+        runIds: publishedRequests
+          .map(({ requestId, runId }) => ({ requestId, runId }))
+          .sort((left, right) => left.requestId.localeCompare(right.requestId)),
+      });
+      if (
+        publishedIds.length === requestIds.length &&
+        publishedIds.every(
+          (requestId, index) => requestId === requestIds[index],
+        ) &&
+        current.revision.experimentRevisionId ===
+          `er_v1_${replayFingerprint}`
+      ) {
+        return {
+          experiment: current,
+          attachedRequestIds: [],
+          detachedRequestIds: [],
+        };
+      }
       throw new ExperimentMembershipError(
         `Experiment revision is stale; current revision is ${current.revision.experimentRevisionId}`,
         409,
