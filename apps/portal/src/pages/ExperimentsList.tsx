@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FlaskConical, Plus } from "lucide-react";
+import { Atom, Plus } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ShortId } from "@/components/ShortId";
 import { Badge } from "@/components/ui/badge";
@@ -54,7 +54,7 @@ export function ExperimentsList() {
       {experimentsQuery.data?.items.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-            <FlaskConical className="h-8 w-8 text-muted-foreground" />
+            <Atom className="h-8 w-8 text-muted-foreground" />
             <div>
               <p className="font-medium">No experiments yet</p>
               <p className="text-sm text-muted-foreground">
