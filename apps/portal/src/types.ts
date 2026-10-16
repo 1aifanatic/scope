@@ -213,6 +213,8 @@ export interface Run {
   resources?: ResourceBinding[];
   extensions?: string[];
   priority?: number;
+  experimentId?: string;
+  /** Legacy request-batch correlation retained for historical API responses. */
   submissionId?: string;
   profileId?: string;
   profileVersionId?: string;
@@ -223,71 +225,6 @@ export interface Run {
   gates?: GateConfig[];
   observations?: string[];
   gateSummaries?: GateRunSummary[];
-}
-
-export type SubmissionReadiness =
-  | "waiting"
-  | "ready"
-  | "blocked"
-  | "processing"
-  | "done"
-  | "failed";
-
-export interface SubmissionDependencyProjection {
-  requestId: string;
-  runId: string;
-  handlerId: string;
-  state: "waiting" | "ready" | "failed" | "blocked";
-  version?: number;
-  updatedAt?: string;
-  error?: string;
-}
-
-export interface SubmissionBlockingDetail {
-  requestId: string;
-  runId: string;
-  handlerId: string;
-  reason:
-    | "request-missing"
-    | "run-changed"
-    | "dependency-failed"
-    | "dependency-blocked";
-  error?: string;
-}
-
-export interface SubmissionRequestSummary {
-  requestId: string;
-  runId: string;
-  task: string;
-  status: string;
-  outcome?: string;
-  workerType: string;
-  model?: string;
-  profileId?: string;
-}
-
-export interface Submission {
-  submissionId: string;
-  projectId: string;
-  requestIds: string[];
-  createdAt: string;
-  updatedAt?: string;
-  submissionRunId: string;
-  attemptNumber: number;
-  readiness: SubmissionReadiness;
-  requests: SubmissionRequestSummary[];
-  dependencyProjection: SubmissionDependencyProjection[];
-  blocking: SubmissionBlockingDetail[];
-  handlerProgress?: Record<
-    string,
-    {
-      status: "queued" | "processing" | "done" | "failed";
-      version?: number;
-      updatedAt?: string;
-      error?: string;
-    }
-  >;
-  report?: { reportId?: string; url?: string; updatedAt?: string };
 }
 
 export interface CursorPaginatedResponse<T> {
@@ -1275,7 +1212,7 @@ export interface ProfileWithVersion extends ProfileDocument {
 
 // --- Runs grouping types (mirrored from shared) ---
 
-export type GroupByKey = "none" | "task" | "submissionId" | "profile";
+export type GroupByKey = "none" | "task" | "experimentId" | "profile";
 
 export interface AggregateStats {
   min: number;
@@ -1294,7 +1231,7 @@ export interface GroupUniformValues {
   skillRevisions?: string[];
   extensions?: string[];
   status?: RunStatus;
-  submissionId?: string;
+  experimentId?: string;
   task?: string;
 }
 

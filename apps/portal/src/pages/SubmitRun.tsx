@@ -2,9 +2,13 @@
 // Licensed under the MIT License.
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, type RunCreateInput } from "@/lib/api";
+import {
+  LEGACY_REQUEST_COMPOSITION_DEPRECATION,
+  type ExperimentView,
+} from "@/lib/experiments";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -184,7 +188,11 @@ function CollapsibleCard({ icon: Icon, title, summary, open, onOpenChange, disab
 // SubmitRun
 // ────────────────────────────────────────────────────────────────────────────
 
-export function SubmitRun() {
+export function SubmitRun({
+  mode = "run",
+}: {
+  mode?: "run" | "experiment";
+}) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const strictAgentCapabilities = useStrictAgentCapabilities();
@@ -215,6 +223,10 @@ export function SubmitRun() {
   const [occurrences, setOccurrences] = useState<number>(5);
   const [priority, setPriority] = useState<number>(0);
   const [agentsMd, setAgentsMd] = useState<string>("");
+  const [experimentName, setExperimentName] = useState("");
+  const [experimentDescription, setExperimentDescription] = useState("");
+  const [experimentTags, setExperimentTags] = useState("");
+  const [createEmptyExperiment, setCreateEmptyExperiment] = useState(false);
 
   // Optional add-ons
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -664,14 +676,56 @@ export function SubmitRun() {
     : [];
   const gateErrors = [...gateValidationErrors, ...promptValidationErrors];
 
-  const submitMutation = useMutation({
-    mutationFn: api.submitRun,
+  type SubmitResult =
+    | ExperimentView
+    | Awaited<ReturnType<typeof api.submitRun>>;
+
+  const submitMutation = useMutation<
+    SubmitResult,
+    Error,
+    { request?: RunCreateInput }
+  >({
+    mutationFn: ({ request }: { request?: RunCreateInput }) =>
+      mode === "experiment"
+        ? api.createExperiment({
+            metadata: {
+              name: experimentName.trim(),
+              ...(experimentDescription.trim()
+                ? { description: experimentDescription.trim() }
+                : {}),
+              ...(experimentTags.trim()
+                ? {
+                    tags: experimentTags
+                      .split(",")
+                      .map((tag) => tag.trim())
+                      .filter(Boolean),
+                  }
+                : {}),
+            },
+            ...(createEmptyExperiment ? { empty: true } : { request: request! }),
+          })
+        : api.submitRun(request!),
     onSuccess: (data) => {
-      navigate(`/submissions/${data.submissionId}`);
+      if (mode === "experiment" && "experimentId" in data) {
+        navigate(`/experiments/${data.experimentId}`);
+        return;
+      }
+      if ("id" in data && typeof data.id === "string") {
+        navigate(`/runs/${data.id}`);
+        return;
+      }
+      if ("ids" in data && Array.isArray(data.ids) && data.ids[0]) {
+        navigate(`/runs/${data.ids[0]}`);
+      }
     },
   });
 
   const doSubmit = () => {
+    if (mode === "experiment" && createEmptyExperiment) {
+      if (!experimentName.trim()) return;
+      submitMutation.mutate({});
+      return;
+    }
     if (!task.trim()) return;
     const normalizedVariationDrafts = variationDrafts.filter((v) => v.profileId.trim().length > 0);
     const profileVariations: string[] = normalizedVariationDrafts.map((v) =>
@@ -682,7 +736,7 @@ export function SubmitRun() {
       ? (selectedProfileVersion ? `${selectedProfileId}@${selectedProfileVersion}` : selectedProfileId)
       : null;
 
-    submitMutation.mutate({
+    const request: RunCreateInput = {
       scenario: { task: task.trim(), criteria: pickedCriteria },
       ...(pickedObservations.length > 0 ? { observations: pickedObservations } : {}),
       ...(inVariationMode ? {} : { ...(worker ? { worker } : {}) }),
@@ -707,7 +761,8 @@ export function SubmitRun() {
         : {
             ...(baseProfileSpec ? { profileId: baseProfileSpec } : {}),
           }),
-    });
+    };
+    submitMutation.mutate({ request });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -728,20 +783,25 @@ export function SubmitRun() {
   });
 
   const canSubmit =
-    !!task.trim() &&
-    !!selectedAgent &&
-    isAgentAvailable(selectedAgent) &&
-    !selectedVersionIsHistorical &&
-    selectedVariationTargetsAvailable &&
-    !submitMutation.isPending &&
-    !(selectedAgent && activeModelIds.length > 0 && !model) &&
-    !(maxIterations !== 1 && pickedCriteria.length === 0) &&
-    gateErrors.length === 0;
+    mode === "experiment" && createEmptyExperiment
+      ? !!experimentName.trim() && !submitMutation.isPending
+      : !!task.trim() &&
+        (mode === "run" || !!experimentName.trim()) &&
+        !!selectedAgent &&
+        isAgentAvailable(selectedAgent) &&
+        !selectedVersionIsHistorical &&
+        selectedVariationTargetsAvailable &&
+        !submitMutation.isPending &&
+        !(selectedAgent && activeModelIds.length > 0 && !model) &&
+        !(maxIterations !== 1 && pickedCriteria.length === 0) &&
+        gateErrors.length === 0;
 
   const selectedVariationCount = variationDrafts.filter((v) => v.profileId.trim().length > 0).length;
   const compositionProfileCount = selectedProfileId ? 1 + selectedVariationCount : 0;
   const expandedRunCount = compositionProfileCount > 0 ? compositionProfileCount * occurrences : occurrences;
   const submitRunCount = expandedRunCount;
+  const usesLegacyComposition =
+    mode === "run" && (occurrences > 1 || selectedVariationCount > 0);
   const lastVariationDraft = variationDrafts.length > 0 ? variationDrafts[variationDrafts.length - 1] : null;
 
   const lastVariationName = lastVariationDraft
@@ -826,15 +886,22 @@ export function SubmitRun() {
           type="button"
           variant="ghost"
           size="icon"
-          onClick={() => navigate("/runs")}
-          aria-label="Back to runs"
+          onClick={() => navigate(mode === "experiment" ? "/experiments" : "/runs")}
+          aria-label={mode === "experiment" ? "Back to experiments" : "Back to runs"}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">New Run</h1>
-          <p className="text-muted-foreground">Submit a benchmark run to a coding agent worker</p>
+          <h1 className="text-3xl font-bold tracking-tight">
+            {mode === "experiment" ? "New Experiment" : "New Run"}
+          </h1>
+          <p className="text-muted-foreground">
+            {mode === "experiment"
+              ? "Create a named benchmark composition and its first execution"
+              : "Submit a benchmark run to a coding agent worker"}
+          </p>
         </div>
+
         <AdvancedModeToggle
           checked={advanced}
           onCheckedChange={setAdvanced}
@@ -842,12 +909,81 @@ export function SubmitRun() {
         />
       </div>
 
+      {mode === "experiment" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Experiment metadata</CardTitle>
+            <CardDescription>
+              Name this reproducible composition before configuring its runs.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="experimentName">Name *</Label>
+              <Input
+                id="experimentName"
+                value={experimentName}
+                onChange={(event) => setExperimentName(event.target.value)}
+                placeholder="Copilot versus Claude on authentication"
+              />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="experimentDescription">Description</Label>
+              <Textarea
+                id="experimentDescription"
+                value={experimentDescription}
+                onChange={(event) =>
+                  setExperimentDescription(event.target.value)
+                }
+                placeholder="What this experiment compares and why"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="experimentTags">Tags</Label>
+              <Input
+                id="experimentTags"
+                value={experimentTags}
+                onChange={(event) => setExperimentTags(event.target.value)}
+                placeholder="nightly, auth, regression"
+              />
+            </div>
+            <label className="flex items-center gap-2 self-end rounded-md border p-3 text-sm">
+              <Checkbox
+                checked={createEmptyExperiment}
+                onCheckedChange={(checked) =>
+                  setCreateEmptyExperiment(checked === true)
+                }
+              />
+              Create explicitly empty
+            </label>
+          </CardContent>
+        </Card>
+      )}
+
+      {usesLegacyComposition && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
+        >
+          <span className="font-medium">
+            Deprecated composition ({LEGACY_REQUEST_COMPOSITION_DEPRECATION}).
+          </span>{" "}
+          Multi-run and profile-variation expansion remains supported here, but
+          new compositions should be created from{" "}
+          <Link className="underline" to="/experiments/new">
+            New Experiment
+          </Link>
+          .
+        </div>
+      )}
+
       {/* Quick Start gallery (collapsible, default closed) */}
       {(topProfiles.length > 0 || recentRuns.length > 0) && (
         <CollapsibleCard
           icon={Sparkles}
           title="Quick start"
-          summary="Start from a profile or re-run a recent submission"
+          summary="Start from a profile or re-run a recent benchmark"
           open={galleryOpen}
           onOpenChange={setGalleryOpen}
         >
@@ -1983,7 +2119,11 @@ export function SubmitRun() {
           <div className="flex items-center gap-2">
             {submitMutation.isError && (
               <p className="text-xs text-destructive">
-                {submitMutation.error instanceof Error ? submitMutation.error.message : "Submission failed"}
+                {submitMutation.error instanceof Error
+                  ? submitMutation.error.message
+                  : mode === "experiment"
+                    ? "Experiment creation failed"
+                    : "Run submission failed"}
               </p>
             )}
             {!profileLocked && worker && model && (
@@ -2037,7 +2177,13 @@ export function SubmitRun() {
               ) : (
                 <Send className="h-4 w-4" />
               )}
-              Submit {submitRunCount > 1 ? `${submitRunCount} Runs` : "Run"}
+              {mode === "experiment"
+                ? createEmptyExperiment
+                  ? "Create Empty Experiment"
+                  : `Create Experiment · ${submitRunCount} ${
+                      submitRunCount === 1 ? "Run" : "Runs"
+                    }`
+                : `Submit ${submitRunCount > 1 ? `${submitRunCount} Runs` : "Run"}`}
               <KbdBadge />
             </Button>
           </div>

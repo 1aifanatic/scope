@@ -95,6 +95,7 @@ const navGroups: NavGroup[] = [
     scoped: true,
     items: [
       { to: "/runs", label: "Runs", icon: List },
+      { to: "/experiments", label: "Experiments", icon: FlaskConical },
       { to: "/statistics", label: "Statistics", icon: BarChart3 },
       { to: "/reports", label: "Reports", icon: FileText },
       { to: "/insights", label: "Insights", icon: Lightbulb },

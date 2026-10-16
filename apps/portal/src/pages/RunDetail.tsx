@@ -905,15 +905,15 @@ export function RunDetail() {
                 />
               )}
               <MetaItem label="Created" value={formatDate(run.createdAt)} />
-              {run.submissionId && (
+              {run.experimentId && (
                 <MetaItem
-                  label="Submission"
+                  label="Experiment"
                   value={(
                     <Link
-                      to={`/submissions/${run.submissionId}`}
+                      to={`/experiments/${run.experimentId}`}
                       className="font-mono text-primary hover:underline"
                     >
-                      {run.submissionId.slice(0, 8)}
+                      {run.experimentId.slice(0, 8)}
                     </Link>
                   )}
                 />
