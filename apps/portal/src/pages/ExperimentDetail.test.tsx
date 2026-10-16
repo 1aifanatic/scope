@@ -163,6 +163,12 @@ describe("ExperimentDetail", () => {
     expect(screen.getAllByText("Current task 1").length).toBeGreaterThan(0);
     expect(screen.queryAllByText("Historical task")).toHaveLength(0);
     expect(screen.getByText("1–10 of 11 runs")).toBeTruthy();
+    const embeddedTable = document.querySelector(
+      '[data-slot="embedded-table-block"]',
+    );
+    if (!embeddedTable) throw new Error("Embedded runs table block is missing");
+    expect(embeddedTable.className).toContain("space-y-3");
+    expect(embeddedTable.parentElement?.className).toContain("p-6");
 
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     expect((await screen.findAllByText("Current task 11")).length).toBeGreaterThan(0);

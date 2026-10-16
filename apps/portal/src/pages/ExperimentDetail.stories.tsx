@@ -119,13 +119,19 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const AttemptSelectionAndRunsTable: Story = {
-  play: async ({ canvas }) => {
+  play: async ({ canvas, canvasElement }) => {
     await expect(
       await screen.findByText("Runs in attempt 2"),
     ).toBeVisible();
     await expect(
       screen.getAllByText("Implement the current benchmark task")[0],
     ).toBeVisible();
+    const embeddedTable = canvasElement.querySelector(
+      '[data-slot="embedded-table-block"]',
+    );
+    if (!embeddedTable) throw new Error("Embedded runs table block is missing");
+    await expect(embeddedTable).toHaveClass("space-y-3");
+    await expect(embeddedTable.parentElement).toHaveClass("p-6");
 
     await userEvent.click(
       canvas.getByRole("combobox", { name: "Experiment attempt" }),
