@@ -3,7 +3,7 @@ title: Data collection and privacy
 description: What data Scope handles, why it is needed, and where it may be sent.
 ---
 
-Last updated: October 14, 2026
+Last updated: October 16, 2026
 
 Scope is deployable software. The organization operating your Scope
 deployment controls its data, chooses its connected services, and sets its
@@ -27,6 +27,7 @@ that site's privacy practices.
 The published documentation website uses Microsoft One Observability
 (1DS) to understand website usage and reliability. Microsoft Web Cookie
 Policy (WCP) provides the consent banner and saves your cookie choices.
+The banner appears at the top of the page, above the site header.
 The WCP consent script loads when you visit the published site; the 1DS
 script loads only after you opt in to the **Analytics** category.
 The same opt-in requirement applies to visitors worldwide, without
@@ -36,6 +37,7 @@ When enabled, 1DS automatically captures page views, page-load and
 page-unload events, clicks, scrolling, resizing, JavaScript errors, and
 browser context. This information is sent to Microsoft's 1DS collector
 to understand how the documentation is used and identify problems.
+Your Analytics choice is also passed to 1DS as consent metadata.
 The SDK is configured not to use analytics cookies and not to collect
 query strings or fragments in page URLs. WCP's consent-preference cookie
 is separate from analytics.

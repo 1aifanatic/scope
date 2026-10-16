@@ -40,7 +40,7 @@ const configuration = {
 	instrumentationKey: 'd73f4c6d7bfd4f54ab769e2baaf3156b-3241346c-4fe3-4bd7-a8b6-7ca73da60140-7462',
 	disableCookiesUsage: true,
 	channelConfiguration: { eventsLimitInMem: 50 },
-	propertyConfiguration: { env: 'PROD' },
+	propertyConfiguration: { env: 'PROD', userConsented: false },
 	webAnalyticsConfiguration: {
 		urlCollectQuery: false,
 		urlCollectHash: false,
@@ -79,10 +79,17 @@ function loadScript(src: string): Promise<void> {
 async function initializeConsent(allowAnalytics: boolean): Promise<void> {
 	const manageCookies = document.querySelector<HTMLButtonElement>('[data-manage-cookies]');
 	if (!manageCookies) throw new Error('Missing Scope cookie-management control');
+	const skipLink = document.querySelector<HTMLAnchorElement>('body > a[href="#_top"]');
+	if (!skipLink) throw new Error('Missing Scope skip link');
 
 	const banner = document.createElement('div');
 	banner.id = 'scope-cookie-banner';
-	document.body.append(banner);
+	skipLink.after(banner);
+	new ResizeObserver((entries) => {
+		for (const { contentRect } of entries) {
+			document.documentElement.style.setProperty('--scope-cookie-banner-height', `${contentRect.height}px`);
+		}
+	}).observe(banner);
 	await loadScript(wcpScript);
 	const wcp = window.WcpConsent;
 	if (!wcp) throw new Error('Microsoft WCP consent API is unavailable');
@@ -128,7 +135,14 @@ async function initializeConsent(allowAnalytics: boolean): Promise<void> {
 		current.addTelemetryInitializer(() => current === analytics && hasAnalyticsConsent());
 		analytics = current;
 		try {
-			current.initialize(configuration, []);
+			// Delaying initialization until opt-in does not set the SDK's consent metadata.
+			current.initialize({
+				...configuration,
+				propertyConfiguration: {
+					...configuration.propertyConfiguration,
+					userConsented: hasAnalyticsConsent(),
+				},
+			}, []);
 		} catch (error) {
 			analytics = undefined;
 			throw error;
