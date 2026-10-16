@@ -1,201 +1,308 @@
-# Experiments
+# Experiments Architecture
 
-Experiments are the canonical aggregate for deliberately composed benchmark
-requests. A standalone request remains a permanent first-class workflow and
-does not imply an Experiment. Every explicitly composed Experiment, including
-one with a single request, uses the model described here.
+> **Status:** PR A foundation and client contract, current as of October 2026.
 
-## Aggregate model
+Experiments are project-scoped, named benchmark compositions. An Experiment
+stores durable metadata, one immutable revision, and one current processing
+execution. Previous executions are immutable history records.
 
-An `ExperimentDocument` in `experiments` owns:
+PR A provides the canonical storage model, project-scoped public API contract,
+CLI commands, Portal creation/list/detail flows, and run correlation. It does
+not add mutable membership or cascading lifecycle behavior.
 
-- stable `experimentId` and immutable `projectId`;
-- bounded user metadata;
-- `storageProfileVersion: "cosmos-mongo-2mb-v1"`;
-- a monotonic `stateVersion`;
-- the current immutable revision identity and fingerprints; and
-- the only dispatchable execution, embedded as `execution`.
+## Model
 
-The revision records `experimentRevisionId`, `revisionNumber`, `memberCount`,
-`membershipFingerprint`, and `definitionFingerprint`. PR A creates revision 1.
-Changing membership belongs to the later membership-mutation contribution.
+```mermaid
+erDiagram
+    EXPERIMENT ||--|| EXPERIMENT_REVISION : fixes
+    EXPERIMENT ||--|| CURRENT_EXECUTION : owns
+    EXPERIMENT ||--o{ EXECUTION_HISTORY : archives
+    CURRENT_EXECUTION ||--|| FIXED_REQUEST_VECTOR : processes
+    FIXED_REQUEST_VECTOR ||--o{ REQUEST_STATE : contains
+    FIXED_REQUEST_VECTOR ||--o{ EXPERIMENT_CHUNK : may_use
 
-An execution records `experimentExecutionId`, attempt number, execution
-version, the exact request/run vector, its fingerprint, compact handler
-progress, blockers, timestamps, and supersession state. Archived executions
-are immutable documents in `experiment-executions`.
+    EXPERIMENT {
+        string experimentId
+        string projectId
+        string storageProfileVersion
+        number stateVersion
+        datetime finalizedAt
+    }
 
-Each vector entry is a bounded, non-recursive `ExperimentRequestState`:
+    EXPERIMENT_REVISION {
+        string experimentRevisionId
+        number revisionNumber
+        number memberCount
+        string membershipFingerprint
+        string definitionFingerprint
+    }
 
-```ts
-interface ExperimentRequestState {
-  requestId: string;
-  runId: string;
-  dependencies: ExperimentDependencyProjection[];
-  blockers: ExperimentBlocker[];
-}
+    CURRENT_EXECUTION {
+        string experimentExecutionId
+        number attemptNumber
+        number version
+        string vectorFingerprint
+        datetime frozenAt
+    }
+
+    REQUEST_STATE {
+        string requestId
+        string runId
+    }
 ```
 
-Unknown API, queue, and persistence values are parsed before use. Raw chunk
-documents are private to the shared Experiment storage modules.
+### Revision versus execution
 
-## Fixed payload storage
+An **Experiment revision** describes the composition itself:
 
-Scope targets the universal Cosmos DB for MongoDB 2 MB document limit and does
-not depend on 16 MB support. The `cosmos-mongo-2mb-v1` profile uses:
+- `experimentRevisionId` and sequential `revisionNumber`;
+- exact `memberCount`;
+- `membershipFingerprint` for the member set;
+- `definitionFingerprint` for the complete definition;
+- immutable creation time.
 
-| Limit | Value |
-| --- | ---: |
-| Cosmos hard document limit | 2 MiB |
-| Current root and bucket target | 256 KiB |
-| Maximum encoded request entry | 4 KiB |
-| Metadata reserve | target / 16 |
-| Planning load factor | 0.8 |
+An **Experiment execution** is one processing attempt over that revision:
 
-The complete request vector is stored solely as
-`FixedPayload<ExperimentRequestState>`. If the worst-case encoded root fits the
-target, the vector is inline. Otherwise it is assigned to deterministic fixed
-buckets.
+- `experimentExecutionId` and sequential `attemptNumber`;
+- optimistic-concurrency `version`;
+- the exact request/run vector and its `vectorFingerprint`;
+- handler status, blockers, and processing timestamps;
+- freeze, discard, and supersession state.
 
-Bucket assignment hashes the UTF-8 bytes of
-`experiment-request-bucket:v1\0${requestId}` with SHA-256, interprets all 32
-bytes as an unsigned big-endian integer, and applies modulo `bucketCount`.
-`assignmentVersion` is `sha256-mod-v1`.
+Retry creates a new execution attempt over the same stored request vector. It
+does not create a new revision or retry member runs. Revision membership
+mutation is deferred to PR C.
 
-Layout selection starts at
-`ceil(entryCount / maxEntriesPerBucket)`, recomputes the full distribution for
-each ascending bucket count, and accepts the first count satisfying entry and
-BSON budgets. If no bounded layout is safe, publication fails before the root
-is finalized.
+### Exact request/run vector
 
-Chunk IDs are derived from the canonical JSON tuple:
+Each `ExperimentRequestState` is a bounded, nonrecursive leaf containing the
+exact `requestId`, exact `runId`, dependency projections, and blockers captured
+for that member. Request IDs are unique within the vector. Each dependency and
+blocker list is bounded to 32 entries, and each serialized request state is
+limited to 4 KiB.
 
-```json
-["sha256-v1", "projectId", "experimentId", "kind", "ownerId", 1, 0]
+The vector is immutable after publication. Its SHA-256 fingerprint is stored
+both on the execution (`vectorFingerprint`) and on its `FixedPayload`
+descriptor (`payloadFingerprint`). Reads reconstruct the original position
+order and reject missing positions, duplicates, count mismatches, identity
+mismatches, or fingerprint mismatches.
+
+## FixedPayload storage
+
+`FixedPayload<T>` has two representations:
+
+| Representation | Stored on the execution | Use |
+| --- | --- | --- |
+| `inline` | `entryCount`, `payloadFingerprint`, and `entries[]` | The complete Experiment document fits the operational target |
+| `chunked` | `entryCount`, `payloadFingerprint`, assignment version, `bucketCount`, and deterministic `chunkIds[]` | The inline document exceeds the operational target |
+
+The storage profile is versioned as `cosmos-mongo-2mb-v1`.
+
+- **2 MiB hard ceiling:** no selected Experiment or chunk document may exceed
+  `maxDocumentBytes`.
+- **256 KiB operational target:** inline storage is used only when the complete
+  Experiment document is at or below `targetDocumentBytes`.
+- Chunk selection reserves 16 KiB for metadata and applies an 80% load factor
+  to the remaining target.
+- Empty vectors are always inline.
+- The bucket search is bounded to 65,536 buckets and fails explicitly when no
+  safe layout exists.
+
+### Deterministic routing and chunk identity
+
+Chunk routing is versioned as `sha256-mod-v1`. For a chosen bucket count, the
+store hashes:
+
+```text
+"experiment-request-bucket:v1\0" + requestId
 ```
 
-The SHA-256 digest is encoded as unpadded base64url with the `ec_v1_` prefix.
-Every unhashed tuple field is stored and compare-and-swapped; a mismatched tuple
-is an invariant failure. Chunk reads are point lookups by `_id`. Request entry,
-dependency, blocker, payload, and wildcard indexes are intentionally absent.
+The full SHA-256 digest is interpreted as an unsigned big-endian integer, then
+reduced modulo `bucketCount`. This makes assignment independent of input order
+and stable across processes.
 
-The representation and bucket count are immutable within a published
-execution. A new execution or future revision may independently choose inline
-or chunked storage without in-place rebalancing.
+Chunk IDs are also deterministic. The store serializes this canonical tuple:
 
-## Creation and publication
-
-`POST /api/v1/experiments?projectId=...` accepts either:
-
-- `mode: "empty"` with no requests; or
-- `mode: "compose"` with one or more complete request definitions.
-
-The API generates the Experiment, revision, execution, request, and run IDs
-before writing. It inserts the requests, prepares all vector chunks, writes the
-pending root idempotently, verifies the complete payload set, and then
-compare-and-swaps final publication. An empty Experiment is visible but not
-dispatchable.
-
-Requests created through this path carry recovery markers and `experimentId`.
-An interrupted finalization can be repaired using the original exact run IDs.
-A historical request that only carries an `experimentId` and has no parent
-document remains correlation-only: clients may display the link, but the
-API coordinator never reconstructs or triggers a new Experiment from it.
-
-Ordinary `POST /api/v1/requests`, `scope run submit`, and `/runs/new` remain
-supported. They never infer an Experiment.
-
-## Processing and rollover
-
-`run.handlerStatus` is authoritative. The API coordinator projects only the
-named dependencies required by an Experiment handler for each exact
-`{requestId, runId}` pair. Queue messages carry:
-
-```json
-{
-  "type": "<registered experiment-handler selector>",
-  "projectId": "...",
-  "experimentId": "...",
-  "experimentExecutionId": "...",
-  "handlerId": "...",
-  "handlerVersion": 1,
-  "claimToken": "...",
-  "executionVersion": 1
-}
+```text
+["sha256-v1", projectId, experimentId, kind, ownerId, generation, chunkIndex]
 ```
 
-Claims and completions compare-and-swap the project, Experiment, execution,
-execution version, handler version, and current state. Stale messages are
-discarded. Workers must cooperatively recheck supersession before expensive
-work and before publication.
+It hashes the JSON bytes with SHA-256, encodes the digest as base64url, and
+prefixes it with `ec_v1_`. `ownerId` is the execution ID and `generation` is
+the attempt number. Upserts use `$setOnInsert`; a read-back comparison rejects
+an existing deterministic ID whose identity or contents differ.
 
-When an exact run ID changes, or processing is manually retried, rollover:
+## Publication and concurrency
 
-1. claims the current root transition and makes it non-dispatchable;
-2. freezes the old fixed payload;
-3. archives the old execution and prepares its deterministic successor;
-4. marks the successor prepared; and
-5. publishes the new embedded execution with a final root compare-and-swap.
+Experiment creation and execution rollover use a prepare-then-publish protocol.
 
-Unchanged request/run pairs preserve their dependency projections. Changed
-pairs are reseeded from authoritative run state. Zero matched rows are
-classified as stale work, bounded same-identity contention, or an invariant
-failure rather than treated as success. Polling repairs missing projections,
-vector drift, dropped retry notifications, and interrupted rollovers.
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Store as ExperimentStore
+    participant Chunks as experiment-chunks
+    participant Current as experiments
+    participant History as experiment-executions
 
-## Runtime ownership
+    Client->>Store: createPending(metadata, revision, vector)
+    Store->>Chunks: prepare deterministic chunks if needed
+    Store->>Current: setOnInsert pending Experiment
+    Client->>Store: finalizeCreation(expected IDs and stateVersion)
+    Store->>Chunks: verify complete FixedPayload
+    Store->>Current: CAS set finalizedAt
 
-The API owns `ExperimentCoordinator`, including projection, rollover,
-readiness, retry, publication repair, and Experiment-handler dispatch policy.
-Its poller is the durable recovery path and queue notifications are
-optimizations, not correctness requirements.
+    Client->>Store: freezeCurrent(expected execution version)
+    Store->>Current: CAS set frozenAt
+    Client->>Store: rollover or retry
+    Store->>Chunks: prepare next execution payload
+    Store->>Current: CAS publish rollover claim
+    Store->>History: archive old execution with setOnInsert
+    Store->>Current: install next execution
+```
 
-The scheduler continues to own coding-agent and per-run handler dispatch. For
-Experiment handlers it only applies exact claim/completion messages through
-the shared `ExperimentStore` CAS primitives. Storage layout, routing,
-fingerprinting, and state transitions remain reusable typed modules under
-`packages/shared/src/experiments`; they contain no workflow policy.
+### Compare-and-swap rules
 
-The three collections have deliberately narrow ownership:
+- `stateVersion` protects whole-document publication transitions.
+- `execution.version` protects handler claims/completions, freeze, discard, and
+  rollover.
+- Handler writes require the expected execution ID and version, the expected
+  handler version/status, and an unfrozen execution with no rollover claim.
+- Freeze competes through the same execution-version compare-and-swap. A
+  writer/freezer race has one winner.
+- Rollover requires the current execution to be frozen and records an embedded
+  claim containing the complete next execution before replacing the current
+  pointer.
 
-- `experiments` contains bounded current roots and the only dispatchable
-  execution;
-- `experiment-executions` contains immutable archived execution manifests;
-- `experiment-chunks` contains private fixed-payload buckets addressed by
-  deterministic `_id`.
+### Finalization, archive, and repair
 
-Only repair/admin indexes are permitted on roots and archived manifests.
-Chunks use point lookup by `_id`; entries, request IDs, dependencies, blockers,
-payloads, and wildcard paths are never indexed.
+`createPending()` may prepare chunks before the root document exists.
+`finalizeCreation()` verifies the complete payload and atomically sets
+`finalizedAt`. Public `get` and `list` operations return only finalized
+Experiments, so partially published state is never visible.
+
+Before rollover, the current execution is frozen. Archival writes an immutable
+history document keyed by `experimentExecutionId` with `$setOnInsert`, then
+reads it back and requires exact equality. The history record includes the
+revision and supersession metadata.
+
+The rollover claim is the repair journal. `repairRollover()` verifies the next
+payload, idempotently archives the old execution, and installs the claimed next
+execution. A caller can resume this sequence after interruption without
+inventing state. Prepared chunks that were never published can be removed with
+`discardUnpublished()`.
+
+## Collection and index ownership
+
+| Collection | Owner and contents | Indexes created by migration 034 |
+| --- | --- | --- |
+| `experiments` | One finalized/current document per Experiment; `_id` equals `experimentId` | `{ projectId: 1, _id: 1 }` for project-scoped paging and lookup |
+| `experiment-executions` | Immutable archived execution history; `_id` equals `experimentExecutionId` | `{ projectId: 1 }`; `{ experimentId: 1, attemptNumber: -1 }` |
+| `experiment-chunks` | Deterministic immutable request-vector chunks | No secondary index; chunks are addressed directly by deterministic `_id` |
+
+The `ExperimentStore` owns root and history writes. `FixedPayloadStore` owns
+chunk preparation, read verification, and unpublished cleanup. Migration
+`034-create-experiment-storage-indexes.ts` owns the secondary indexes and
+intentionally leaves removal to a manual operation in `down()`.
+
+Every lookup includes `projectId` in addition to the entity ID. An Experiment
+ID is never resolved globally.
 
 ## Public API
 
-The Experiment API is project-scoped:
+All routes require `?projectId=`:
 
-- `POST /api/v1/experiments`
-- `GET /api/v1/experiments`
-- `GET /api/v1/experiments/:id`
-- `GET /api/v1/experiments/:id/executions`
-- `GET /api/v1/experiments/:id/executions/:experimentExecutionId`
-- `POST /api/v1/experiments/:id/retry`
+| Method | Route | Behavior |
+| --- | --- | --- |
+| `POST` | `/api/v1/experiments` | Create from `{ metadata, request }` or `{ metadata, empty: true }`; optional worker selection remains a query parameter |
+| `GET` | `/api/v1/experiments` | Cursor-page finalized Experiments |
+| `GET` | `/api/v1/experiments/:id` | Read the public Experiment and current execution |
+| `GET` | `/api/v1/experiments/:id/executions` | List current and archived execution summaries |
+| `GET` | `/api/v1/experiments/:id/executions/:experimentExecutionId` | Read one exact current or archived execution |
+| `POST` | `/api/v1/experiments/:id/retry` | Start a new processing attempt for the current exact vector |
 
-Responses expose public readiness, blockers, handler progress, supersession,
-and the current report pointer. Queue names, claim tokens, chunk identities,
-and other scheduler internals are not public. Lists use stable cursors.
+Creation metadata requires `name` and accepts optional `description` and
+`tags`. Unless `empty: true`, `request` uses the existing request-creation
+configuration and composition controls. `empty: true` forbids `request`.
 
-## Compatibility
+The public view exposes identity, project, metadata, revision, current
+execution, readiness, blockers, handler progress, supersession, current report,
+and linked request summaries when available. Creation additionally returns
+`createdRequestIds`. List responses and execution-list responses use
+`{ items, nextCursor? }`.
 
-The run-submission operation itself is not deprecated. Only composition inputs
-that overlap Experiment creation are deprecated, under the shared
-`legacy-request-composition` identifier. The API emits `Deprecation` and a
-successor `Link` only when those inputs are present; there is no Sunset date.
-CLI warnings and the Portal notice follow the same conditional rule.
+## CLI and Portal
 
-The following successor-stack capabilities are intentionally deferred:
+The CLI provides:
 
-- PR B: built-in Experiment readout;
-- PR C: existing-run membership mutation and later revisions;
-- PR D: Experiment report templates;
-- PR E: lifecycle cascade.
+```text
+scope experiment create
+scope experiment list
+scope experiment get <experiment-id>
+scope experiment executions <experiment-id> [experiment-execution-id]
+scope experiment retry <experiment-id> --execution <current-execution-id>
+```
 
-GEPA restacking is also outside PR A.
+Creation reuses run configuration flags, adds Experiment metadata, supports
+composition preview, and supports explicit empty creation. Every command
+requires project scope.
+
+The Portal provides `/experiments`, `/experiments/new`, and
+`/experiments/:id`. The shared creation form retains the established run
+configuration and expansion count, adds Experiment metadata and an empty
+option, and navigates to Experiment Detail after creation. Detail shows current
+state, linked runs, blockers, exact execution history, and retry. Run list and
+detail views link `experimentId` back to the Experiment. A historical
+correlation that has no Experiment document is view-only and cannot trigger
+retry.
+
+## Permanent request creation and composition deprecation
+
+`POST /api/v1/requests`, `scope run submit`, and the Portal's **New Run** flow
+remain permanent for one request, including:
+
+- one inline/manual configuration;
+- one saved profile;
+- ordinary model, tool, criterion, resource, and codebase configuration;
+- `count: 1`;
+- no profile variations.
+
+Only these overlapping request-creation controls are deprecated:
+
+- `count` greater than `1`; or
+- a non-empty `profileVariations` array.
+
+Clients identify this case as `legacy-request-composition`. Existing expansion,
+response, status, and navigation behavior remain intact. The CLI writes the
+warning only to stderr. The Portal renders an accessible status notice only
+when one of those two conditions is true. New multi-request compositions use
+Experiment creation.
+
+## Deferred capabilities
+
+The following are explicitly outside PR A:
+
+| Follow-up | Deferred capability |
+| --- | --- |
+| PR B | Additional derived readout orchestration beyond PR A's stored/public current and historical execution views |
+| PR C | Membership mutation and new revision creation after initial publication |
+| PR D | Report-template attachment or template-driven report orchestration |
+| PR E | Cascading lifecycle operations across an Experiment and its member requests/runs |
+
+PR A must not imply these capabilities through storage methods, client actions,
+or API contracts.
+
+## Key files
+
+| File | Purpose |
+| --- | --- |
+| `packages/shared/src/experiments/types.ts` | Canonical Experiment, revision, execution, and `FixedPayload` types |
+| `packages/shared/src/experiments/schemas.ts` | Strict persisted-boundary validation |
+| `packages/shared/src/experiments/layout.ts` | BSON limits and inline/chunked layout selection |
+| `packages/shared/src/experiments/routing.ts` | SHA-256 bucket routing, chunk IDs, and fingerprints |
+| `packages/shared/src/experiments/fixed-payload-store.ts` | Deterministic chunk publication and verified reads |
+| `packages/shared/src/experiments/experiment-store.ts` | Creation, CAS processing, freeze, archive, rollover, retry, and repair |
+| `packages/db-migrations/src/migrations/034-create-experiment-storage-indexes.ts` | Collection index ownership |
+| `apps/cli/src/commands/experiment.ts` | Project-scoped CLI surface |
+| `apps/portal/src/lib/experiments.ts` | Public response parsing |
+| `apps/portal/src/pages/ExperimentsList.tsx` | Experiment list |
+| `apps/portal/src/pages/ExperimentDetail.tsx` | Current state, history, and retry |
