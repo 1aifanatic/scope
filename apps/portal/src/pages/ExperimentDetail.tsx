@@ -21,6 +21,7 @@ import {
   CustomizeColumnsLink,
   CustomizeColumnsPanel,
   DataTable,
+  EmbeddedTableBlock,
   Pagination,
   useColumnOrder,
   useHiddenColumns,
@@ -671,73 +672,69 @@ export function ExperimentDetail() {
           )}
 
           <Card>
-            <CardHeader className="flex-row items-center justify-between space-y-0">
-              <div>
-                <CardTitle className="text-base">
-                  Runs in attempt {activeExecution.attemptNumber}
-                </CardTitle>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Open a row to inspect the exact request/run pair captured by
-                  this processing attempt.
-                </p>
-              </div>
-              <CustomizeColumnsLink
-                onClick={() => setCustomizingColumns((open) => !open)}
-              />
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="flex min-h-0">
-                {customizingColumns && (
-                  <CustomizeColumnsPanel
-                    columns={RUN_COLUMN_OPTIONS}
-                    hidden={columnVisibility.hidden}
-                    onToggle={columnVisibility.toggle}
-                    onSetHidden={columnVisibility.setHidden}
-                    onReset={() => {
-                      columnVisibility.reset();
-                      columnOrder.reset();
-                    }}
-                    onClose={() => setCustomizingColumns(false)}
-                    order={columnOrder.order}
-                    onReorder={columnOrder.setOrder}
+            <CardContent className="p-6">
+              <EmbeddedTableBlock
+                title={`Runs in attempt ${activeExecution.attemptNumber}`}
+                description="Open a row to inspect the exact request/run pair captured by this processing attempt."
+                actions={
+                  <CustomizeColumnsLink
+                    onClick={() => setCustomizingColumns((open) => !open)}
                   />
-                )}
-                <div className="min-w-0 flex-1">
-                  <DataTable
-                    items={pagedRequests}
-                    columns={columns}
-                    getRowId={(request) => request.requestId}
-                    onRowClick={(request) =>
-                      navigate(
-                        `/runs/${request.requestId}?runId=${encodeURIComponent(request.runId)}`,
-                      )
-                    }
-                    sort={sortColumn}
-                    sortDir={sortDirection}
-                    onSortChange={changeSort}
-                    density="compact"
-                    emptyState={
-                      <div className="py-6 text-sm text-muted-foreground">
-                        {activeExecution.requestCount === 0
-                          ? "This processing attempt has no runs."
-                          : `${activeExecution.requestCount} linked runs are stored outside the resolved response.`}
-                      </div>
-                    }
-                  />
-                  {sortedRequests.length > 0 && (
-                    <Pagination
-                      page={page}
-                      pageSize={pageSize}
-                      total={sortedRequests.length}
-                      pageSizeOptions={[10, 25, 50]}
-                      onPageChange={setPage}
-                      onPageSizeChange={setPageSize}
-                      itemLabel="runs"
-                      className="border-t px-4"
+                }
+              >
+                <div className="flex min-h-0 items-start gap-3">
+                  {customizingColumns && (
+                    <CustomizeColumnsPanel
+                      columns={RUN_COLUMN_OPTIONS}
+                      hidden={columnVisibility.hidden}
+                      onToggle={columnVisibility.toggle}
+                      onSetHidden={columnVisibility.setHidden}
+                      onReset={() => {
+                        columnVisibility.reset();
+                        columnOrder.reset();
+                      }}
+                      onClose={() => setCustomizingColumns(false)}
+                      order={columnOrder.order}
+                      onReorder={columnOrder.setOrder}
                     />
                   )}
+                  <div className="min-w-0 flex-1">
+                    <DataTable
+                      items={pagedRequests}
+                      columns={columns}
+                      getRowId={(request) => request.requestId}
+                      onRowClick={(request) =>
+                        navigate(
+                          `/runs/${request.requestId}?runId=${encodeURIComponent(request.runId)}`,
+                        )
+                      }
+                      sort={sortColumn}
+                      sortDir={sortDirection}
+                      onSortChange={changeSort}
+                      density="compact"
+                      emptyState={
+                        <div className="py-6 text-sm text-muted-foreground">
+                          {activeExecution.requestCount === 0
+                            ? "This processing attempt has no runs."
+                            : `${activeExecution.requestCount} linked runs are stored outside the resolved response.`}
+                        </div>
+                      }
+                    />
+                    {sortedRequests.length > 0 && (
+                      <Pagination
+                        page={page}
+                        pageSize={pageSize}
+                        total={sortedRequests.length}
+                        pageSizeOptions={[10, 25, 50]}
+                        onPageChange={setPage}
+                        onPageSizeChange={setPageSize}
+                        itemLabel="runs"
+                        className="px-1 pt-2"
+                      />
+                    )}
+                  </div>
                 </div>
-              </div>
+              </EmbeddedTableBlock>
             </CardContent>
           </Card>
         </>
