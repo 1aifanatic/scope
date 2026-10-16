@@ -187,6 +187,7 @@ export const RequestResponseSchema = z
     agentVersion: z.string().optional(),
     profileId: z.string().optional(),
     profileVersionId: z.string().optional(),
+    submissionId: z.string().optional(),
     experimentId: z.string().optional(),
     experimentExpectedRequestCount: z.number().int().min(0).optional(),
     experimentRequestIndex: z.number().int().min(0).optional(),
@@ -294,6 +295,7 @@ export const ListRequestsQuerySchema = z
     worker: MultiValueParam,
     taskPromptId: z.string().optional(),
     criteria: z.string().optional(),
+    submissionId: z.string().optional(),
     experimentId: z.string().optional(),
     profileId: MultiValueParam,
     status: MultiValueParam,
@@ -304,7 +306,9 @@ export const ListRequestsQuerySchema = z
     agentVersion: MultiValueParam,
     // Free-text, case-insensitive search across run id, scenario task, model, worker.
     search: z.string().optional(),
-    groupBy: z.enum(["task", "experimentId", "profile"]).optional(),
+    groupBy: z
+      .enum(["task", "submissionId", "experimentId", "profile"])
+      .optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
     after: z.string().optional(),
     before: z.string().optional(),
@@ -377,6 +381,7 @@ export const GroupUniformValuesSchema = z
     codebaseRevisionId: z.string().optional(),
     extensions: z.array(z.string()).optional(),
     status: RequestStatusSchema.optional(),
+    submissionId: z.string().optional(),
     experimentId: z.string().optional(),
     task: z.string().optional(),
   })

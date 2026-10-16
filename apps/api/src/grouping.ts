@@ -12,12 +12,22 @@ import type { GroupByKey, RunGroup, AggregateStats, GroupUniformValues } from "s
  * The pipeline is appended after a $match stage with the caller's filter.
  */
 export function buildGroupingPipeline(
-  groupBy: "task" | "experimentId" | "profile",
+  groupBy: "task" | "submissionId" | "experimentId" | "profile",
 ): Document[] {
   const groupField =
-    groupBy === "task" ? "$taskPromptId" : groupBy === "profile" ? "$profileId" : "$experimentId";
+    groupBy === "task"
+      ? "$taskPromptId"
+      : groupBy === "profile"
+        ? "$profileId"
+        : groupBy === "submissionId"
+          ? "$submissionId"
+          : "$experimentId";
   const fallbackGroupField =
-    groupBy === "profile" ? { $literal: "no-profile" } : { $literal: "no-experiment" };
+    groupBy === "profile"
+      ? { $literal: "no-profile" }
+      : groupBy === "submissionId"
+        ? { $literal: "no-submission" }
+        : { $literal: "no-experiment" };
   // `task` groups purely by the always-present `taskPromptId` — it is
   // materialized on every run-creation path (findOrCreate → taskPrompt._id) and
   // backfilled onto legacy docs by migration 001, so the group key is always a
@@ -131,6 +141,7 @@ export function buildGroupingPipeline(
         _agentVersions: { $addToSet: { $ifNull: ["$agentVersion", ""] } },
         _platforms: { $addToSet: { $ifNull: ["$run.os.platform", ""] } },
         _statuses: { $addToSet: "$run.status" },
+        _submissionIds: { $addToSet: { $ifNull: ["$submissionId", ""] } },
         _experimentIds: { $addToSet: { $ifNull: ["$experimentId", ""] } },
         _tasks: { $addToSet: { $ifNull: ["$scenario.task", ""] } },
         _mcpKeys: { $addToSet: "$_mcpKey" },
@@ -183,6 +194,7 @@ export function buildGroupingPipeline(
           agentVersion: { $cond: { if: { $and: [{ $eq: [{ $size: "$_agentVersions" }, 1] }, { $ne: [{ $arrayElemAt: ["$_agentVersions", 0] }, ""] }] }, then: { $arrayElemAt: ["$_agentVersions", 0] }, else: "$$REMOVE" } },
           platform: { $cond: { if: { $and: [{ $eq: [{ $size: "$_platforms" }, 1] }, { $ne: [{ $arrayElemAt: ["$_platforms", 0] }, ""] }] }, then: { $arrayElemAt: ["$_platforms", 0] }, else: "$$REMOVE" } },
           status: { $cond: { if: { $eq: [{ $size: "$_statuses" }, 1] }, then: { $arrayElemAt: ["$_statuses", 0] }, else: "$$REMOVE" } },
+          submissionId: { $cond: { if: { $and: [{ $eq: [{ $size: "$_submissionIds" }, 1] }, { $ne: [{ $arrayElemAt: ["$_submissionIds", 0] }, ""] }] }, then: { $arrayElemAt: ["$_submissionIds", 0] }, else: "$$REMOVE" } },
           experimentId: { $cond: { if: { $and: [{ $eq: [{ $size: "$_experimentIds" }, 1] }, { $ne: [{ $arrayElemAt: ["$_experimentIds", 0] }, ""] }] }, then: { $arrayElemAt: ["$_experimentIds", 0] }, else: "$$REMOVE" } },
           task: { $cond: { if: { $and: [{ $eq: [{ $size: "$_tasks" }, 1] }, { $ne: [{ $arrayElemAt: ["$_tasks", 0] }, ""] }] }, then: { $arrayElemAt: ["$_tasks", 0] }, else: "$$REMOVE" } },
           mcpServers: { $cond: { if: { $and: [{ $eq: [{ $size: "$_mcpKeys" }, 1] }, { $ne: [{ $arrayElemAt: ["$_mcpKeys", 0] }, ""] }] }, then: "$_firstMcpServers", else: "$$REMOVE" } },

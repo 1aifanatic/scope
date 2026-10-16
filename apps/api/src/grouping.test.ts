@@ -19,6 +19,14 @@ describe("buildGroupingPipeline", () => {
     expect(pipeline).toHaveLength(4);
   });
 
+  it("preserves submissionId grouping", () => {
+    const pipeline = buildGroupingPipeline("submissionId");
+    expect(pipeline).toHaveLength(4);
+    expect(
+      (pipeline[0].$addFields as Record<string, unknown>)._groupKey,
+    ).toBeDefined();
+  });
+
   it("$sort stage orders by key ascending", () => {
     const pipeline = buildGroupingPipeline("task");
     expect(pipeline[3]).toEqual({ $sort: { key: 1 } });
@@ -74,6 +82,7 @@ describe("buildGroupingPipeline", () => {
     expect(group._agentVersions).toBeDefined();
     expect(group._platforms).toBeDefined();
     expect(group._statuses).toBeDefined();
+    expect(group._submissionIds).toBeDefined();
     expect(group._experimentIds).toBeDefined();
     expect(group._tasks).toBeDefined();
     expect(group._mcpKeys).toBeDefined();

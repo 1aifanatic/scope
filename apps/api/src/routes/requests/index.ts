@@ -37,6 +37,7 @@ import {
   isCriterionCompatibleWithGate,
   orderGates,
   computeTaskPromptId,
+  LEGACY_REQUEST_COMPOSITION_DEPRECATION_ID,
 } from "shared";
 import { trackMetric } from "telemetry";
 import type {
@@ -236,9 +237,6 @@ const validatePersistedRequestTarget = (request: RequestDocument) =>
 
 /** Maximum number of profile variations (including the base profile) allowed in one submit. */
 const MAX_PROFILE_VARIATIONS = 25;
-const LEGACY_EXPERIMENT_COMPOSITION_ID =
-  "scope.api.requests.legacy-experiment-composition.v1";
-
 function emitLegacyCompositionHeaders(
   res: { setHeader(name: string, value: string): void },
   properties: readonly string[],
@@ -253,7 +251,7 @@ function emitLegacyCompositionHeaders(
     name: "api.deprecated_input_used",
     value: 1,
     properties: {
-      identifier: LEGACY_EXPERIMENT_COMPOSITION_ID,
+      identifier: LEGACY_REQUEST_COMPOSITION_DEPRECATION_ID,
       properties: [...properties].sort().join(","),
     },
   });
@@ -871,14 +869,14 @@ apiRoute(ctx.app, ctx.registry, {
         });
       }
 
-      // Pass 2: build independent request documents. Comparative composition is
-      // represented only by POST /experiments.
+      // Preserve the legacy request-batch correlation value. Experiments remain
+      // explicit resources created only by POST /experiments.
+      const submissionId = uuidv4();
       const allNewIds: string[] = [];
       const newDocs: RequestDocument[] = [];
       const variationResults: Array<{ profileId: string; label?: string; ids: string[] }> = [];
       const agentsMdPromptId = await resolveAgentsMdPromptId();
       const agentsMdFields = buildAgentsMdFields(agentsMdPromptId);
-      const expectedRequestCount = resolved.length * count;
 
       for (const r of resolved) {
         const newIds: string[] = [];
@@ -912,6 +910,7 @@ apiRoute(ctx.app, ctx.registry, {
             profileId: r.profile._id,
             profileVersionId: r.profileVersion.ref ?? r.profileVersion._id,
             ...(persistedVariationGates ? { gates: persistedVariationGates } : {}),
+            submissionId,
             ...agentsMdFields,
             run: { _id: runId, attemptNumber: 1, status: "pending", logsUrl: ctx.blobStorage.getLogsBlobUrl(`${requestId}/runs/${runId}/run.jsonl`) },
           };
@@ -929,6 +928,7 @@ apiRoute(ctx.app, ctx.registry, {
       res.status(201).json({
         ids: allNewIds,
         count: allNewIds.length,
+        submissionId,
         variations: variationResults,
         variationCount: variationEntries.length,
         status: "pending",
@@ -1311,6 +1311,7 @@ apiRoute(ctx.app, ctx.registry, {
     const persistedObservations: string[] | undefined = observationsProvided
       ? [...new Set(resolvedObservations)]
       : undefined;
+    const submissionId = uuidv4();
 
     // Handle multiple runs (count > 1)
     if (count > 1) {
@@ -1345,6 +1346,7 @@ apiRoute(ctx.app, ctx.registry, {
           ...(profileVersionId ? { profileVersionId } : {}),
           ...(persistedGates ? { gates: persistedGates } : {}),
           ...(persistedObservations ? { observations: persistedObservations } : {}),
+          submissionId,
           ...agentsMdFields,
           // Mint a distinct run id for the first attempt. Blob artifacts
           // are scoped under `{requestId}/runs/{runId}/...` so retries
@@ -1362,6 +1364,7 @@ apiRoute(ctx.app, ctx.registry, {
       res.status(201).json({
         ids: newIds,
         count,
+        submissionId,
         workerType,
         taskPromptId,
         ...(model ? { model } : {}),
@@ -1406,6 +1409,7 @@ apiRoute(ctx.app, ctx.registry, {
       ...(profileVersionId ? { profileVersionId } : {}),
       ...(persistedGates ? { gates: persistedGates } : {}),
       ...(persistedObservations ? { observations: persistedObservations } : {}),
+      submissionId,
       ...agentsMdFields,
       // Mint a distinct run id for the first attempt. Blob artifacts
       // are scoped under `{requestId}/runs/{runId}/...` so retries
@@ -1420,6 +1424,7 @@ apiRoute(ctx.app, ctx.registry, {
 
     res.status(201).json({
       id: requestId,
+      submissionId,
       workerType,
       ...(model ? { model } : {}),
       ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
@@ -1502,6 +1507,7 @@ apiRoute(ctx.app, ctx.registry, {
     const projectId = getQueryProjectId(req);
     const taskPromptIdFilter = req.query.taskPromptId as string;
     const criteriaFilter = req.query.criteria as string;
+    const submissionIdFilter = req.query.submissionId as string;
     const experimentIdFilter = req.query.experimentId as string;
     const searchFilter = req.query.search as string | undefined;
     const turnsFilterRaw = req.query.turns as string | undefined;
@@ -1509,7 +1515,12 @@ apiRoute(ctx.app, ctx.registry, {
     const maxIterationsFilterRaw = req.query.maxIterations as string | undefined;
     const maxIterationsOpFilter = (req.query.maxIterationsOp as string | undefined) ?? "eq";
     const includeDeleted = req.query.includeDeleted === "true";
-    const groupByParam = req.query.groupBy as "task" | "experimentId" | "profile" | undefined;
+    const groupByParam = req.query.groupBy as
+      | "task"
+      | "submissionId"
+      | "experimentId"
+      | "profile"
+      | undefined;
     const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
     const afterParam = req.query.after as string | undefined;
     const beforeParam = req.query.before as string | undefined;
@@ -1576,6 +1587,11 @@ apiRoute(ctx.app, ctx.registry, {
     pushClause(buildMultiClause("priority", priorityValues, { coerceNumber: true }));
     pushClause(buildMultiClause("agentVersion", agentVersionValues));
 
+    if (submissionIdFilter) {
+      flat.submissionId = {
+        $regex: `^${submissionIdFilter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+      };
+    }
     if (experimentIdFilter) {
       // Prefix-based matching: allow filtering by partial experiment ID.
       flat.experimentId = { $regex: `^${experimentIdFilter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` };
@@ -1675,7 +1691,12 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Grouped mode: paginated RunGroup[] via two-phase aggregation
     if (groupByParam) {
-      const groupByField = groupByParam === "task" ? "taskPromptId" : groupByParam === "profile" ? "profileId" : "experimentId";
+      const groupByField =
+        groupByParam === "task"
+          ? "taskPromptId"
+          : groupByParam === "profile"
+            ? "profileId"
+            : groupByParam;
       const groupByAggField = `$${groupByField}`;
 
       // Decode group cursor
@@ -1908,6 +1929,7 @@ apiRoute(ctx.app, ctx.registry, {
     taskPromptId: z.string().optional(),
     criteria: z.string().optional(),
     features: z.string().optional(),
+    submissionId: z.string().optional(),
     experimentId: z.string().optional(),
     k: z.string().optional(),
   }).merge(ProjectIdQuerySchema),
@@ -2092,6 +2114,7 @@ apiRoute(ctx.app, ctx.registry, {
     const foundIds = new Set(originalRuns.map(r => r._id));
     const notFound = ids.filter((id: string) => !foundIds.has(id));
 
+    const submissionId = uuidv4();
     const newIds: string[] = [];
     const newDocs: RequestDocument[] = [];
 
@@ -2230,6 +2253,7 @@ apiRoute(ctx.app, ctx.registry, {
           // Preserve AGENTS.md lineage across re-submits.
           ...(original.agentsMdPromptId ? { agentsMdPromptId: original.agentsMdPromptId } : {}),
           ...(original.agentsMdParentIds && original.agentsMdParentIds.length > 0 ? { agentsMdParentIds: original.agentsMdParentIds } : {}),
+          submissionId,
           // Bulk re-submit creates a brand-new request — mint a distinct
           // run id for the first attempt so blob artifacts live under
           // `{requestId}/runs/{runId}/...` (independent of the original run).
@@ -2251,6 +2275,7 @@ apiRoute(ctx.app, ctx.registry, {
       submitted: newIds.length,
       failed: notFound,
       newIds,
+      submissionId,
     });
   },
 });
@@ -2673,6 +2698,7 @@ async function finalizePendingRun(
     createdAt: runDoc.createdAt ?? new Date(),
     priority: runDoc.priority ?? 0,
     taskPromptId: resolvedTaskPromptId,
+    ...(runDoc.submissionId ? {} : { submissionId: uuidv4() }),
     run: {
       ...(runState as unknown as RunState),
       // Per-attempt `run._id` is preserved from the yaml (NOT clobbered

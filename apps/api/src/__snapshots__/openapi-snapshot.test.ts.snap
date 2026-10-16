@@ -2207,6 +2207,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             ],
             "type": "string",
           },
+          "submissionId": {
+            "type": "string",
+          },
           "task": {
             "type": "string",
           },
@@ -3406,6 +3409,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "type": "string",
             },
             "type": "array",
+          },
+          "submissionId": {
+            "type": "string",
           },
           "taskPromptId": {
             "type": "string",
@@ -5337,6 +5343,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           {
             "in": "query",
+            "name": "submissionId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
             "name": "experimentId",
             "required": false,
             "schema": {
@@ -6367,6 +6381,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
           },
           {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
             "in": "query",
             "name": "limit",
             "required": false,
@@ -6425,6 +6451,18 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "name": "experimentExecutionId",
             "required": true,
             "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
               "minLength": 1,
               "type": "string",
             },
@@ -9784,6 +9822,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           {
             "in": "query",
+            "name": "submissionId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
             "name": "experimentId",
             "required": false,
             "schema": {
@@ -9931,6 +9977,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "schema": {
               "enum": [
                 "task",
+                "submissionId",
                 "experimentId",
                 "profile",
               ],

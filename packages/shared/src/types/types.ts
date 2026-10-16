@@ -384,6 +384,7 @@ export interface RequestDocument {
   agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
   profileId?: string;             // FK → ProfileDocument._id (the profile lineage)
   profileVersionId?: string;      // FK → ProfileVersionDocument._id (exact version used)
+  submissionId?: string;          // Legacy request-batch correlation identifier (not a resource FK)
   experimentId?: string;           // FK → ExperimentDocument._id
   /** Expected native request count for interrupted ExperimentDocument finalization.
    * Historical/imported requests omit it and remain view-only if their parent
@@ -600,6 +601,9 @@ export interface ExperimentQueueMessagePayload {
   experimentExecutionId: string;
 }
 
+export const LEGACY_REQUEST_COMPOSITION_DEPRECATION_ID =
+  "legacy-request-composition" as const;
+
 /**
  * Field names whose values move from `RequestDocument` (top-level, legacy
  * shape) into `RequestDocument.run: RunState` (new shape introduced for
@@ -733,7 +737,12 @@ export interface QueueProcessorConfig extends BaseQueueProcessorConfig {
 
 // --- Runs grouping types (shared between API and portal) ---
 
-export type GroupByKey = "none" | "task" | "experimentId" | "profile";
+export type GroupByKey =
+  | "none"
+  | "task"
+  | "submissionId"
+  | "experimentId"
+  | "profile";
 
 export interface AggregateStats {
   min: number;
@@ -751,6 +760,7 @@ export interface GroupUniformValues {
   skillRevisions?: string[];
   extensions?: string[];
   status?: "pending" | "processing" | "done";
+  submissionId?: string;
   experimentId?: string;
   task?: string;
 }

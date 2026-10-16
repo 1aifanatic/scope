@@ -525,15 +525,17 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
     tags: ["Experiments"],
     summary: "List current and historical experiment executions",
     params: z.object({ id: z.string().min(1) }),
-    query: z.object({
+    query: ProjectIdQuerySchema.extend({
       limit: z.coerce.number().int().min(1).max(100).default(50),
       after: CursorSchema,
     }),
     response: ExecutionListResponseSchema,
     errorResponses: { 404: { description: "Experiment not found" } },
     handler: async (req, res) => {
+      const projectId = getQueryProjectId(req);
       const experiment = await ctx.experimentCollection.findOne({
         _id: req.params.id,
+        projectId,
         finalizedAt: { $exists: true },
       });
       if (!experiment) {
@@ -589,11 +591,14 @@ export function registerExperimentsRoutes(ctx: RouteContext): void {
       id: z.string().min(1),
       experimentExecutionId: z.string().min(1),
     }),
+    query: ProjectIdQuerySchema,
     response: ExecutionResponseSchema,
     errorResponses: { 404: { description: "Experiment execution not found" } },
     handler: async (req, res) => {
+      const projectId = getQueryProjectId(req);
       const experiment = await ctx.experimentCollection.findOne({
         _id: req.params.id,
+        projectId,
         finalizedAt: { $exists: true },
       });
       if (!experiment) {

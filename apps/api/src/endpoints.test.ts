@@ -781,6 +781,36 @@ describe("API Endpoints", () => {
       expect(res.body.data[0]).toHaveProperty("key", "experiment-1");
     });
 
+    it("preserves grouped results when groupBy=submissionId", async () => {
+      const groupedDocs = [
+        {
+          key: "submission-1",
+          label: "submission-1",
+          aggregates: {
+            count: 2,
+            turns: null,
+            duration: null,
+            promptTokens: null,
+            completionTokens: null,
+          },
+          uniform: {},
+        },
+      ];
+      (mocks.collection.aggregate as any)
+        .mockReturnValueOnce({
+          toArray: vi.fn().mockResolvedValue([{ _id: "submission-1" }]),
+        })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue(groupedDocs) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) });
+
+      const res = await request(testServer()).get(
+        `/api/v1/requests?groupBy=submissionId&projectId=${TEST_PROJECT_ID}`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.data[0]).toHaveProperty("key", "submission-1");
+    });
+
     it("calls aggregate pipeline when groupBy is provided", async () => {
       (mocks.collection.aggregate as any)
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) }); // keys (empty)
@@ -1956,6 +1986,8 @@ describe("API Endpoints", () => {
       const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
       expect(doc).toHaveProperty("reasoningEffort", "high");
       expect(doc).not.toHaveProperty("experimentId");
+      expect(doc).toHaveProperty("submissionId", res.body.submissionId);
+      expect(res.body.submissionId).toEqual(expect.any(String));
       expect(mocks.experimentCollection.updateOne).not.toHaveBeenCalled();
       expect(res.headers).not.toHaveProperty("deprecation");
       expect(res.headers).not.toHaveProperty("link");
@@ -1974,6 +2006,13 @@ describe("API Endpoints", () => {
       const docs = (mocks.collection.insertMany as any).mock.calls[0][0];
       expect(docs).toHaveLength(3);
       expect(docs.every((doc: object) => !("experimentId" in doc))).toBe(true);
+      expect(res.body.submissionId).toEqual(expect.any(String));
+      expect(
+        docs.every(
+          (doc: { submissionId?: string }) =>
+            doc.submissionId === res.body.submissionId,
+        ),
+      ).toBe(true);
       expect(mocks.experimentCollection.updateOne).not.toHaveBeenCalled();
       expect(res.headers.deprecation).toBe("true");
       expect(res.headers.link).toBe(
@@ -2285,6 +2324,7 @@ describe("API Endpoints", () => {
       );
       for (const doc of docs) {
         expect(doc.experimentId).toBeUndefined();
+        expect(doc.submissionId).toBe(res.body.submissionId);
         expect(Array.isArray(doc.gates)).toBe(true);
         const selectGate = doc.gates.find((g: { gate: string }) => g.gate === "select");
         const buildGate = doc.gates.find((g: { gate: string }) => g.gate === "build");
@@ -2296,6 +2336,10 @@ describe("API Endpoints", () => {
         expect(buildGate.promptText).toBeUndefined();
       }
       expect(mocks.experimentCollection.updateOne).not.toHaveBeenCalled();
+      expect(res.body.submissionId).toEqual(expect.any(String));
+      expect(res.headers.deprecation).toBe("true");
+      expect(res.headers.link).toContain("POST /api/v1/experiments");
+      expect(res.headers).not.toHaveProperty("sunset");
       // Response surfaces the configured gate count.
       expect(res.body.gates).toBe(2);
     });
@@ -2454,6 +2498,11 @@ describe("API Endpoints", () => {
       expect(insertCall[0]).toHaveProperty("model", "gpt-4o");
       expect(insertCall[0]).toHaveProperty("maxIterations", 5);
       expect(insertCall[0]).not.toHaveProperty("experimentId");
+      expect(insertCall[0]).toHaveProperty(
+        "submissionId",
+        res.body.submissionId,
+      );
+      expect(res.body.submissionId).toEqual(expect.any(String));
       expect(mocks.experimentCollection.updateOne).not.toHaveBeenCalled();
     });
 

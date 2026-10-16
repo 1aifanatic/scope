@@ -94,6 +94,36 @@ describe("Experiment API contract", () => {
     expect(retry.status).toBe(400);
   });
 
+  it("requires and verifies project scope on execution routes", async () => {
+    const findOne = vi.fn().mockResolvedValue(null);
+    const { app } = harness({
+      experimentCollection: { findOne },
+    } as unknown as Partial<RouteContext>);
+
+    const historyWithoutProject = await request(app).get(
+      "/api/v1/experiments/experiment-1/executions",
+    );
+    const exactWithoutProject = await request(app).get(
+      "/api/v1/experiments/experiment-1/executions/execution-1",
+    );
+    const wrongProject = await request(app).get(
+      "/api/v1/experiments/experiment-1/executions?projectId=wrong-project",
+    );
+    const wrongProjectExact = await request(app).get(
+      "/api/v1/experiments/experiment-1/executions/execution-1?projectId=wrong-project",
+    );
+
+    expect(historyWithoutProject.status).toBe(400);
+    expect(exactWithoutProject.status).toBe(400);
+    expect(wrongProject.status).toBe(404);
+    expect(wrongProjectExact.status).toBe(404);
+    expect(findOne).toHaveBeenCalledWith({
+      _id: "experiment-1",
+      projectId: "wrong-project",
+      finalizedAt: { $exists: true },
+    });
+  });
+
   it("enforces explicit empty and compose modes", async () => {
     const { app } = harness();
 

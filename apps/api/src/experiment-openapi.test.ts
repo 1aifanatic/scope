@@ -3,6 +3,7 @@
 
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { OpenAPIObject } from "openapi3-ts/oas31";
+import { LEGACY_REQUEST_COMPOSITION_DEPRECATION_ID } from "shared";
 
 vi.mock("db-migrations/check-migrations", () => ({
   checkMigrations: vi.fn().mockResolvedValue({
@@ -34,6 +35,12 @@ beforeAll(async () => {
 });
 
 describe("Experiment OpenAPI contract", () => {
+  it("exports the shared legacy composition deprecation identifier", () => {
+    expect(LEGACY_REQUEST_COMPOSITION_DEPRECATION_ID).toBe(
+      "legacy-request-composition",
+    );
+  });
+
   it("publishes canonical experiment operations", () => {
     expect(document.paths).toHaveProperty("/api/v1/experiments");
     expect(document.paths).toHaveProperty("/api/v1/experiments/{id}");
