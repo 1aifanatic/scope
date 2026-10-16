@@ -1,16 +1,14 @@
 # Experiments Architecture
 
-> **Status:** PR A foundation plus the PR B built-in readout, current as of
-> October 2026.
+> **Status:** PR A foundation and client contract, current as of October 2026.
 
 Experiments are project-scoped, named benchmark compositions. An Experiment
 stores durable metadata, one immutable revision, and one current processing
 execution. Previous executions are immutable history records.
 
 PR A provides the canonical storage model, project-scoped public API contract,
-CLI commands, Portal creation/list/detail flows, and run correlation. PR B adds
-one built-in `pp-readout` Experiment handler and generic Reports presentation.
-Neither contribution adds mutable membership or cascading lifecycle behavior.
+CLI commands, Portal creation/list/detail flows, and run correlation. It does
+not add mutable membership or cascading lifecycle behavior.
 
 ## Model
 
@@ -223,52 +221,6 @@ through shared `ExperimentStore` compare-and-swap primitives. Storage layout,
 routing, fingerprinting, and state transitions remain reusable typed modules
 under `packages/shared/src/experiments`; they do not own workflow policy.
 
-## Built-in readout
-
-The built-in `pp-readout` Experiment handler synthesizes one report for one
-exact immutable Experiment execution. It depends on `pp-observations` in
-`all-runs` mode. Every `{requestId, runId}` pair in the execution vector must
-have that dependency at `done` before dispatch:
-
-- a terminal coding outcome of `failed` is still valid evidence;
-- an observation result with `passed: false` is still valid evidence;
-- a failed `pp-observations` handler or one blocked by a failed dependency
-  blocks readout dispatch;
-- failures in unrelated handlers do not block the readout.
-
-Dispatch messages carry `projectId`, `experimentId`,
-`experimentExecutionId`, `handlerId`, `handlerVersion`, `claimToken`, and the
-expected execution version. The worker claims the handler through
-`ExperimentStore`, reconstructs the exact inline or chunked vector with
-`readExecutionRequests()`, and verifies the current claim before and after each
-external step. A frozen, rolled-over, superseded, or otherwise stale execution
-cannot publish itself as current.
-
-The worker validates a structured `scope.experiment-readout@1.0` object, derives
-Markdown from that object, uploads the JSON to blob storage, and inserts an
-append-only `reports` document. Final handler completion and publication of the
-execution's report pointer occur in one compare-and-swap. If the execution is
-superseded after report insertion, the document remains available as historical
-evidence but the execution pointer is not published.
-
-```mermaid
-sequenceDiagram
-    participant Coordinator
-    participant Queue
-    participant Worker as pp-readout
-    participant Store as ExperimentStore
-    participant Blob
-    participant Reports
-
-    Coordinator->>Queue: exact execution message and claim token
-    Worker->>Store: claim handler by execution/version/token
-    Worker->>Store: read and verify exact request/run vector
-    Worker->>Worker: compose and validate structured readout
-    Worker->>Blob: upload structured JSON
-    Worker->>Reports: insert append-only report document
-    Worker->>Store: atomic CAS complete + publish report pointer
-```
-
 ## Public API
 
 All routes require `?projectId=`:
@@ -280,9 +232,6 @@ All routes require `?projectId=`:
 | `GET` | `/api/v1/experiments/:id` | Read the public Experiment and current execution |
 | `GET` | `/api/v1/experiments/:id/executions` | List current and archived execution summaries |
 | `GET` | `/api/v1/experiments/:id/executions/:experimentExecutionId` | Read one exact current or archived execution |
-| `GET` | `/api/v1/experiments/:id/executions/:experimentExecutionId/reports` | List reports for one exact execution, newest first |
-| `GET` | `/api/v1/experiments/:id/executions/:experimentExecutionId/reports/:reportId/structured` | Download that exact report's structured JSON artifact |
-| `GET` | `/api/v1/experiments/:id/executions/:experimentExecutionId/logs` | Stream attempt-scoped handler logs as SSE |
 | `POST` | `/api/v1/experiments/:id/retry` | Start a new processing attempt for the current exact vector |
 
 Creation metadata requires `name` and accepts an optional `description`.
@@ -290,15 +239,10 @@ Compose mode requires one or more complete request definitions and empty mode
 requires an empty request array.
 
 The public view exposes identity, project, metadata, revision, current
-execution, readiness, blockers, handler progress, supersession, report,
+execution, readiness, blockers, handler progress, supersession, current report,
 and linked request summaries when available. Creation additionally returns
 `requestIds`. List responses and execution-list responses use
 `{ data, nextCursor? }`.
-
-The global generic Reports API accepts `experimentId` and
-`experimentExecutionId` filters. Every nested and global report lookup retains
-project scope; an Experiment ID or report ID is never used as a global business
-key.
 
 ## CLI and Portal
 
@@ -309,8 +253,6 @@ scope experiment create
 scope experiment list
 scope experiment get <experiment-id>
 scope experiment executions <experiment-id> [experiment-execution-id]
-scope experiment reports <experiment-id> <experiment-execution-id>
-scope experiment logs <experiment-id> <experiment-execution-id>
 scope experiment retry <experiment-id> --execution <current-execution-id>
 ```
 
@@ -320,18 +262,27 @@ requires project scope.
 
 The Portal provides `/experiments`, `/experiments/new`, and
 `/experiments/:id`. The shared creation form retains the established run
-configuration and expansion count, adds Experiment metadata and an empty
-option, and navigates to Experiment Detail after creation. Detail shows current
-state, linked runs, blockers, exact execution history, retry, and the selected
-attempt's built-in report. The selected execution is encoded as
-`?execution=<experimentExecutionId>` so direct links and browser back/forward
-navigation preserve the report scope. Report Markdown, the global report detail
-link, structured JSON download, loading/error/retry states, and attempt-scoped
-logs all use the exact `experimentId + experimentExecutionId` identity. Public
-UI terminology remains generic **Reports**; `pp-readout` is only the internal
-handler identifier. Run list and detail views link `experimentId` back to the
-Experiment. A historical correlation that has no Experiment document is
-view-only and cannot trigger retry.
+configuration and expansion count and adds Experiment metadata. No selected
+scenario creates an empty Experiment; selecting a scenario reveals the run
+composition controls and creates the expanded run count. The Portal navigates
+to Experiment Detail after creation. The Experiments list uses the shared
+`ListLayout`, `FilterRail`, `DataTable`, column customization, and cursor-aware
+`Pagination` interaction model while retaining Experiment-specific status,
+revision, attempt, and run-count columns. Detail selects the current processing
+attempt by default and supports direct historical links via `?executionId=`.
+A header attempt selector renders exactly one current or historical execution
+at a time, including its state, blockers, and a shared
+sortable/customizable/paginated Runs `DataTable`. Run rows link to the exact
+stored request/run pair. The same selected attempt owns the built-in report:
+Markdown, structured JSON, the global report-detail link, loading/error/retry
+states, and logs all use the exact
+`experimentId + experimentExecutionId` identity. Browser navigation preserves
+that attempt scope through `?executionId=<experimentExecutionId>`. Public UI
+terminology remains generic **Reports**; `pp-readout` is only the internal
+handler identifier. Processing retry remains current-attempt-only. Run list
+and detail views link `experimentId` back to the Experiment. A historical
+correlation that has no Experiment document is view-only and cannot trigger
+retry.
 
 ## Permanent request creation and composition deprecation
 
@@ -361,6 +312,7 @@ The following are explicitly outside PR A:
 
 | Follow-up | Deferred capability |
 | --- | --- |
+| PR B | Additional derived readout orchestration beyond PR A's stored/public current and historical execution views |
 | PR C | Membership mutation and new revision creation after initial publication |
 | PR D | Report-template attachment or template-driven report orchestration |
 | PR E | Cascading lifecycle operations across an Experiment and its member requests/runs |
@@ -381,8 +333,7 @@ through storage methods, client actions, or API contracts.
 | `packages/db-migrations/src/migrations/034-create-experiment-storage-indexes.ts` | Collection index ownership |
 | `apps/api/src/experiment-coordinator.ts` | API-owned workflow policy and repair |
 | `apps/api/src/experiment-dispatcher.ts` | Durable polling and queue delivery |
-| `apps/workers/readout/` | Exact-execution readout synthesis, append-only report storage, and final CAS publication |
 | `apps/cli/src/commands/experiment.ts` | Project-scoped CLI surface |
 | `apps/portal/src/lib/experiments.ts` | Public response parsing |
 | `apps/portal/src/pages/ExperimentsList.tsx` | Experiment list |
-| `apps/portal/src/pages/ExperimentDetail.tsx` | Current state, history, retry, and selected-attempt report |
+| `apps/portal/src/pages/ExperimentDetail.tsx` | Current state, history, and retry |
