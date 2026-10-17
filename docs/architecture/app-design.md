@@ -399,6 +399,14 @@ feature definitions are inserted into their real judge/extraction user
 messages; persona text occupies the feedback system-instruction position; and
 report templates preserve default, append, and override system-prompt modes.
 
+Report templates are project-scoped roots with immutable content versions.
+`subject: run | experiment` determines where a template may be attached.
+Experiment templates support manual revision selection, automatic execution,
+or automatic linked-run dependencies. Lookup and mutation always include
+`projectId`; a slug alone is never sufficient. Generated reports persist the
+exact template version and content fingerprint so historical artifacts are
+never reinterpreted after a template edit.
+
 The package commits curated inputs and provenance, schemas, rubrics, profiles,
 attack configuration, and threshold policy. Per-run responses, SDK/cloud
 output, manifests, summaries, and findings stay in the ignored
@@ -476,7 +484,7 @@ registrations continue to require a non-empty queue.
 
 ### Run submission flow
 
-1. User submits via Portal or CLI with: **task**, **criteria** (required), **worker**, **model** (required), and optionally **agentVersion**, a **codebase** selection, and/or a per-gate **`gates`** configuration (see [Gates](#gates--multi-phase-evaluation-pipeline))
+1. User submits via Portal or CLI with: **task**, **criteria** (required), **worker**, **model** (required), and optionally **agentVersion**, a **codebase** selection, record-only **`observations`** criteria, and/or a per-gate **`gates`** configuration (see [Gates](#gates--multi-phase-evaluation-pipeline))
 2. API rejects unknown, deleted, unavailable, versionless, or explicitly inactive targets and resolves `agentVersion`: explicit selection → validate active; omitted → latest active by `createdAt`
 3. API resolves `model`: explicit → validate against `supportedModels`; omitted → `defaultModel`
 4. API validates requested reasoning effort, MCP servers, skills, and extensions when strict capability enforcement is enabled
@@ -494,9 +502,36 @@ When a codebase is selected, the API resolves the submitted spec (`codebaseRevis
 Profile fan-out mode is also supported for comparative runs:
 
 1. User selects a base `profileId` (optionally pinned via `profileId@version`) and a `profileVariations[]` array of profile spec strings to compare against (e.g. `["def456", "ghi789@2"]`)
-2. API parses each spec, validates every variation upfront, then expands one submit call into multiple requests under one shared `submissionId`
+2. API parses each spec, validates every variation upfront, then expands one submit call into multiple requests
 3. Each expanded request resolves configuration from its variation profile; unpinned specs resolve to `latestVersion`
 4. Expanded requests persist `profileId` and `profileVersionId` on each `RequestDocument` for indexing and traceability
+
+### Experiment identity and processing executions
+
+An [Experiment](experiments.md) is created only through a deliberate Experiment
+creation surface, including bulk creation from existing standalone requests. It
+owns a stable project-scoped identity, immutable revision history, and an exact
+request/run vector per revision. Complete-set add/move/remove operations publish
+one new revision and execution. The current execution is embedded in the bounded
+root, immutable history is archived separately, and deterministic fixed buckets
+keep large vectors below Cosmos DB's universal 2 MB limit.
+
+Standalone request creation, profile fan-out, and bulk resubmission remain
+first-class request workflows and never infer an Experiment. Request documents
+denormalize the current `experimentId` for lookup, but Experiment history is
+authoritative. Direct deletion of a member publishes a removal revision and
+clears that field before soft deletion. Only legacy composition inputs that
+overlap Experiment creation are deprecated.
+
+Deleting an Experiment is an asynchronous recoverable lifecycle operation, not
+a direct document removal. The root becomes non-dispatchable immediately and
+stores a stable operation ID, phase, progress, blockers, and CAS
+`stateVersion`. Exact request and report targets are snapshotted through the
+same deterministic fixed-payload storage used by execution vectors. Cascaded
+children store operation provenance; records deleted independently are never
+claimed or restored. Restore revives matching children first, then the
+Experiment, and finally reconciles the current request/run vector. Immutable
+execution history and report artifacts are retained throughout.
 
 ## Runs List Query API
 
@@ -522,7 +557,7 @@ A single value compiles to an equality clause; multiple values compile to `$in`.
 | `agentVersion` | `agentVersion` |
 | `profileId` | `profileId` |
 | `taskPromptId` | `taskPromptId` |
-| `submissionId` | `submissionId` (prefix match) |
+| `experimentId` | `experimentId` (prefix match) |
 | `criteria` | `scenario.criteria` |
 | `turns` / `maxIterations` | `run.turns` size / `maxIterations` |
 
@@ -718,6 +753,12 @@ Criteria are reusable evaluation rules stored in the database and optionally def
 - **AI-generated prompts** — natural language behavior descriptions can be converted to evaluation prompts via LLM
 - **Traits** — reusable labels for filtering and composition (e.g., `has_azure`, `has_node`)
 - **Gate compatibility** — a `gates: GateId[]` list controls which [gates](#gates--multi-phase-evaluation-pipeline) a criterion may be selected for (empty = all); the list is downward-closed along the DAG
+- **Criterion kind** — `kind: "gate" | "observation"` distinguishes criteria that gate the agent from record-only observations. Observation criteria can optionally set `taxonomyElementId` to one of the hard-coded observation dimensions and a `subject` (`run`|`iteration`) that selects whole-run vs per-iteration evaluation; run detail derives dimension grouping by joining each `observationResults[].criterionId` (per-turn or run-level) back to the criterion metadata.
+- **Kind** — `kind: "gate" | "observation"` (default `gate`). **Gate** criteria steer the coding agent through the gate DAG. **Observation** criteria (issue #1156) are record-only: they produce a boolean + evidence, never feed back to the agent, never pass/fail a gate, and never enter the gate DAG. Dependencies may only reference same-kind criteria.
+- **Taxonomy classification** — observation criteria carry an optional `taxonomyElementId` from a hard-coded enum of the three R&A Readout quality dimensions (`dimension:idiomatic-use`, `dimension:dependency-currency`, `dimension:configuration-correctness`). Classification is static/design-time, not per-run.
+- **Evaluation subject** — `subject: "run" | "iteration"` decides the evaluation granularity of an observation. **`run`** (the default for observations) is evaluated **once** against the final snapshot + the merged trajectory across all iterations and stored at run level (`run.observationResults`); **`iteration`** is evaluated per turn and stored on each turn (`turn.observationResults`). Gate criteria are always `iteration` (the API rejects `run` for gates); `subject` is honored only by the `pp-observations` pipeline. The AI authoring assistant auto-detects the subject and the user can override it.
+
+Observation evaluation happens off the coding-agent critical path in the `pp-observations` post-processor (see [post-processing](post-processing.md)). A run carries the chosen `observations: string[]` (observation-criteria ids); **iteration-subject** results are stored per turn as `turn.observationResults: CriterionResult[]`, while **run-subject** results are stored once at run level as `run.observationResults: CriterionResult[]` (both the same shape as gate `criteriaResults`). Dimension grouping is derived at read time by joining `criterionId` → criterion `taxonomyElementId`.
 
 See [`ENV_VARIABLES.md`](../../scope-mt-app/ENV_VARIABLES.md) for related configuration options.
 

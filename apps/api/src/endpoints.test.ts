@@ -7,6 +7,8 @@ import { app, _injectTestDependencies } from "./index.js";
 import { useTestServer } from "./test-server.js";
 import { _resetRunFacetsCacheForTests } from "./routes/requests/index.js";
 import { createAllMockDependencies, createMockCollection } from "./test-helpers.js";
+import { ExperimentStore } from "shared";
+import { ExperimentMembershipCoordinator } from "./experiment-membership.js";
 
 const TEST_PROJECT_ID = "test-project";
 
@@ -266,6 +268,66 @@ describe("API Endpoints", () => {
       const res = await request(testServer())
         .post(`/api/v1/criteria?projectId=${TEST_PROJECT_ID}`)
         .send({ id: "child", prompt: "C", dependsOn: ["parent"], gates: ["select", "build"] });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("creates an observation criterion with a taxonomy element", async () => {
+      (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app)
+        .post(`/api/v1/criteria?projectId=${TEST_PROJECT_ID}`)
+        .send({
+          id: "obs_crit",
+          prompt: "Did the agent use current deps?",
+          dependsOn: [],
+          kind: "observation",
+          taxonomyElementId: "dimension:dependency-currency",
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("kind", "observation");
+      expect(res.body).toHaveProperty("taxonomyElementId", "dimension:dependency-currency");
+    });
+
+    it("rejects an unknown taxonomyElementId", async () => {
+      (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app)
+        .post(`/api/v1/criteria?projectId=${TEST_PROJECT_ID}`)
+        .send({ id: "bad_tax", prompt: "x", dependsOn: [], kind: "observation", taxonomyElementId: "dimension:nope" });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("defaults an observation's subject to 'run'", async () => {
+      (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app)
+        .post(`/api/v1/criteria?projectId=${TEST_PROJECT_ID}`)
+        .send({ id: "obs_subj", prompt: "Did the agent add then remove a dep?", dependsOn: [], kind: "observation" });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("subject", "run");
+    });
+
+    it("creates an observation with an explicit subject:'iteration' override", async () => {
+      (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app)
+        .post(`/api/v1/criteria?projectId=${TEST_PROJECT_ID}`)
+        .send({ id: "obs_iter", prompt: "x", dependsOn: [], kind: "observation", subject: "iteration" });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("subject", "iteration");
+    });
+
+    it("rejects subject:'run' on a gate criterion", async () => {
+      (mocks.criteriaCollection.findOne as any).mockResolvedValue(null);
+
+      const res = await request(app)
+        .post(`/api/v1/criteria?projectId=${TEST_PROJECT_ID}`)
+        .send({ id: "gate_run", prompt: "x", dependsOn: [], kind: "gate", subject: "run" });
 
       expect(res.status).toBe(400);
     });
@@ -706,19 +768,49 @@ describe("API Endpoints", () => {
       expect(res.body.data[0]).toHaveProperty("uniform");
     });
 
-    it("returns grouped results when groupBy=submissionId", async () => {
+    it("returns grouped results when groupBy=experimentId", async () => {
       const groupedDocs = [
-        { key: "sub-1", label: "sub-1", aggregates: { count: 2, turns: null, duration: null, promptTokens: null, completionTokens: null }, uniform: {} },
+        { key: "experiment-1", label: "experiment-1", aggregates: { count: 2, turns: null, duration: null, promptTokens: null, completionTokens: null }, uniform: {} },
       ];
       (mocks.collection.aggregate as any)
-        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ _id: "sub-1" }]) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([{ _id: "experiment-1" }]) })
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue(groupedDocs) })
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) })
         .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) });
 
-      const res = await request(testServer()).get(`/api/v1/requests?groupBy=submissionId&projectId=${TEST_PROJECT_ID}`);
+      const res = await request(testServer()).get(`/api/v1/requests?groupBy=experimentId&projectId=${TEST_PROJECT_ID}`);
       expect(res.status).toBe(200);
-      expect(res.body.data[0]).toHaveProperty("key", "sub-1");
+      expect(res.body.data[0]).toHaveProperty("key", "experiment-1");
+    });
+
+    it("preserves grouped results when groupBy=submissionId", async () => {
+      const groupedDocs = [
+        {
+          key: "submission-1",
+          label: "submission-1",
+          aggregates: {
+            count: 2,
+            turns: null,
+            duration: null,
+            promptTokens: null,
+            completionTokens: null,
+          },
+          uniform: {},
+        },
+      ];
+      (mocks.collection.aggregate as any)
+        .mockReturnValueOnce({
+          toArray: vi.fn().mockResolvedValue([{ _id: "submission-1" }]),
+        })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue(groupedDocs) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) })
+        .mockReturnValueOnce({ toArray: vi.fn().mockResolvedValue([]) });
+
+      const res = await request(testServer()).get(
+        `/api/v1/requests?groupBy=submissionId&projectId=${TEST_PROJECT_ID}`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.data[0]).toHaveProperty("key", "submission-1");
     });
 
     it("returns grouped results when groupBy=experiment", async () => {
@@ -1107,6 +1199,10 @@ describe("API Endpoints", () => {
 
   describe("DELETE /api/v1/requests/:id", () => {
     it("returns 200 when request is soft-deleted", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "r1",
+        projectId: TEST_PROJECT_ID,
+      });
       (mocks.collection.updateOne as any).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
 
       const res = await request(testServer()).delete("/api/v1/requests/r1");
@@ -1128,6 +1224,155 @@ describe("API Endpoints", () => {
 
       const res = await request(testServer()).delete("/api/v1/requests/r1");
       expect(res.status).toBe(410);
+    });
+
+    it("publishes one membership revision before deleting a member", async () => {
+      (mocks.collection.findOne as any).mockResolvedValue({
+        _id: "r1",
+        projectId: TEST_PROJECT_ID,
+        experimentId: "experiment-1",
+      });
+      const get = vi.spyOn(ExperimentStore.prototype, "get").mockResolvedValue({
+        revision: {
+          experimentRevisionId: "revision-1",
+        },
+      } as any);
+      const remove = vi.spyOn(
+        ExperimentMembershipCoordinator.prototype,
+        "remove",
+      ).mockResolvedValue({
+        experiment: {
+          revision: {
+            experimentRevisionId: "revision-2",
+            revisionNumber: 2,
+          },
+        },
+        attachedRequestIds: [],
+        detachedRequestIds: ["r1"],
+      } as any);
+      (mocks.collection.updateOne as any).mockResolvedValue({
+        matchedCount: 1,
+        modifiedCount: 1,
+      });
+
+      const res = await request(testServer()).delete("/api/v1/requests/r1");
+
+      expect(res.status).toBe(200);
+      expect(res.body.membershipRevision).toEqual({
+        experimentId: "experiment-1",
+        experimentRevisionId: "revision-2",
+        revisionNumber: 2,
+      });
+      expect(get).toHaveBeenCalledWith(TEST_PROJECT_ID, "experiment-1");
+      expect(remove).toHaveBeenCalledWith({
+        projectId: TEST_PROJECT_ID,
+        experimentId: "experiment-1",
+        expectedExperimentRevisionId: "revision-1",
+        requestIds: ["r1"],
+      });
+      expect(remove.mock.invocationCallOrder[0]).toBeLessThan(
+        (mocks.collection.updateOne as any).mock.invocationCallOrder[0],
+      );
+      expect(mocks.collection.updateOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          _id: "r1",
+          experimentId: { $exists: false },
+        }),
+        expect.anything(),
+      );
+    });
+  });
+
+  describe("DELETE /api/v1/requests/bulk", () => {
+    it("publishes one revision for several members before deleting them", async () => {
+      const documents = [
+        {
+          _id: "r1",
+          projectId: TEST_PROJECT_ID,
+          experimentId: "experiment-1",
+        },
+        {
+          _id: "r2",
+          projectId: TEST_PROJECT_ID,
+          experimentId: "experiment-1",
+        },
+      ];
+      (mocks.collection.find as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue(documents),
+      });
+      vi.spyOn(ExperimentStore.prototype, "get").mockResolvedValue({
+        revision: { experimentRevisionId: "revision-1" },
+      } as any);
+      const remove = vi.spyOn(
+        ExperimentMembershipCoordinator.prototype,
+        "remove",
+      ).mockResolvedValue({
+        experiment: {
+          revision: {
+            experimentRevisionId: "revision-2",
+            revisionNumber: 2,
+          },
+        },
+        attachedRequestIds: [],
+        detachedRequestIds: ["r1", "r2"],
+      } as any);
+      (mocks.collection.updateMany as any).mockResolvedValue({
+        matchedCount: 2,
+        modifiedCount: 2,
+      });
+
+      const res = await request(testServer())
+        .delete("/api/v1/requests/bulk")
+        .send({ ids: ["r1", "r2"] });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        deleted: 2,
+        notFound: [],
+        membershipRevision: {
+          experimentId: "experiment-1",
+          experimentRevisionId: "revision-2",
+          revisionNumber: 2,
+        },
+      });
+      expect(remove).toHaveBeenCalledOnce();
+      expect(remove).toHaveBeenCalledWith(
+        expect.objectContaining({ requestIds: ["r1", "r2"] }),
+      );
+      expect(remove.mock.invocationCallOrder[0]).toBeLessThan(
+        (mocks.collection.updateMany as any).mock.invocationCallOrder[0],
+      );
+    });
+
+    it("rejects a selection spanning several Experiments without deletion", async () => {
+      (mocks.collection.find as any).mockReturnValue({
+        toArray: vi.fn().mockResolvedValue([
+          {
+            _id: "r1",
+            projectId: TEST_PROJECT_ID,
+            experimentId: "experiment-1",
+          },
+          {
+            _id: "r2",
+            projectId: TEST_PROJECT_ID,
+            experimentId: "experiment-2",
+          },
+        ]),
+      });
+
+      const res = await request(testServer())
+        .delete("/api/v1/requests/bulk")
+        .send({ ids: ["r1", "r2"] });
+
+      expect(res.status).toBe(409);
+      expect(res.body).toMatchObject({
+        code: "multiple-experiment-delete-conflict",
+        conflicts: [
+          { requestId: "r1", experimentId: "experiment-1" },
+          { requestId: "r2", experimentId: "experiment-2" },
+        ],
+      });
+      expect(mocks.collection.updateMany).not.toHaveBeenCalled();
     });
   });
 
@@ -1196,8 +1441,21 @@ describe("API Endpoints", () => {
 
   describe("GET /api/v1/report-templates", () => {
     it("returns 200 with array of report templates", async () => {
-      const templates = [{ id: "rt1", name: "Default", userPrompt: "Analyze", createdAt: new Date() }];
+      const templates = [{
+        _id: "rt1",
+        projectId: TEST_PROJECT_ID,
+        id: "rt1",
+        subject: "run",
+        name: "Default",
+        userPrompt: "Analyze",
+        enabled: true,
+        currentVersionId: "rt1:v1",
+        currentVersion: 1,
+        contentFingerprint: "fingerprint",
+        createdAt: new Date(),
+      }];
       (mocks.reportTemplateCollection.find as any).mockReturnValue({
+        sort: vi.fn().mockReturnThis(),
         toArray: vi.fn().mockResolvedValue(templates),
       });
 
@@ -1215,8 +1473,14 @@ describe("API Endpoints", () => {
     const seededTemplate = {
       projectId: TEST_PROJECT_ID,
       id: TID,
+      _id: TID,
+      subject: "run",
       name: "Seed",
       userPrompt: "Analyze",
+      enabled: true,
+      currentVersionId: `${TID}:v1`,
+      currentVersion: 1,
+      contentFingerprint: "fingerprint",
       createdAt: new Date(),
     };
 
@@ -1243,6 +1507,10 @@ describe("API Endpoints", () => {
 
     it("PUT /:id?projectId scopes both the existence check and the update to { projectId, id }", async () => {
       (mocks.reportTemplateCollection.findOne as any).mockResolvedValue(seededTemplate);
+      (mocks.reportTemplateCollection.findOneAndUpdate as any).mockResolvedValue({
+        ...seededTemplate,
+        name: "Renamed",
+      });
       const res = await request(testServer())
         .put(`/api/v1/report-templates/${TID}?projectId=${TEST_PROJECT_ID}`)
         .send({ name: "Renamed" });
@@ -1250,9 +1518,10 @@ describe("API Endpoints", () => {
       expect(mocks.reportTemplateCollection.findOne).toHaveBeenCalledWith(
         expect.objectContaining({ projectId: TEST_PROJECT_ID, id: TID })
       );
-      expect(mocks.reportTemplateCollection.updateOne).toHaveBeenCalledWith(
-        expect.objectContaining({ projectId: TEST_PROJECT_ID, id: TID }),
-        expect.anything()
+      expect(mocks.reportTemplateCollection.findOneAndUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: TEST_PROJECT_ID }),
+        expect.anything(),
+        { returnDocument: "after" },
       );
     });
 
@@ -1955,6 +2224,40 @@ describe("API Endpoints", () => {
       expect(res.status).toBe(201);
       const doc = (mocks.collection.insertOne as any).mock.calls[0][0];
       expect(doc).toHaveProperty("reasoningEffort", "high");
+      expect(doc).not.toHaveProperty("experimentId");
+      expect(doc).toHaveProperty("submissionId", res.body.submissionId);
+      expect(res.body.submissionId).toEqual(expect.any(String));
+      expect(mocks.experimentCollection.updateOne).not.toHaveBeenCalled();
+      expect(res.headers).not.toHaveProperty("deprecation");
+      expect(res.headers).not.toHaveProperty("link");
+      expect(res.headers).not.toHaveProperty("sunset");
+    });
+
+    it("keeps count fan-out independent from experiments", async () => {
+      const res = await request(testServer())
+        .post(`/api/v1/requests?worker=coder-acp-copilot&projectId=${TEST_PROJECT_ID}`)
+        .send({
+          scenario: { task: "Build something", criteria: ["works"] },
+          count: 3,
+        });
+
+      expect(res.status).toBe(201);
+      const docs = (mocks.collection.insertMany as any).mock.calls[0][0];
+      expect(docs).toHaveLength(3);
+      expect(docs.every((doc: object) => !("experimentId" in doc))).toBe(true);
+      expect(res.body.submissionId).toEqual(expect.any(String));
+      expect(
+        docs.every(
+          (doc: { submissionId?: string }) =>
+            doc.submissionId === res.body.submissionId,
+        ),
+      ).toBe(true);
+      expect(mocks.experimentCollection.updateOne).not.toHaveBeenCalled();
+      expect(res.headers.deprecation).toBe("true");
+      expect(res.headers.link).toBe(
+        '</api/v1/experiments>; rel="successor-version"; title="POST /api/v1/experiments"',
+      );
+      expect(res.headers).not.toHaveProperty("sunset");
     });
 
     it("profile reasoningEffort takes precedence over client-provided effort", async () => {
@@ -2276,6 +2579,8 @@ describe("API Endpoints", () => {
         new Set(["base-profile", "var-profile"]),
       );
       for (const doc of docs) {
+        expect(doc.experimentId).toBeUndefined();
+        expect(doc.submissionId).toBe(res.body.submissionId);
         expect(Array.isArray(doc.gates)).toBe(true);
         const selectGate = doc.gates.find((g: { gate: string }) => g.gate === "select");
         const buildGate = doc.gates.find((g: { gate: string }) => g.gate === "build");
@@ -2286,6 +2591,11 @@ describe("API Endpoints", () => {
         expect(buildGate.promptId).toBe("tp-build");
         expect(buildGate.promptText).toBeUndefined();
       }
+      expect(mocks.experimentCollection.updateOne).not.toHaveBeenCalled();
+      expect(res.body.submissionId).toEqual(expect.any(String));
+      expect(res.headers.deprecation).toBe("true");
+      expect(res.headers.link).toContain("POST /api/v1/experiments");
+      expect(res.headers).not.toHaveProperty("sunset");
       // Response surfaces the configured gate count.
       expect(res.body.gates).toBe(2);
     });
@@ -2445,6 +2755,13 @@ describe("API Endpoints", () => {
       expect(insertCall[0]).toHaveProperty("experimentId", "exp-42");
       expect(insertCall[0]).toHaveProperty("model", "gpt-4o");
       expect(insertCall[0]).toHaveProperty("maxIterations", 5);
+      expect(insertCall[0]).not.toHaveProperty("experimentId");
+      expect(insertCall[0]).toHaveProperty(
+        "submissionId",
+        res.body.submissionId,
+      );
+      expect(res.body.submissionId).toEqual(expect.any(String));
+      expect(mocks.experimentCollection.updateOne).not.toHaveBeenCalled();
     });
 
     it("applies profile override: uses profile fields for worker, model, mcpServers, skillRevisions, extensions", async () => {
@@ -2821,11 +3138,13 @@ describe("API Endpoints", () => {
     it("retries eligible requests and skips non-terminal ones", async () => {
       const doc1 = {
         _id: "req-1",
+        experimentId: "experiment-1",
         workerType: "coder-acp-copilot",
         run: { _id: "run-1", attemptNumber: 1, status: "done", outcome: "failed" },
       };
       const doc2 = {
         _id: "req-2",
+        experimentId: "experiment-1",
         workerType: "coder-acp-copilot",
         run: { _id: "run-2", attemptNumber: 1, status: "processing" },
       };
@@ -2851,6 +3170,7 @@ describe("API Endpoints", () => {
           $set: expect.objectContaining({ agentVersion: "1.0.0" }),
         }),
       );
+      expect(mocks.experimentCollection.updateMany).not.toHaveBeenCalled();
     });
 
     it("returns 400 when ids array is empty", async () => {

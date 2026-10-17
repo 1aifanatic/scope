@@ -50,8 +50,11 @@ import type {
   FeatureFlagResponseSchema,
   ReportTriggerSchema,
   ReportTemplateResponseSchema,
+  ReportTemplateVersionDocument,
   RequestResponseSchema,
   RunHistoryDocumentSchema,
+  ExperimentDocument,
+  ExperimentExecutionHistoryDocument,
 } from "shared";
 
 // ─── Document types (inferred from Zod schemas) ─────────────────────────────
@@ -70,11 +73,9 @@ export type ExtensionDocument = z.infer<typeof ExtensionResponseSchema>;
 export type FeatureFlagDocument = z.infer<typeof FeatureFlagResponseSchema>;
 
 export type ReportTrigger = z.infer<typeof ReportTriggerSchema>;
-// Omit _id — MongoDB auto-generates it; the document type only uses `id`
-export type ReportTemplateDocument = Omit<z.infer<typeof ReportTemplateResponseSchema>, "_id">;
+export type ReportTemplateDocument = z.infer<typeof ReportTemplateResponseSchema>;
 export type RequestDocument = z.infer<typeof RequestResponseSchema>;
 export type RunHistoryDocument = z.infer<typeof RunHistoryDocumentSchema>;
-
 export type WorkerType = string;
 
 // ─── RouteContext ────────────────────────────────────────────────────────────
@@ -92,11 +93,15 @@ export interface RouteContext {
   db: Db;
   requestCollection: Collection<RequestDocument>;
   runsCollection: Collection<RunHistoryDocument>;
+  experimentCollection: Collection<ExperimentDocument>;
+  experimentExecutionsCollection: Collection<ExperimentExecutionHistoryDocument>;
+  experimentChunksCollection: Collection;
   projectCollection: Collection<ProjectDocument>;
   criteriaCollection: Collection<CriteriaDocument>;
   promptFeatureCollection: Collection<PromptFeatureDocument>;
   reportCollection: Collection<ReportDocument>;
   reportTemplateCollection: Collection<ReportTemplateDocument>;
+  reportTemplateVersionCollection: Collection<ReportTemplateVersionDocument>;
   agentCollection: Collection<CodingAgentDocument>;
   modelCollection: Collection<ModelDocument>;
   mcpServerCollection: Collection<McpServerDocument>;

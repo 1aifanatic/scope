@@ -33,20 +33,57 @@ export const ReportStatusSchema = z.enum([
   "failed",
 ]);
 
+export const StructuredReportArtifactSchema = z
+  .object({
+    schemaId: z.string(),
+    schemaVersion: z.string(),
+    contentType: z.literal("application/json"),
+    url: z.string(),
+  })
+  .openapi("StructuredReportArtifact");
+
 export const ReportResponseSchema = z
   .object({
     _id: z.string(),
-    requestId: z.string(),
+    requestId: z.string().optional(),
+    runId: z.string().optional(),
+    experimentId: z.string().optional(),
+    experimentExecutionId: z.string().optional(),
     templateId: z.string().optional(),
+    templateVersionId: z.string().optional(),
+    templateVersion: z.number().int().positive().optional(),
+    templateContentFingerprint: z.string().optional(),
+    reportVersion: z.number().int().positive().optional(),
+    supersedesReportId: z.string().optional(),
     reporter: ReporterSchema.optional(),
     content: z.string().optional(),
+    structuredArtifact: StructuredReportArtifactSchema.optional(),
     status: ReportStatusSchema,
     error: z.string().optional(),
     insightReferences: z.array(InsightReferenceSchema).optional(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date().optional(),
+    deletedAt: z.coerce.date().optional(),
+    deletionProvenance: z
+      .object({
+        kind: z.literal("experiment"),
+        experimentId: z.string().min(1),
+        operationId: z.string().min(1),
+      })
+      .strict()
+      .optional(),
     projectId: z.string(),
   })
+  .refine(
+    (report) =>
+      report.requestId !== undefined ||
+      (report.experimentId !== undefined &&
+        report.experimentExecutionId !== undefined),
+    {
+      message:
+        "Report must identify either a request or an exact Experiment execution",
+    },
+  )
   .openapi("ReportResponse");
 
 export const CreateReportInputSchema = z

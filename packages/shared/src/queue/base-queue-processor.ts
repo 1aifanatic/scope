@@ -235,6 +235,13 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
         await this.safeDeleteMessage(message.messageId, currentPopReceipt);
         return;
       }
+      if ((doc as { deletedAt?: unknown }).deletedAt) {
+        console.log(
+          `[${this.workerName}] Discarding queue message for deleted document ${documentId}`,
+        );
+        await this.safeDeleteMessage(message.messageId, currentPopReceipt);
+        return;
+      }
       document = doc as TDocument;
 
       // Resolve the runId for log persistence. Prefer the runId carried in
@@ -242,8 +249,13 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
       // the runId currently on the document, then to the documentId itself
       // (legacy / pre-migration safety).
       const payloadRunId = typeof payload?.runId === "string" ? payload.runId : undefined;
+      const payloadExperimentExecutionId =
+        typeof payload?.experimentExecutionId === "string"
+          ? payload.experimentExecutionId
+          : undefined;
       const docRunId = typeof (doc as any)?.run?._id === "string" ? (doc as any).run._id : undefined;
-      const logRunId = payloadRunId ?? docRunId ?? documentId!;
+      const logRunId =
+        payloadExperimentExecutionId ?? payloadRunId ?? docRunId ?? documentId!;
       runId = logRunId;
       // Capture this attempt's startedAt so the error-path failure write can
       // denormalize run.durationMs in a single $set (doc is out of scope there).
@@ -316,9 +328,13 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
           // Best-effort runId resolution for the failure log line. Same
           // resolution order as the success path above.
           const payloadRunId = typeof payload?.runId === "string" ? payload.runId : undefined;
+          const payloadExperimentExecutionId =
+            typeof payload?.experimentExecutionId === "string"
+              ? payload.experimentExecutionId
+              : undefined;
           await this.logPublisher.publish(
             documentId,
-            payloadRunId ?? documentId,
+            payloadRunId ?? payloadExperimentExecutionId ?? documentId,
             "error",
             `Processing failed: ${error instanceof Error ? error.message : String(error)}`,
             { final: true }
@@ -340,6 +356,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
                 "run._id": runId,
                 "run.status": "processing",
                 "run.worker.instanceId": this.instanceId,
+                deletedAt: { $exists: false },
               } as any,
               {
                 $set: {
@@ -378,7 +395,7 @@ export abstract class BaseQueueProcessor<TDocument extends { _id: string } = any
           } else {
             // Legacy fallback: top-level fields (pre-migration / no runId in message).
             await withRetry(() => this.collection.updateOne(
-              { _id: documentId } as any,
+              { _id: documentId, deletedAt: { $exists: false } } as any,
               {
                 $set: {
                   status: "done",

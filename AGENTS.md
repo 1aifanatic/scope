@@ -19,6 +19,7 @@ apps/
     coder-acp-copilot/          # GitHub Copilot worker (ACP SDK)
     coder-acp-claude-code/      # Claude Code worker (ACP SDK)
     report-generator/           # Post-run report generation
+    readout/                    # Submission-level generated readout
   model-scanners/               # Feature detection for Copilot and Anthropic models
   version-checkers/             # Poll for new agent/tool releases
   key-updaters/                 # GitHub auth cookie management for VS Code Web
@@ -70,6 +71,7 @@ Each worker implements the same queue-processor interface but adapts a different
 | `coder-acp-copilot` | GitHub Copilot | ACP SDK v0.14.1 |
 | `coder-acp-claude-code` | Claude Code | ACP SDK v0.13.1 |
 | `report-generator` | — | Copilot SDK |
+| `readout` | — | Copilot SDK |
 
 Workers consume tasks from Azure Storage Queues (named `queue-<worker-name>`) and write results to MongoDB and Blob Storage. Each has its own Dockerfile and docker-compose profile.
 
@@ -267,6 +269,7 @@ not open the PR against the fork unless the user explicitly asks you to.
 |----------|-------------|
 | [docs/architecture/overview.md](docs/architecture/overview.md) | System architecture, component interactions, data flow |
 | [docs/architecture/app-design.md](docs/architecture/app-design.md) | Data models, API design, package dependency graph |
+| [docs/architecture/experiments.md](docs/architecture/experiments.md) | Canonical Experiment revisions, execution attempts, fixed-vector storage, publication, and client contract |
 | [docs/architecture/prompt-evaluations.md](docs/architecture/prompt-evaluations.md) | Static prompt quality, datasets, commands, and maintenance rules |
 | [docs/architecture/data-organization-projects.md](docs/architecture/data-organization-projects.md) | Projects (a single container) to isolate/group data within a cluster; composes with data-tags and auth-rbac |
 | [docs/architecture/auth-rbac.md](docs/architecture/auth-rbac.md) | Explicit-login IdP auth, Redis user-access cache, Portal handshake; deferred RBAC/internal-token roadmap |

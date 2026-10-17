@@ -15,6 +15,9 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -52,11 +55,13 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { useStrictAgentCapabilities } from "@/hooks/useStrictAgentCapabilities";
 import { useModelCapabilities, ModelSelectItems } from "@/components/ReasoningEffortSelect";
 import { formatDate, formatId, formatDuration, truncate, cn } from "@/lib/utils";
+import { getExistingRunMembershipEligibility } from "@/lib/experiment-membership";
+import { ExperimentMembershipActions } from "@/components/ExperimentMembershipActions";
 import { isAgentAvailable, isAgentVersionAvailable, STATUS_LIST, OUTCOME_LIST } from "@/types";
 import type { Run, RunStatus, RunOutcome, IterationOp, BulkResubmitOverrides, RunSortField, RunFacetBucket } from "@/types";
 import { buildRunWorkerFilterOptions } from "./run-worker-filter-options";
 
-const FILTER_KEYS = ["worker", "status", "outcome", "taskPromptId", "submissionId", "experimentId", "criteria", "model", "profile", "os", "priority", "version", "dateFrom", "dateTo", "groupBy", "turns", "turnsOp", "maxIter", "maxIterOp"] as const;
+const FILTER_KEYS = ["worker", "status", "outcome", "taskPromptId", "experimentId", "criteria", "model", "profile", "os", "priority", "version", "dateFrom", "dateTo", "groupBy", "turns", "turnsOp", "maxIter", "maxIterOp"] as const;
 
 /**
  * Describes how to fetch a given (1-based) page from the cursor-paginated
@@ -132,20 +137,18 @@ const GROUP_MEMBER_PAGE = 100;
 /**
  * Map a server group key (issue #1138 server-side grouping) to the extra
  * server-side filter that selects that group's member runs. `task` groups by
- * `taskPromptId`, `profile` by `profileId`, `submissionId` by `submissionId`
- * (the literal `no-submission`/`no-profile` keys mean "missing", expressed as
+ * `taskPromptId`, `profile` by `profileId`, `experimentId` by `experimentId`
+ * (the literal `no-experiment`/`no-profile` keys mean "missing", expressed as
  * the `__empty__` sentinel so the API matches rows lacking the field).
  */
 function groupKeyExtraFilter(
-  groupBy: "task" | "submissionId" | "profile" | "experiment",
+  groupBy: "task" | "experimentId" | "profile",
   key: string,
-): { taskPromptId?: string; submissionId?: string; profileId?: string[]; experimentId?: string[] } {
+): { taskPromptId?: string; experimentId?: string; profileId?: string[] } {
   if (groupBy === "task") return { taskPromptId: key };
   if (groupBy === "profile")
     return { profileId: [key === "no-profile" ? EMPTY_FILTER_VALUE : key] };
-  if (groupBy === "experiment")
-    return { experimentId: [key === "no-experiment" ? EMPTY_FILTER_VALUE : key] };
-  return { submissionId: key === "no-submission" ? EMPTY_FILTER_VALUE : key };
+  return { experimentId: key === "no-experiment" ? EMPTY_FILTER_VALUE : key };
 }
 
 /** Compact inline badges with overflow (+N) dropdown for dense table cells. */
@@ -315,7 +318,6 @@ const COLUMN_OPTIONS: CustomizeColumnsOption[] = [
   // growth-ecosystems/scope-project#127).
   { id: "status", label: "Status" },
   { id: "outcome", label: "Outcome" },
-  { id: "submission", label: "Submission" },
   { id: "experiment", label: "Experiment" },
   { id: "task", label: "Task" },
   { id: "criteria", label: "Criteria" },
@@ -342,19 +344,18 @@ const COLUMN_IDS = COLUMN_OPTIONS.map((o) => o.id);
 
 // Segmented toggle used in the list header for the Group By control. Kept
 // inline because it is only used here.
-const GROUP_BY_OPTIONS: ReadonlyArray<{ value: "profile" | "task" | "submissionId" | "experiment"; label: string }> = [
+const GROUP_BY_OPTIONS: ReadonlyArray<{ value: "profile" | "task" | "experimentId"; label: string }> = [
   { value: "profile", label: "Profile" },
   { value: "task", label: "Task" },
-  { value: "submissionId", label: "Submission" },
-  { value: "experiment", label: "Experiment" },
+  { value: "experimentId", label: "Experiment" },
 ];
 
 function GroupByToggle({
   value,
   onChange,
 }: {
-  value: "none" | "profile" | "task" | "submissionId" | "experiment";
-  onChange: (next: "none" | "profile" | "task" | "submissionId" | "experiment") => void;
+  value: "none" | "profile" | "task" | "experimentId";
+  onChange: (next: "none" | "profile" | "task" | "experimentId") => void;
 }) {
   return (
     <div
@@ -474,7 +475,7 @@ export function RunsList() {
   // Column visibility — persisted under scope:hidden-columns:runs:v3.
   // The `:v3` suffix forces the new default set + order to apply for users
   // who had an older preference stored under a previous versioned key.
-  // Default visible: ID, Status, Outcome, Submission, Task, Criteria, Worker,
+  // Default visible: ID, Status, Outcome, Experiment, Task, Criteria, Worker,
   // Version, OS, MCP, Skills, Extensions, Profile, Priority.
   // Hidden by default (opt-in via Customize columns): Report, Attempt,
   // Turns, LLM Calls, Duration, Tokens, Created. Model is shown next to
@@ -506,7 +507,7 @@ export function RunsList() {
   const [groupMemberPages, setGroupMemberPages] = useState<Record<string, number>>({});
   
   // Get groupBy from URL state
-  const groupBy = (state.getFilter("groupBy") ?? "none") as "none" | "profile" | "task" | "submissionId" | "experiment";
+  const groupBy = (state.getFilter("groupBy") ?? "none") as "none" | "profile" | "task" | "experimentId";
 
   // Cursor pagination — keep a stack of cursors that map a virtual page number
   // to a fetch instruction. Each entry describes how to fetch that page:
@@ -528,6 +529,10 @@ export function RunsList() {
   const [resubmitDialogOpen, setResubmitDialogOpen] = useState(false);
   const [resubmitCount, setResubmitCount] = useState<number>(1);
   const [resubmitOverrides, setResubmitOverrides] = useState<BulkResubmitOverrides>({});
+  const [createExperimentDialogOpen, setCreateExperimentDialogOpen] = useState(false);
+  const [moveExperimentDialogOpen, setMoveExperimentDialogOpen] = useState(false);
+  const [experimentName, setExperimentName] = useState("");
+  const [targetExperimentId, setTargetExperimentId] = useState("");
 
   // Reset stack whenever filters or page size change.
   const filtersKey = useMemo(
@@ -538,7 +543,6 @@ export function RunsList() {
         status: state.getFilterList("status"),
         outcome: state.getFilterList("outcome"),
         taskPromptId: state.getFilter("taskPromptId"),
-        submissionId: state.getFilter("submissionId"),
         experimentId: state.getFilter("experimentId"),
         criteria: state.getFilter("criteria"),
         model: state.getFilterList("model"),
@@ -584,7 +588,6 @@ export function RunsList() {
   const priorities = state.getFilterList("priority");
   const versions = state.getFilterList("version");
   const taskPromptId = state.getFilter("taskPromptId") ?? undefined;
-  const submissionId = state.getFilter("submissionId") ?? undefined;
   const experimentId = state.getFilter("experimentId") ?? undefined;
   const criteria = state.getFilter("criteria") ?? undefined;
   const dateFrom = state.getFilter("dateFrom");
@@ -637,7 +640,6 @@ export function RunsList() {
       agentVersion: asArray(versions),
       profileId: asArray(profiles),
       taskPromptId,
-      submissionId,
       experimentId,
       criteria,
       search: searchValue,
@@ -659,7 +661,6 @@ export function RunsList() {
       versions.join(","),
       profiles.join(","),
       taskPromptId,
-      submissionId,
       experimentId,
       criteria,
       searchValue,
@@ -711,6 +712,12 @@ export function RunsList() {
     queryFn: () => api.listProfiles(),
     staleTime: 60_000,
   });
+  const experimentsQuery = useQuery({
+    queryKey: ["experiments", "runs-membership"],
+    queryFn: () => api.listExperiments({ limit: 100 }),
+    enabled: moveExperimentDialogOpen,
+    staleTime: 30_000,
+  });
   // Registry data also supplies worker labels for filters and historical values.
   const { data: agentsData = [] } = useQuery({
     queryKey: ["agents", "include-deleted"],
@@ -749,7 +756,7 @@ export function RunsList() {
     enabled: groupBy !== "none",
     queryFn: () =>
       api.listRunGroups({
-        groupBy: groupBy as "task" | "submissionId" | "profile" | "experiment",
+        groupBy: groupBy as "task" | "experimentId" | "profile",
         ...runFilterArgs,
         sortBy,
         sortDir,
@@ -784,7 +791,7 @@ export function RunsList() {
     // Keep the already-loaded member rows visible while a "Load more" refetch runs.
     placeholderData: keepPreviousData,
     queryFn: async () => {
-      const gb = groupBy as "task" | "submissionId" | "profile" | "experiment";
+      const gb = groupBy as "task" | "experimentId" | "profile";
       const entries = await Promise.all(
         expandedKeyList.map(async (key) => {
           // Walk the list cursor up to the group's requested page count. The list
@@ -909,9 +916,17 @@ export function RunsList() {
   const bulkDeleteMutation = useMutation({
     mutationFn: (ids: string[]) => api.bulkDeleteRuns(ids),
     onSuccess: (res) => {
-      toast.success(`Deleted ${res.deleted} run${res.deleted !== 1 ? "s" : ""}`);
+      const revision = res.membershipRevision;
+      toast.success(
+        `Deleted ${res.deleted} run${res.deleted !== 1 ? "s" : ""}` +
+        (revision ? ` · Experiment revision ${revision.revisionNumber} (${formatId(revision.experimentRevisionId)})` : ""),
+      );
       setSelectedIds(new Set());
       invalidateRuns();
+      if (revision) {
+        void queryClient.invalidateQueries({ queryKey: ["experiment", revision.experimentId] });
+        void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+      }
     },
     onError: (err: Error) => toast.error(`Failed to delete: ${err.message}`),
   });
@@ -1049,6 +1064,63 @@ export function RunsList() {
     () => allRuns.filter((r) => selectedIds.has(r._id)),
     [allRuns, selectedIds],
   );
+  const experimentMembershipEligibility = useMemo(
+    () => getExistingRunMembershipEligibility(selectedIds, selectedRunsList),
+    [selectedIds, selectedRunsList],
+  );
+  const selectedExperimentMemberCount = useMemo(
+    () => selectedRunsList.filter((run) => Boolean(run.experimentId)).length,
+    [selectedRunsList],
+  );
+
+  const createExperimentMutation = useMutation({
+    mutationFn: () =>
+      api.createExperimentFromRuns({
+        metadata: { name: experimentName.trim() },
+        requestIds: [...selectedIds],
+      }),
+    onSuccess: ({ experiment }) => {
+      toast.success(
+        `Created ${experiment.metadata.name} · revision ${experiment.revision.revisionNumber}`,
+      );
+      setSelectedIds(new Set());
+      setExperimentName("");
+      setCreateExperimentDialogOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+      navigate(
+        `/experiments/${encodeURIComponent(experiment.experimentId)}?revision=${encodeURIComponent(experiment.revision.experimentRevisionId)}&execution=${encodeURIComponent(experiment.execution.experimentExecutionId)}`,
+      );
+    },
+    onError: (error: Error) => toast.error(`Failed to create Experiment: ${error.message}`),
+  });
+
+  const moveToExperimentMutation = useMutation({
+    mutationFn: () => {
+      const target = experimentsQuery.data?.items.find(
+        (experiment) => experiment.experimentId === targetExperimentId,
+      );
+      if (!target) throw new Error("Choose an Experiment");
+      return api.updateExperimentRequests("POST", target.experimentId, {
+        expectedExperimentRevisionId: target.revision.experimentRevisionId,
+        requestIds: [...selectedIds],
+      });
+    },
+    onSuccess: ({ experiment, attachedRequestIds }) => {
+      toast.success(
+        `Moved ${attachedRequestIds.length} run${attachedRequestIds.length === 1 ? "" : "s"} · revision ${experiment.revision.revisionNumber}`,
+      );
+      setSelectedIds(new Set());
+      setTargetExperimentId("");
+      setMoveExperimentDialogOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["experiments"] });
+      navigate(
+        `/experiments/${encodeURIComponent(experiment.experimentId)}?revision=${encodeURIComponent(experiment.revision.experimentRevisionId)}&execution=${encodeURIComponent(experiment.execution.experimentExecutionId)}`,
+      );
+    },
+    onError: (error: Error) => toast.error(`Failed to move runs: ${error.message}`),
+  });
 
   // Capability counts so action buttons can disable cleanly.
   const selectionCaps = useMemo(() => {
@@ -1219,6 +1291,8 @@ export function RunsList() {
 
   const isBusy =
     bulkDeleteMutation.isPending ||
+    createExperimentMutation.isPending ||
+    moveToExperimentMutation.isPending ||
     bulkRetryMutation.isPending ||
     bulkResubmitMutation.isPending ||
     bulkPauseMutation.isPending ||
@@ -1352,25 +1426,18 @@ export function RunsList() {
       cell: (r) => <ShortId id={r._id} label="run ID" />,
     },
     {
-      id: "submission",
-      header: "Submission",
-      width: "120px",
-      hidden: columnVisibility.isHidden("submission"),
-      cell: (r) =>
-        r.submissionId ? (
-          <ShortId id={r.submissionId} label="submission ID" />
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
-        ),
-    },
-    {
       id: "experiment",
       header: "Experiment",
-      width: "140px",
+      width: "120px",
       hidden: columnVisibility.isHidden("experiment"),
       cell: (r) =>
         r.experimentId ? (
-          <span className="font-mono text-xs">{r.experimentId}</span>
+          <Link
+            to={`/experiments/${r.experimentId}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <ShortId id={r.experimentId} label="experiment ID" />
+          </Link>
         ) : (
           <span className="text-xs text-muted-foreground">—</span>
         ),
@@ -2152,6 +2219,13 @@ export function RunsList() {
           </Button>
 
           <BulkGroupLabel>Runs</BulkGroupLabel>
+          <ExperimentMembershipActions
+            eligibility={experimentMembershipEligibility}
+            selectedCount={selectedIds.size}
+            busy={isBusy}
+            onCreate={() => setCreateExperimentDialogOpen(true)}
+            onMove={() => setMoveExperimentDialogOpen(true)}
+          />
           <Button
             variant="outline"
             size="sm"
@@ -2261,9 +2335,7 @@ export function RunsList() {
                       // `taskPromptId` is always materialized server-side, so it
                       // matches the server group key 1:1 (no raw-text fallback).
                       return run.taskPromptId ?? "";
-                    case "submissionId":
-                      return run.submissionId ?? "no-submission";
-                    case "experiment":
+                    case "experimentId":
                       return run.experimentId ?? "no-experiment";
                     default:
                       return "";
@@ -2527,8 +2599,6 @@ export function RunsList() {
                   };
 
                   switch (column.id) {
-                    case "submission":
-                      return distinct("submissions", (r) => r.submissionId);
                     case "experiment":
                       return distinct("experiments", (r) => r.experimentId);
                     case "task":
@@ -2679,49 +2749,47 @@ export function RunsList() {
                   }
 
                   // Default: render the first run's cell (works when the column
-                  // value is uniform across the group, e.g. submission/task when
-                  // grouped by submissionId, or profile when grouped by profile).
+                  // value is uniform across the group, e.g. experiment/task when
+                  // grouped by experimentId, or profile when grouped by profile).
                   return runs[0] ? column.cell(runs[0]) : null;
                 },
                 renderGroupHeader: (groupKey, runs, expanded) => {
-                  const groupLabel =
-                    groupBy === "submissionId"
-                      ? "Submission ID"
-                      : groupBy === "profile"
-                        ? "Profile"
-                        : groupBy === "experiment"
-                          ? "Experiment"
-                          : "Task";
+                  const groupLabel = groupBy === "experimentId" ? "Experiment ID" : groupBy === "profile" ? "Profile" : "Task";
                   const groupDisplayKey =
                     groupBy === "profile" && groupKey !== "no-profile"
                       ? (profileNameById.get(groupKey) ?? formatId(groupKey))
                       : groupKey;
                   return (
-                    <button
-                      type="button"
-                      onClick={() => toggleGroupExpansion(groupKey)}
-                      className="w-full bg-muted/30 px-4 py-3 text-sm flex items-center justify-between gap-3 hover:bg-muted/40 transition-colors"
-                      aria-expanded={expanded}
-                    >
-                      <div className="flex min-w-0 items-center gap-2">
-                        {expanded ? (
-                          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                        ) : (
-                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                        )}
-                        <span className="min-w-0 truncate font-semibold">
-                          <span className="text-muted-foreground">{groupLabel}:</span> {groupDisplayKey}
-                        </span>
-                      </div>
+                    <div className="w-full bg-muted/30 px-4 py-3 text-sm flex items-center justify-between gap-3 hover:bg-muted/40 transition-colors">
+                      <button
+                        type="button"
+                        onClick={() => toggleGroupExpansion(groupKey)}
+                        className="flex min-w-0 items-center gap-2 text-left"
+                        aria-expanded={expanded}
+                      >
+                          {expanded ? (
+                            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                          ) : (
+                            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                          )}
+                          <span className="min-w-0 truncate font-semibold">
+                            <span className="text-muted-foreground">{groupLabel}:</span> {groupDisplayKey}
+                          </span>
+                      </button>
                       <div className="flex shrink-0 items-center gap-3">
+                        {groupBy === "experimentId" && groupKey !== "no-experiment" && (
+                          <Link
+                            to={`/experiments/${groupKey}`}
+                            className="text-xs font-medium text-primary hover:underline"
+                          >
+                            View experiment
+                          </Link>
+                        )}
                         <span className="text-xs text-muted-foreground font-normal">
                           {runs.length} run{runs.length !== 1 ? "s" : ""}
                         </span>
-                        <span className="text-xs text-muted-foreground font-normal">
-                          {expanded ? "Click to collapse" : "Click to expand"}
-                        </span>
                       </div>
-                    </button>
+                    </div>
                   );
                 },
               }}
@@ -3262,6 +3330,109 @@ export function RunsList() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <Dialog
+        open={createExperimentDialogOpen}
+        onOpenChange={(open) => {
+          setCreateExperimentDialogOpen(open);
+          if (!open) setExperimentName("");
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create experiment</DialogTitle>
+            <DialogDescription>
+              Create an Experiment containing the {selectedIds.size} selected standalone run
+              {selectedIds.size === 1 ? "" : "s"}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="experiment-name">Name</Label>
+            <Input
+              id="experiment-name"
+              value={experimentName}
+              onChange={(event) => setExperimentName(event.target.value)}
+              placeholder="Experiment name"
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateExperimentDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => createExperimentMutation.mutate()}
+              disabled={
+                createExperimentMutation.isPending ||
+                experimentName.trim().length === 0 ||
+                !experimentMembershipEligibility.eligible
+              }
+            >
+              {createExperimentMutation.isPending ? "Creating…" : "Create experiment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={moveExperimentDialogOpen}
+        onOpenChange={(open) => {
+          setMoveExperimentDialogOpen(open);
+          if (!open) setTargetExperimentId("");
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Move to experiment</DialogTitle>
+            <DialogDescription>
+              Add the {selectedIds.size} selected standalone run
+              {selectedIds.size === 1 ? "" : "s"} to the target&apos;s current revision.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="target-experiment">Experiment</Label>
+            <Select value={targetExperimentId} onValueChange={setTargetExperimentId}>
+              <SelectTrigger id="target-experiment">
+                <SelectValue placeholder={experimentsQuery.isLoading ? "Loading…" : "Choose an Experiment"} />
+              </SelectTrigger>
+              <SelectContent>
+                {experimentsQuery.data?.items.map((experiment) => (
+                  <SelectItem key={experiment.experimentId} value={experiment.experimentId}>
+                    {experiment.metadata.name} · revision {experiment.revision.revisionNumber}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {experimentsQuery.isError && (
+              <p className="text-sm text-destructive">
+                {experimentsQuery.error instanceof Error
+                  ? experimentsQuery.error.message
+                  : "Experiments could not be loaded."}
+              </p>
+            )}
+            {experimentsQuery.data?.items.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                No target Experiments are available.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMoveExperimentDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => moveToExperimentMutation.mutate()}
+              disabled={
+                moveToExperimentMutation.isPending ||
+                !targetExperimentId ||
+                !experimentMembershipEligibility.eligible
+              }
+            >
+              {moveToExperimentMutation.isPending ? "Moving…" : "Move runs"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -3271,6 +3442,14 @@ export function RunsList() {
             <AlertDialogDescription>
               This permanently removes the selected runs along with their logs,
               turns, and report associations. This action cannot be undone.
+              {selectedExperimentMemberCount > 0 && (
+                <span className="mt-2 block font-medium text-destructive">
+                  {selectedExperimentMemberCount} selected run
+                  {selectedExperimentMemberCount === 1 ? " is" : "s are"} an Experiment
+                  member. Deleting {selectedExperimentMemberCount === 1 ? "it" : "them"} will
+                  publish a new Experiment revision without those runs.
+                </span>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -6,6 +6,7 @@ import { Link, useLocation, Outlet, matchPath } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import {
   Activity,
+  Atom,
   Plus,
   List,
   FlaskConical,
@@ -95,6 +96,7 @@ const navGroups: NavGroup[] = [
     scoped: true,
     items: [
       { to: "/runs", label: "Runs", icon: List },
+      { to: "/experiments", label: "Experiments", icon: Atom },
       { to: "/statistics", label: "Statistics", icon: BarChart3 },
       { to: "/reports", label: "Reports", icon: FileText },
       { to: "/insights", label: "Insights", icon: Lightbulb },
