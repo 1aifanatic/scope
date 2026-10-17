@@ -265,10 +265,7 @@ The Portal provides `/experiments`, `/experiments/new`, and
 configuration and expansion count and adds Experiment metadata. No selected
 scenario creates an empty Experiment; selecting a scenario reveals the run
 composition controls and creates the expanded run count. The Portal navigates
-to Experiment Detail after creation. The project-scoped sidebar creation
-launcher keeps **New Run** emphasized while exposing **New Experiment** beside
-it when expanded, in a hover/focus flyout when collapsed, and as a full action
-in the mobile sheet. The Experiments list uses the shared
+to Experiment Detail after creation. The Experiments list uses the shared
 full-height, edge-to-edge `ListLayout`, `FilterRail`, `DataTable`, column
 customization, and cursor-aware `Pagination` interaction model used by Runs
 while retaining Experiment-specific status, revision, attempt, and run-count

@@ -36,7 +36,6 @@ import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetTrigger,
   SheetTitle,
 } from "@/components/ui/sheet";
@@ -88,8 +87,7 @@ interface NavGroup {
  * it stays visible without a selection and is pinned last.
  *
  * The pinned Projects link (global) and the dev-only MDP view (scoped) are
- * rendered outside these groups; creation actions and MDP are gated on the
- * selection too.
+ * rendered outside these groups; New Run and MDP are gated on the selection too.
  */
 const navGroups: NavGroup[] = [
   {
@@ -186,7 +184,6 @@ interface SidebarIconLinkProps {
   expanded: boolean;
   external?: boolean;
   emphasized?: boolean;
-  tooltip?: boolean;
 }
 
 function SidebarIconLink({
@@ -197,7 +194,6 @@ function SidebarIconLink({
   expanded,
   external,
   emphasized,
-  tooltip = true,
 }: SidebarIconLinkProps) {
   const className = cn(
     "relative flex h-10 items-center rounded-md transition-colors",
@@ -237,7 +233,7 @@ function SidebarIconLink({
     </Link>
   );
 
-  if (expanded || !tooltip) {
+  if (expanded) {
     return link;
   }
 
@@ -250,77 +246,6 @@ function SidebarIconLink({
         {label}
       </TooltipContent>
     </Tooltip>
-  );
-}
-
-interface NewWorkflowLauncherProps {
-  expanded: boolean;
-  pathname: string;
-}
-
-function NewWorkflowLauncher({
-  expanded,
-  pathname,
-}: NewWorkflowLauncherProps) {
-  if (expanded) {
-    return (
-      <div
-        className="flex w-full items-center gap-1"
-        data-testid="new-workflow-launcher"
-      >
-        <Link
-          to="/runs/new"
-          className={cn(
-            "flex h-10 basis-[46%] items-center justify-center gap-1.5 rounded-md bg-action px-1.5 text-action-foreground shadow-sm transition-colors hover:bg-action/90",
-            pathname === "/runs/new" && "ring-2 ring-ring ring-offset-1",
-          )}
-        >
-          <Plus className="h-4 w-4 shrink-0" />
-          <span className="truncate text-xs font-medium">New Run</span>
-        </Link>
-        <Link
-          to="/experiments/new"
-          aria-label="New Experiment"
-          title="New Experiment"
-          className={cn(
-            "flex h-10 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-border/60 px-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-            pathname === "/experiments/new" &&
-              "bg-accent text-foreground ring-2 ring-ring ring-offset-1",
-          )}
-        >
-          <Atom className="h-4 w-4 shrink-0" />
-          <span className="truncate text-xs font-medium">Experiment</span>
-        </Link>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className="group/new-workflow relative flex w-full flex-col items-center"
-      data-testid="new-workflow-launcher"
-    >
-      <SidebarIconLink
-        to="/runs/new"
-        label="New Run"
-        icon={Plus}
-        active={pathname === "/runs/new"}
-        expanded={false}
-        emphasized
-        tooltip={false}
-      />
-      <div className="invisible pointer-events-none fixed left-14 top-28 z-50 w-52 pl-2 opacity-0 transition-opacity duration-150 group-hover/new-workflow:visible group-hover/new-workflow:pointer-events-auto group-hover/new-workflow:opacity-100 group-focus-within/new-workflow:visible group-focus-within/new-workflow:pointer-events-auto group-focus-within/new-workflow:opacity-100">
-        <div className="rounded-md border border-border/60 bg-popover p-1 shadow-md">
-          <SidebarIconLink
-            to="/experiments/new"
-            label="New Experiment"
-            icon={Atom}
-            active={pathname === "/experiments/new"}
-            expanded
-          />
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -449,13 +374,18 @@ export function Layout() {
                 sidebarExpanded ? "px-2" : "items-center",
               )}
             >
-              {/* Primary creation launcher. Scoped because both workflows need a
-                  selected project; hover and focus-within reveal Experiment. */}
+              {/* New Run — emphasized primary CTA. Scoped (submitting a run needs
+                  a project), so it's hidden along with its divider until one is
+                  selected; Projects then becomes the first pinned item. */}
               {hasProject && (
                 <>
-                  <NewWorkflowLauncher
+                  <SidebarIconLink
+                    to="/runs/new"
+                    label="New Run"
+                    icon={Plus}
+                    active={location.pathname === "/runs/new"}
                     expanded={sidebarExpanded}
-                    pathname={location.pathname}
+                    emphasized
                   />
                   <div
                     className={cn("my-1 h-px bg-border/60", sidebarExpanded ? "w-full" : "w-6")}
@@ -573,31 +503,7 @@ export function Layout() {
                 </SheetTrigger>
                 <SheetContent side="left" className="w-64 pt-10">
                   <SheetTitle className="sr-only">Navigation</SheetTitle>
-                  <SheetDescription className="sr-only">
-                    Project and platform navigation
-                  </SheetDescription>
                   <nav className="flex flex-col space-y-1">
-                    {hasProject && (
-                      <>
-                        <Link
-                          to="/runs/new"
-                          onClick={() => setMobileOpen(false)}
-                          className="flex items-center gap-2 rounded-md bg-action px-3 py-2 text-sm font-medium text-action-foreground shadow-sm transition-colors hover:bg-action/90"
-                        >
-                          <Plus className="h-4 w-4" />
-                          New Run
-                        </Link>
-                        <Link
-                          to="/experiments/new"
-                          onClick={() => setMobileOpen(false)}
-                          className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                        >
-                          <Atom className="h-4 w-4" />
-                          New Experiment
-                        </Link>
-                        <div className="my-2 h-px bg-border/60" aria-hidden />
-                      </>
-                    )}
                     {visibleGroups.map((group, groupIdx) => (
                       <Fragment key={group.id}>
                         <div
