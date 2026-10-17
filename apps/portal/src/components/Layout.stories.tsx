@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent } from "storybook/test";
+import { expect, screen, userEvent } from "storybook/test";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { http, HttpResponse } from "msw";
 import { PROJECT_STORAGE_KEY } from "@/lib/project-scope";
@@ -38,6 +38,16 @@ export const Collapsed: Story = {
   play: async ({ canvas }) => {
     localStorage.removeItem("scope:layout:sidebar-expanded");
     await expect(canvas.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
+    const newRun = canvas.getByRole("link", { name: "New Run" });
+    await userEvent.hover(newRun);
+    const newExperiment = canvas.getByRole("link", {
+      name: "New Experiment",
+    });
+    await expect(newExperiment).toBeVisible();
+    await userEvent.unhover(newRun);
+    newRun.focus();
+    await expect(newRun).toHaveFocus();
+    await expect(newExperiment).toBeVisible();
     await expect(
       canvas.getByText(/This is an AI evaluation platform\./),
     ).toBeVisible();
@@ -49,6 +59,9 @@ export const Expanded: Story = {
     localStorage.removeItem("scope:layout:sidebar-expanded");
     await userEvent.click(canvas.getByRole("button", { name: "Expand sidebar" }));
     await expect(canvas.getByRole("button", { name: "Collapse sidebar" })).toBeVisible();
+    await expect(
+      canvas.getByRole("link", { name: "New Experiment" }),
+    ).toBeVisible();
     // With a project selected, scoped nav is present.
     await expect(canvas.getByRole("link", { name: "Runs" })).toBeVisible();
     const experimentsLink = canvas.getByRole("link", { name: "Experiments" });
@@ -62,8 +75,25 @@ export const Expanded: Story = {
   },
 };
 
+export const Mobile: Story = {
+  parameters: {
+    viewport: {
+      defaultViewport: "mobile1",
+    },
+  },
+  play: async ({ canvas }) => {
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Toggle navigation" }),
+    );
+    await expect(screen.getByRole("link", { name: "New Run" })).toBeVisible();
+    await expect(
+      screen.getByRole("link", { name: "New Experiment" }),
+    ).toBeVisible();
+  },
+};
+
 // No project selected: only global entries (Projects + Platform) remain; the
-// scoped groups and the New Run CTA are hidden until a project is picked.
+// scoped groups and creation actions are hidden until a project is picked.
 export const NoProjectSelected: Story = {
   beforeEach: () => {
     localStorage.removeItem(PROJECT_STORAGE_KEY);
@@ -77,6 +107,9 @@ export const NoProjectSelected: Story = {
     // Scoped nav and the New Run CTA are gone until a project is selected.
     await expect(canvas.queryByRole("link", { name: "Runs" })).toBeNull();
     await expect(canvas.queryByRole("link", { name: "New Run" })).toBeNull();
+    await expect(
+      canvas.queryByRole("link", { name: "New Experiment" }),
+    ).toBeNull();
   },
 };
 

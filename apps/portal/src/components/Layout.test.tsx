@@ -191,14 +191,20 @@ describe("Layout", () => {
     expect(within(sidebar).queryByRole("link", { name: "Tasks" })).toBeNull();
   });
 
-  it("shows scoped nav and the New Run CTA when a project is selected", () => {
+  it("offers both creation workflows from the expanded primary launcher", () => {
     localStorage.setItem("scope:layout:sidebar-expanded", "1");
 
     renderLayout("/runs");
 
     const sidebar = screen.getByLabelText("Primary navigation");
-    // Scoped groups + the emphasized CTA are present with a project in use.
-    expect(within(sidebar).getByRole("link", { name: "New Run" })).toBeTruthy();
+    const launcher = within(sidebar).getByTestId("new-workflow-launcher");
+    const newRun = within(launcher).getByRole("link", { name: "New Run" });
+    const newExperiment = within(launcher).getByRole("link", {
+      name: "New Experiment",
+    });
+    expect(newRun.getAttribute("href")).toBe("/runs/new");
+    expect(newExperiment.getAttribute("href")).toBe("/experiments/new");
+    expect(newExperiment.getAttribute("title")).toBe("New Experiment");
     expect(within(sidebar).getByText("Activity")).toBeTruthy();
     expect(within(sidebar).getByRole("link", { name: "Runs" })).toBeTruthy();
     const experimentsLink = within(sidebar).getByRole("link", {
@@ -221,6 +227,42 @@ describe("Layout", () => {
     expect(within(sidebar).getByText("Platform")).toBeTruthy();
   });
 
+  it("keeps New Run emphasized and exposes New Experiment to keyboard focus when collapsed", () => {
+    renderLayout("/runs");
+
+    const launcher = within(
+      screen.getByLabelText("Primary navigation"),
+    ).getByTestId("new-workflow-launcher");
+    const newRun = within(launcher).getByRole("link", { name: "New Run" });
+    const newExperiment = within(launcher).getByRole("link", {
+      name: "New Experiment",
+    });
+
+    expect(newRun.className).toContain("bg-action");
+    expect(newRun.getAttribute("href")).toBe("/runs/new");
+    expect(newExperiment.getAttribute("href")).toBe("/experiments/new");
+    newRun.focus();
+    expect(document.activeElement).toBe(newRun);
+    newExperiment.focus();
+    expect(document.activeElement).toBe(newExperiment);
+  });
+
+  it("shows both full creation actions in the mobile navigation sheet", () => {
+    renderLayout("/runs");
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle navigation" }));
+
+    const sheet = screen.getByRole("dialog");
+    expect(
+      within(sheet).getByRole("link", { name: "New Run" }).getAttribute("href"),
+    ).toBe("/runs/new");
+    expect(
+      within(sheet)
+        .getByRole("link", { name: "New Experiment" })
+        .getAttribute("href"),
+    ).toBe("/experiments/new");
+  });
+
   it("hides project-scoped nav until a project is selected", () => {
     localStorage.setItem("scope:layout:sidebar-expanded", "1");
 
@@ -241,8 +283,11 @@ describe("Layout", () => {
     expect(within(sidebar).queryByRole("link", { name: "Prompts" })).toBeNull();
     expect(within(sidebar).queryByRole("link", { name: "Resources" })).toBeNull();
     expect(within(sidebar).queryByRole("link", { name: "MCP" })).toBeNull();
-    // The New Run CTA is scoped too, so it's gone until a project is picked.
+    // Creation actions are scoped too, so they're gone until a project is picked.
     expect(within(sidebar).queryByRole("link", { name: "New Run" })).toBeNull();
+    expect(
+      within(sidebar).queryByRole("link", { name: "New Experiment" }),
+    ).toBeNull();
   });
 
   it("routes home via the logo without de-scoping in Layout itself", () => {
