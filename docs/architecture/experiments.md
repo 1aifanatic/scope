@@ -370,9 +370,10 @@ configuration and expansion count and adds Experiment metadata. No selected
 scenario creates an empty Experiment; selecting a scenario reveals the run
 composition controls and creates the expanded run count. The Portal navigates
 to Experiment Detail after creation. The Experiments list uses the shared
-`ListLayout`, `FilterRail`, `DataTable`, column customization, and cursor-aware
-`Pagination` interaction model while retaining Experiment-specific status,
-revision, attempt, and run-count columns.
+full-height, edge-to-edge `ListLayout`, `FilterRail`, `DataTable`, column
+customization, and cursor-aware `Pagination` interaction model used by Runs
+while retaining Experiment-specific status, revision, attempt, and run-count
+columns.
 
 Experiment Detail keeps the Experiment identity, concise status, and global
 attempt selector in a compact header. The horizontal **Runs**, **Reports**, and
