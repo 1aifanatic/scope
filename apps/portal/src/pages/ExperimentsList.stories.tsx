@@ -81,6 +81,12 @@ export const SharedListInteractions: Story = {
     await expect(
       canvas.getByRole("complementary", { name: "Filters" }),
     ).toBeVisible();
+    const listShell = canvas
+      .getByRole("heading", { name: "Experiments" })
+      .closest("section")?.parentElement;
+    if (!listShell) throw new Error("Experiments list shell is missing");
+    await expect(listShell).toHaveClass("h-full");
+    await expect(listShell).not.toHaveClass("px-6");
 
     fireEvent.change(canvas.getByPlaceholderText("Search experiments…"), {
       target: { value: "Beta" },
