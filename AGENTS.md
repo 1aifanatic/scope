@@ -148,12 +148,13 @@ Python + uv app (outside the pnpm workspace, like the Rust `apps/gateway`) that
 runs the [GEPA](https://github.com/gepa-ai/gepa) reflective prompt-optimization
 algorithm to optimize an **AGENTS.md** file. Each candidate is scored by a real
 Scope run (Copilot CLI worker + Claude Haiku 4.5) via a custom `ScopeAdapter`:
-submit a request with `agentsMd` + `experimentId`, poll to completion, and score
-from the run's `criteriaResults`. Scoring is derived, never persisted. Run tests
-with `pnpm test:gepa` (`uv run pytest`); CI runs `uv sync --locked && uv run pytest`.
+submit standalone requests with `agentsMd`, add them through canonical Experiment
+membership revisions, poll exact requests/executions/reports, and score from the
+run's `criteriaResults`. Scoring is derived, never persisted. Run tests with
+`pnpm test:gepa` (`uv run pytest`); CI runs `uv sync --locked && uv run pytest`.
 
 - README: [apps/gepa-optimizer/README.md](apps/gepa-optimizer/README.md)
-- Data-model impact (`experimentId` grouping and derived scoring): [docs/architecture/app-design.md](docs/architecture/app-design.md)
+- Experiment integration: [docs/architecture/experiments.md](docs/architecture/experiments.md)
 
 ### Shared Package (`packages/shared/`)
 

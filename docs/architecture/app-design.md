@@ -321,33 +321,19 @@ pre-asserts no composite duplicates, reuses 025's Cosmos-safe helpers (composite
 non-unique on Cosmos, unique on real MongoDB), and its `down()` unsets `slug`/`ref` (index changes
 log-only). The dead `prompt-feature-extractions` drop is guarded against a missing namespace.
 
-### Experiment correlation and grouping
+### GEPA optimization
 
-Requests may carry an optional `experimentId` to correlate related runs without
-changing their submission or profile identity. The Runs API supports exact
-filtering with `?experimentId=` (including the standard `__empty__` sentinel for
-missing values) and server-side grouping with `groupBy=experiment`. Grouped
-pagination uses the same two-phase aggregation as the other group dimensions,
-including a stable `no-experiment` bucket whose member fetch matches both absent
-and explicit `null` values.
-
-Bulk resubmission preserves `experimentId`. The CLI and Portal expose the field
-at submission time and support filtering/grouping existing runs by it. Migration
-031 adds a sparse single-field index on `requests.experimentId`; Cosmos DB can
-intersect it with the existing project and deletion filters, while runs without
-an experiment avoid the additional index entry.
-
-The GEPA optimizer in `apps/gepa-optimizer` uses this correlation field to group
-the seed request and all mutated candidates from one optimization run. Callers
-that know candidate parentage may continue to populate
-`RequestDocument.agentsMdParentIds`; the optimizer reconstructs its own lineage
-post-hoc from GEPA's public parent indices and stores it in the optimizer result
-artifact rather than mutating Scope run documents.
+The Python optimizer in `apps/gepa-optimizer` is a client of the canonical
+Experiment API described in [experiments.md](experiments.md). One optimization
+creates or targets one Experiment. Each candidate batch first creates
+standalone requests, then publishes those exact request IDs through the
+membership API, producing a new immutable revision and execution. The optimizer
+records those identities and reads reports through the exact execution route.
 
 **GEPA scoring is not persisted.** Its metric (fraction of criteria passed,
 aggregated across turns) is derived from `run.turns[].criteriaResults` and
-remains algorithm-specific. If ever persisted it would be named (for example,
-`metrics.gepaCriteriaPassRateMeanTurns`) and live on `RunState`.
+remains algorithm-specific. Candidate lineage is reconstructed from GEPA's
+public parent indices in the optimizer result artifact.
 
 ## Judge Pipeline
 

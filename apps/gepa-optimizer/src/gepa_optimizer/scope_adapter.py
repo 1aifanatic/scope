@@ -4,10 +4,11 @@
 """``ScopeAdapter`` — a GEPA adapter that scores AGENTS.md candidates with Scope.
 
 Each GEPA candidate is ``{"AGENTS.md": "<text>"}``. ``evaluate`` submits one
-Scope run per dataset example (task + criteria + the candidate AGENTS.md),
-polls until the run finishes, and scores it from the persisted criteria
-results. Submissions/polls run concurrently under a semaphore capped at the
-Linux ``coder-acp-copilot`` KEDA ceiling (default 10).
+standalone Scope run per dataset example, publishes those requests as one
+canonical Experiment membership revision, polls the exact requests and
+execution, and scores from persisted criteria results. Submissions/polls run
+concurrently under a semaphore capped at the Linux ``coder-acp-copilot`` KEDA
+ceiling (default 10).
 
 Failure model (per the rubber-duck critique):
 
@@ -45,6 +46,7 @@ class ScopeAdapter(GEPAAdapter):
         *,
         model: str,
         experiment_id: str,
+        experiment_revision_id: str,
         max_iterations: int,
         max_concurrency: int = 10,
         run_timeout_seconds: float = 1800.0,
@@ -55,6 +57,7 @@ class ScopeAdapter(GEPAAdapter):
         self.client = client
         self.model = model
         self.experiment_id = experiment_id
+        self.experiment_revision_id = experiment_revision_id
         self.max_iterations = max_iterations
         self.max_concurrency = max_concurrency
         self.run_timeout_seconds = run_timeout_seconds
@@ -91,16 +94,93 @@ class ScopeAdapter(GEPAAdapter):
         self, batch: Sequence[Mapping[str, Any]], agents_md: str
     ) -> list[dict[str, Any]]:
         sem = asyncio.Semaphore(self.max_concurrency)
-        # Create the client inside the coroutine so it binds to this loop.
         async with httpx.AsyncClient(timeout=self.client.timeout_seconds) as http:
-
-            async def run_one(example: Mapping[str, Any]) -> dict[str, Any]:
+            async def submit_one(example: Mapping[str, Any]) -> dict[str, Any]:
                 async with sem:
-                    return await self._evaluate_one(http, example, agents_md)
+                    return await self._submit_one(http, example, agents_md)
 
-            return await asyncio.gather(*(run_one(ex) for ex in batch))
+            submitted = await asyncio.gather(*(submit_one(ex) for ex in batch))
+            request_ids = [
+                result["request_id"]
+                for result in submitted
+                if result.get("request_id") is not None
+            ]
+            if not request_ids:
+                return submitted
 
-    async def _evaluate_one(
+            membership = await self.client.add_requests(
+                http,
+                experiment_id=self.experiment_id,
+                expected_experiment_revision_id=self.experiment_revision_id,
+                request_ids=request_ids,
+            )
+            experiment = membership.get("experiment") or {}
+            revision = experiment.get("revision") or {}
+            execution = experiment.get("currentExecution") or {}
+            revision_id = revision.get("experimentRevisionId")
+            execution_id = execution.get("experimentExecutionId")
+            if not isinstance(revision_id, str) or not isinstance(execution_id, str):
+                raise SystemicScopeError(
+                    "Experiment membership response omitted revision/execution identity"
+                )
+            self.experiment_revision_id = revision_id
+
+            async def finish_one(result: dict[str, Any]) -> dict[str, Any]:
+                if result.get("request_id") is None:
+                    return result
+                async with sem:
+                    return await self._finish_one(
+                        http,
+                        result,
+                        revision_id=revision_id,
+                        execution_id=execution_id,
+                    )
+
+            results = await asyncio.gather(*(finish_one(result) for result in submitted))
+            execution_error = None
+            try:
+                exact_execution = await self.client.wait_for_execution(
+                    http,
+                    self.experiment_id,
+                    execution_id,
+                    timeout_seconds=self.run_timeout_seconds,
+                    poll_interval_seconds=self.poll_interval_seconds,
+                )
+            except RequestTimeout as exc:
+                execution_error = str(exc)
+                exact_execution = await self.client.get_execution(
+                    http, self.experiment_id, execution_id
+                )
+            reports = await self.client.list_execution_reports(
+                http, self.experiment_id, execution_id
+            )
+            report_refs = [
+                {
+                    "reportId": report.get("id") or report.get("_id"),
+                    "status": report.get("status"),
+                    "reportType": report.get("reportType"),
+                }
+                for report in reports
+            ]
+            for result in results:
+                result["output"].update(
+                    {
+                        "experimentId": self.experiment_id,
+                        "experimentRevisionId": revision_id,
+                        "experimentExecutionId": execution_id,
+                        "experimentReadiness": exact_execution.get("readiness"),
+                        "reports": report_refs,
+                        **(
+                            {"experimentExecutionError": execution_error}
+                            if execution_error
+                            else {}
+                        ),
+                    }
+                )
+                result["trajectory"].update(result["output"])
+            return results
+
+    async def _submit_one(
         self,
         http: httpx.AsyncClient,
         example: Mapping[str, Any],
@@ -115,10 +195,35 @@ class ScopeAdapter(GEPAAdapter):
                 criteria=criteria,
                 agents_md=agents_md or None,
                 model=self.model,
-                experiment_id=self.experiment_id,
                 max_iterations=self.max_iterations,
             )
             request_id = created.get("_id") or created.get("id")
+            if not isinstance(request_id, str):
+                raise SystemicScopeError("Request submission omitted request identity")
+            return {
+                "request_id": request_id,
+                "task": task,
+                "criteria": criteria,
+            }
+        except SystemicScopeError as exc:
+            return self._failure(task, criteria, str(exc), "systemic")
+        except (RequestFailedError, RequestTimeout) as exc:
+            return self._failure(task, criteria, str(exc), "per_example")
+        except Exception as exc:  # never raise for a single example
+            return self._failure(task, criteria, repr(exc), "per_example")
+
+    async def _finish_one(
+        self,
+        http: httpx.AsyncClient,
+        submitted: Mapping[str, Any],
+        *,
+        revision_id: str,
+        execution_id: str,
+    ) -> dict[str, Any]:
+        task = str(submitted["task"])
+        criteria = list(submitted["criteria"])
+        request_id = str(submitted["request_id"])
+        try:
             doc = await self.client.wait_for_completion(
                 http,
                 request_id,
@@ -127,8 +232,22 @@ class ScopeAdapter(GEPAAdapter):
             )
             run = doc.get("run") or {}
             score = compute_run_score(run, criteria, self.score_strategy)
-            trajectory = self._build_trajectory(task, criteria, request_id, run, score)
-            return {"score": score, "output": {"requestId": request_id, "score": score}, "trajectory": trajectory, "error_kind": None}
+            trajectory = self._build_trajectory(
+                task, criteria, request_id, run, score
+            )
+            identity = {
+                "requestId": request_id,
+                "score": score,
+                "experimentId": self.experiment_id,
+                "experimentRevisionId": revision_id,
+                "experimentExecutionId": execution_id,
+            }
+            return {
+                "score": score,
+                "output": identity,
+                "trajectory": {**trajectory, **identity},
+                "error_kind": None,
+            }
         except SystemicScopeError as exc:
             return self._failure(task, criteria, str(exc), "systemic")
         except (RequestFailedError, RequestTimeout) as exc:
@@ -175,7 +294,13 @@ class ScopeAdapter(GEPAAdapter):
             "score": 0.0,
             "error": message,
         }
-        return {"score": 0.0, "output": {"error": message}, "trajectory": trajectory, "error_kind": kind}
+        return {
+            "request_id": None,
+            "score": 0.0,
+            "output": {"error": message},
+            "trajectory": trajectory,
+            "error_kind": kind,
+        }
 
     # -- GEPAAdapter.make_reflective_dataset ------------------------------
 

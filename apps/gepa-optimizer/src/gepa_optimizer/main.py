@@ -16,12 +16,13 @@ So keep ``valset`` tiny and ``GEPA_MAX_METRIC_CALLS`` small.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
-import uuid
 from datetime import datetime
 from pathlib import Path
 
+import httpx
 from dotenv import load_dotenv
 
 import gepa
@@ -58,8 +59,12 @@ def main() -> None:
     max_metric_calls = int(_env("GEPA_MAX_METRIC_CALLS", "12"))
     reflection_minibatch_size = int(_env("GEPA_REFLECTION_MINIBATCH_SIZE", "2"))
     reflection_lm = _env("GEPA_REFLECTION_LM", "azure/gpt-5.5")
+    configured_experiment_id = _env("SCOPE_EXPERIMENT_ID", "")
+    experiment_name = _env(
+        "SCOPE_EXPERIMENT_NAME",
+        f"GEPA AGENTS.md optimization {datetime.now().isoformat(timespec='seconds')}",
+    )
 
-    experiment_id = f"gepa-{uuid.uuid4()}"
     run_dir = Path(f"runs/{datetime.now().strftime('%Y%m%d_%H%M%S')}")
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -71,10 +76,40 @@ def main() -> None:
     all_criteria = collect_criteria([trainset, valset])
     preflight_criteria(client, sorted(all_criteria))
 
+    async def prepare_experiment() -> tuple[str, str]:
+        async with httpx.AsyncClient(timeout=client.timeout_seconds) as http:
+            if configured_experiment_id:
+                payload = await client.get_experiment(
+                    http, configured_experiment_id
+                )
+                experiment = payload
+            else:
+                payload = await client.create_experiment(
+                    http,
+                    name=experiment_name,
+                    description=(
+                        "Canonical Scope Experiment containing every request "
+                        "evaluated by one GEPA optimization."
+                    ),
+                )
+                experiment = payload.get("experiment") or {}
+            experiment_id = experiment.get("experimentId")
+            revision_id = (experiment.get("revision") or {}).get(
+                "experimentRevisionId"
+            )
+            if not isinstance(experiment_id, str) or not isinstance(revision_id, str):
+                raise ValueError(
+                    "Experiment response omitted experiment/revision identity"
+                )
+            return experiment_id, revision_id
+
+    experiment_id, experiment_revision_id = asyncio.run(prepare_experiment())
+
     adapter = ScopeAdapter(
         client,
         model=model,
         experiment_id=experiment_id,
+        experiment_revision_id=experiment_revision_id,
         max_iterations=max_iterations,
         max_concurrency=max_concurrency,
         run_timeout_seconds=run_timeout,
@@ -82,7 +117,10 @@ def main() -> None:
         score_strategy=score_strategy,
     )
 
-    print(f"Experiment id: {experiment_id}")
+    print(
+        f"Experiment id: {experiment_id} "
+        f"(starting revision {experiment_revision_id})"
+    )
     print(f"Worker={worker} model={model} strategy={score_strategy}")
 
     result = gepa.optimize(
@@ -103,6 +141,7 @@ def main() -> None:
     parents = getattr(result, "parents", None) or []
     payload["lineage"] = reconstruct_lineage(candidates, parents)
     payload["experimentId"] = experiment_id
+    payload["experimentRevisionId"] = adapter.experiment_revision_id
 
     (run_dir / "results.json").write_text(json.dumps(payload, indent=2, default=str))
 

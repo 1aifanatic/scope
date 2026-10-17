@@ -1387,6 +1387,15 @@ Project that owns the criteria and candidate runs. Scope's catalog and run
 creation APIs are project-scoped, so the optimizer fails fast when this is not
 configured.
 
+### SCOPE_EXPERIMENT_ID / SCOPE_EXPERIMENT_NAME
+**Defaults:** empty / `GEPA AGENTS.md optimization <timestamp>`
+
+With no ID, the optimizer creates one empty canonical Experiment and uses its
+membership revisions for every evaluated candidate batch. Set
+`SCOPE_EXPERIMENT_ID` to target an existing Experiment; the optimizer reads its
+current revision before adding requests. `SCOPE_EXPERIMENT_NAME` controls the
+metadata name only when creating a new Experiment.
+
 ### SCOPE_WORKER / SCOPE_MODEL
 **Defaults:** `coder-acp-copilot` / `claude-haiku-4.5`
 

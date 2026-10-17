@@ -10,15 +10,25 @@ but, instead of optimizing a system prompt evaluated by a single LLM completion,
 it optimizes an `AGENTS.md` evaluated by a multi-turn Scope agent run and judged
 against a criteria DAG.
 
-```text
-GEPA reflection loop
-  └─ ScopeAdapter.evaluate(candidate={"AGENTS.md": ...})
-        POST /api/v1/requests   (task + criteria + agentsMd + experimentId)
-        poll GET /api/v1/requests/:id until run.status == "done"
-        score = fraction of requested criteria passed, aggregated over turns
-  └─ ScopeAdapter.make_reflective_dataset(...)
-        per-turn judge feedback + criteria pass/fail  → reflection LM rewrites AGENTS.md
+```mermaid
+flowchart LR
+    Candidate[GEPA AGENTS.md candidate] --> Submit[Submit standalone Scope requests]
+    Submit --> Membership[Publish one Experiment membership revision]
+    Membership --> Runs[Poll exact request runs]
+    Runs --> Score[Derive criteria scores]
+    Membership --> Execution[Poll exact Experiment execution]
+    Execution --> Reports[Read exact execution reports]
+    Score --> Reflection[Build reflective evidence]
+    Reports --> Reflection
+    Reflection --> Candidate
 ```
+
+One optimization owns one canonical Scope Experiment. By default the entry
+point creates an empty Experiment, then every `evaluate()` call adds its newly
+submitted requests through `POST /experiments/:id/requests`. That publishes a
+new immutable revision and execution, whose exact identities and reports are
+stored in the GEPA outputs and reflective trajectories. Set
+`SCOPE_EXPERIMENT_ID` to target an existing Experiment instead.
 
 ## Polyglot exception
 
@@ -77,6 +87,9 @@ uv run python -m gepa_optimizer.main
 
 Results (best candidate, Pareto front, and a best-effort lineage DAG
 reconstructed from GEPA's parent indices) are written to `runs/<timestamp>/results.json`.
+The artifact also records the canonical `experimentId` and final
+`experimentRevisionId`. Every evaluated request remains visible in the normal
+Scope Runs, Experiment Detail, CLI, and API surfaces.
 
 ## Tests
 
@@ -98,6 +111,6 @@ harmless — extras just queue — but yields no speedup.
 
 Parent→child lineage is reconstructed **after** optimization from GEPA's public
 `result.parents` / `result.candidates` and saved into `results.json`
-(`root` / `mutation` / `merge`). The Scope `requests.agentsMdParentIds` field
-remains available for callers that know parentage at submit time; this optimizer
-groups all of an experiment's runs via `experimentId` instead.
+(`root` / `mutation` / `merge`). Candidate evaluation requests are grouped by
+canonical Experiment membership revisions rather than a caller-provided
+correlation field.
