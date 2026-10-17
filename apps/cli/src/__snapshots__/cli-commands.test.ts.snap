@@ -2,6 +2,74 @@
 
 exports[`CLI command registration > full command tree matches snapshot 1`] = `
 {
+  "access": {
+    "subcommands": {
+      "disable-user": {
+        "options": [
+          "--operation-id",
+          "--revision",
+          "--url",
+        ],
+      },
+      "enroll": {
+        "options": [
+          "--url",
+        ],
+      },
+      "find-user": {
+        "options": [
+          "--url",
+        ],
+      },
+      "me": {
+        "options": [
+          "--url",
+        ],
+      },
+      "members": {
+        "options": [
+          "--url",
+        ],
+      },
+      "operation": {
+        "options": [
+          "--url",
+        ],
+      },
+      "projects": {
+        "options": [
+          "--url",
+        ],
+      },
+      "reconcile": {
+        "options": [
+          "--url",
+        ],
+      },
+      "revoke-member": {
+        "options": [
+          "--operation-id",
+          "--revision",
+          "--url",
+        ],
+      },
+      "search-users": {
+        "options": [
+          "--cursor",
+          "--limit",
+          "--url",
+        ],
+      },
+      "set-member": {
+        "options": [
+          "--operation-id",
+          "--revision",
+          "--role",
+          "--url",
+        ],
+      },
+    },
+  },
   "agent": {
     "subcommands": {
       "delete": {
@@ -449,6 +517,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         "options": [
           "--description",
           "--name",
+          "--operation-id",
           "--output",
           "--url",
           "--use",
@@ -456,6 +525,8 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       },
       "delete": {
         "options": [
+          "--operation-id",
+          "--revision",
           "--url",
         ],
       },
@@ -468,7 +539,9 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       },
       "restore": {
         "options": [
+          "--operation-id",
           "--output",
+          "--revision",
           "--url",
         ],
       },
@@ -482,7 +555,9 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         "options": [
           "--description",
           "--name",
+          "--operation-id",
           "--output",
+          "--revision",
           "--url",
         ],
       },

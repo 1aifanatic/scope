@@ -9,12 +9,14 @@ import {
   type UserProfile,
   type VerifiedIdentity,
 } from "shared";
+import type { AdminOperations } from "./admin-operations.js";
 
 export interface UserStoreOptions {
   /** Identity keys (`${idp}:${tenant}/${subject}`) to promote to admin. */
   bootstrapAdmins?: Set<string>;
   /** Tenant allowlist gating bootstrap promotion (empty = no promotion). */
   bootstrapTenants?: Set<string>;
+  operations?: Pick<AdminOperations, "execute">;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -55,7 +57,7 @@ export class UserStore {
 
   constructor(
     private readonly collection: Collection<UserDocument>,
-    options: UserStoreOptions = {},
+    private readonly options: UserStoreOptions = {},
   ) {
     this.bootstrapAdmins = options.bootstrapAdmins ?? new Set();
     this.bootstrapTenants = options.bootstrapTenants ?? new Set();
@@ -75,6 +77,7 @@ export class UserStore {
     // Only refresh fields the profile actually provided, so a token missing a
     // claim never clobbers a previously-known value.
     if (profile.displayName !== undefined) set.displayName = profile.displayName;
+    if (profile.alias !== undefined || profile.email !== undefined) set.alias = profile.alias ?? profile.email;
     if (profile.emailVerified === true) {
       if (profile.email !== undefined) set.email = profile.email;
       set.emailVerified = true;
@@ -121,18 +124,24 @@ export class UserStore {
     if (!result) {
       throw new Error("Failed to upsert user during login");
     }
-    let user = result as UserDocument;
+    const user = result as UserDocument;
 
-    if (this.shouldBootstrapAdmin(identity) && user.role !== "admin") {
-      const promoted = await this.collection.findOneAndUpdate(
-        { _id: user._id } as unknown as UpdateFilter<UserDocument>,
-        { $set: { role: "admin", updatedAt: new Date() } } as unknown as
-          UpdateFilter<UserDocument>,
-        { returnDocument: "after" },
-      );
-      if (promoted) {
-        user = promoted as UserDocument;
+    if (this.shouldBootstrapAdmin(identity) && user.role !== "admin" && !user.disabledAt) {
+      if (!this.options.operations) {
+        throw new Error("Bootstrap promotion requires durable administrative operations");
       }
+      const securityUser = user as UserDocument & { revision?: number };
+      const result = await this.options.operations.execute({
+        _id: `bootstrap:${user._id}:${securityUser.revision ?? 0}`,
+        actor: `bootstrap:${bootstrapAdminKey(identity.idp, identity.idpTenant, identity.idpSubject)}`,
+        reason: "Verified configured bootstrap identity",
+        collection: "users", targetId: user._id, expectedRevision: securityUser.revision ?? 0,
+        change: { role: "admin" }, unset: [], condition: { role: "user", disabledAt: { $exists: false } },
+      });
+      if (result.state === "pending") throw new Error(`Bootstrap operation pending: ${result.operationId}`);
+      const promoted = await this.findById(user._id);
+      if (!promoted) throw new Error("Bootstrap user disappeared");
+      return promoted;
     }
 
     return user;

@@ -5,6 +5,7 @@ import { describe, it, expect, vi } from "vitest";
 import { MongoNetworkError, MongoServerError, type Collection } from "mongodb";
 import type { UserDocument, UserProfile, VerifiedIdentity } from "shared";
 import { UserStore } from "./user-store.js";
+import type { AdminOperations } from "./admin-operations.js";
 
 const IDENTITY: VerifiedIdentity = {
   idp: "entra",
@@ -41,10 +42,18 @@ function fakeCollection(queue: (UserDocument | null)[]) {
   const findOneAndUpdate = vi.fn(async (
     _filter: unknown, _update: unknown, _options: unknown,
   ) => queue.shift() ?? null);
-  const findOne = vi.fn<(filter: unknown) => Promise<UserDocument | null>>(async () => null);
+  const findOne = vi.fn<(filter: unknown) => Promise<UserDocument | null>>(async () => queue.shift() ?? null);
   const collection = { findOneAndUpdate, findOne } as unknown as
     Collection<UserDocument>;
   return { collection, findOneAndUpdate, findOne };
+}
+
+function bootstrapOperations() {
+  return {
+    execute: vi.fn<AdminOperations["execute"]>().mockImplementation(async intent => ({
+      operationId: intent._id, state: "completed", revision: intent.expectedRevision + 1,
+    })),
+  };
 }
 
 describe("UserStore.upsertOnLogin", () => {
@@ -91,6 +100,7 @@ describe("UserStore.upsertOnLogin", () => {
     expect(update.$set.displayName).toBe("Only Name");
     expect("email" in update.$set).toBe(false);
     expect("emailVerified" in update.$set).toBe(false);
+    expect("alias" in update.$set).toBe(false);
   });
 
   it("does not persist an email that is not verified", async () => {
@@ -99,6 +109,7 @@ describe("UserStore.upsertOnLogin", () => {
 
     await store.upsertOnLogin(IDENTITY, {
       email: "unverified@example.com",
+      alias: "login-alias@example.com",
       emailVerified: false,
     });
 
@@ -107,6 +118,8 @@ describe("UserStore.upsertOnLogin", () => {
     };
     expect("email" in update.$set).toBe(false);
     expect(update.$set.emailVerified).toBe(false);
+    expect(update.$set.alias).toBe("login-alias@example.com");
+    expect(update.$set.role).toBeUndefined();
   });
 
   it("promotes a bootstrap admin (promote-only)", async () => {
@@ -117,16 +130,14 @@ describe("UserStore.upsertOnLogin", () => {
     const store = new UserStore(collection, {
       bootstrapAdmins: new Set(["entra:tenant-1/subject-1"]),
       bootstrapTenants: new Set(["tenant-1"]),
+      operations: bootstrapOperations(),
     });
 
     const user = await store.upsertOnLogin(IDENTITY, PROFILE);
 
     expect(user.role).toBe("admin");
-    expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
-    const promote = findOneAndUpdate.mock.calls[1][1] as {
-      $set: Record<string, unknown>;
-    };
-    expect(promote.$set.role).toBe("admin");
+    expect(findOneAndUpdate).toHaveBeenCalledOnce();
+    expect(findOneAndUpdate.mock.calls[0][1]).not.toHaveProperty("$set.role");
   });
 
   it("does not re-promote an existing admin", async () => {
@@ -167,12 +178,13 @@ describe("UserStore.upsertOnLogin", () => {
     const store = new UserStore(collection, {
       bootstrapAdmins: new Set(["entra:tenant-1/subject-1"]),
       bootstrapTenants: new Set(["tenant-1"]),
+      operations: bootstrapOperations(),
     });
 
     const user = await store.upsertOnLogin(IDENTITY, PROFILE);
 
     expect(user.role).toBe("admin");
-    expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
+    expect(findOneAndUpdate).toHaveBeenCalledOnce();
   });
 
   it("does not promote when the tenant allowlist is empty", async () => {
@@ -197,6 +209,7 @@ describe("UserStore.upsertOnLogin", () => {
     const store = new UserStore(collection, {
       bootstrapAdmins: new Set(["entra:tenant-1/subject-1"]),
       bootstrapTenants: new Set(["tenant-1"]),
+      operations: bootstrapOperations(),
     });
 
     const user = await store.upsertOnLogin(
@@ -205,10 +218,33 @@ describe("UserStore.upsertOnLogin", () => {
     );
 
     expect(user.role).toBe("admin");
-    expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
+    expect(findOneAndUpdate).toHaveBeenCalledOnce();
     const update = findOneAndUpdate.mock.calls[0][1];
     expect(update).not.toHaveProperty("$set.email");
     expect(update).not.toHaveProperty("$set.emailVerified", true);
+  });
+
+  it("never promotes without a durable administrative intent service", async () => {
+    const { collection, findOneAndUpdate } = fakeCollection([baseDoc()]);
+    const store = new UserStore(collection, {
+      bootstrapAdmins: new Set(["entra:tenant-1/subject-1"]),
+      bootstrapTenants: new Set(["tenant-1"]),
+    });
+    await expect(store.upsertOnLogin(IDENTITY, PROFILE)).rejects.toThrow("durable administrative operations");
+    expect(findOneAndUpdate).toHaveBeenCalledOnce();
+    expect(findOneAndUpdate.mock.calls[0][1]).not.toHaveProperty("$set.role");
+  });
+
+  it("does not bootstrap a disabled identity or remove its disable marker", async () => {
+    const operations = bootstrapOperations();
+    const { collection } = fakeCollection([baseDoc({ disabledAt: new Date() })]);
+    const store = new UserStore(collection, {
+      bootstrapAdmins: new Set(["entra:tenant-1/subject-1"]),
+      bootstrapTenants: new Set(["tenant-1"]),
+      operations,
+    });
+    expect(await store.upsertOnLogin(IDENTITY, PROFILE)).toMatchObject({ role: "user", disabledAt: expect.any(Date) });
+    expect(operations.execute).not.toHaveBeenCalled();
   });
 
   it.each([

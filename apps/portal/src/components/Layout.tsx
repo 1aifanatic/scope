@@ -50,6 +50,7 @@ import { UserMenu } from "./UserMenu";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { useFeatureFlags } from "@/contexts/FeatureFlagContext";
 import { useProjectContext } from "@/contexts/ProjectContext";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface NavItem {
   to: string;
@@ -249,7 +250,10 @@ function SidebarIconLink({
 export function Layout() {
   const location = useLocation();
   const { isFeatureEnabled } = useFeatureFlags();
-  const { hasProject } = useProjectContext();
+  const { hasProject, selectedProjectId } = useProjectContext();
+  const { user, authEnabled } = useAuth();
+  const capabilities = user?.capabilities;
+  const canWrite = !authEnabled || capabilities?.memberships.some(m => m.projectId === selectedProjectId && m.permissions.includes("content:write"));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState<boolean>(() => {
     try {
@@ -268,7 +272,9 @@ export function Layout() {
   }, [sidebarExpanded]);
 
   const filterByFeature = (items: NavItem[]) =>
-    items.filter((item) => !item.featureKey || isFeatureEnabled(item.featureKey));
+    items.filter((item) => (!item.featureKey || isFeatureEnabled(item.featureKey)) &&
+      (item.to !== "/secrets" || !authEnabled || capabilities?.platformAdmin) &&
+      (!authEnabled || !["/agents", "/models"].includes(item.to) || Boolean(capabilities?.memberships.length)));
 
   const visibleGroups = useMemo(
     () =>
@@ -279,7 +285,7 @@ export function Layout() {
         // separator/label is left behind.
         .filter((g) => (hasProject || !g.scoped) && g.items.length > 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isFeatureEnabled, hasProject],
+    [isFeatureEnabled, hasProject, capabilities, authEnabled],
   );
   // MDP points at /criteria/mdp (project-scoped), so hide the Dev section until
   // a project is selected.
@@ -374,7 +380,7 @@ export function Layout() {
               {/* New Run — emphasized primary CTA. Scoped (submitting a run needs
                   a project), so it's hidden along with its divider until one is
                   selected; Projects then becomes the first pinned item. */}
-              {hasProject && (
+              {hasProject && canWrite && (
                 <>
                   <SidebarIconLink
                     to="/runs/new"

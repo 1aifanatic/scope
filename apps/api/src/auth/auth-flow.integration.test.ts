@@ -7,12 +7,15 @@ import { MongoClient, type Collection } from "mongodb";
 import { Redis } from "ioredis";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { EntraIdAuthProvider, type UserDocument } from "shared";
+import { EntraIdAuthProvider, ProjectStore, type ProjectDocument, type UserDocument } from "shared";
+import type { AccessUserSearchResult, ProjectMembershipSummary } from "shared/rbac";
 import { app, _injectTestDependencies } from "../index.js";
 import { createAllMockDependencies } from "../test-helpers.js";
 import { UserStore } from "./user-store.js";
 import { RedisUserAccessCache } from "./user-access-cache.js";
 import { UserAccessResolver } from "./user-access-resolver.js";
+import { AdminOperations } from "./admin-operations.js";
+import { operatorAccess } from "./operator-access.js";
 
 vi.mock("db-migrations/check-migrations", () => ({
   checkMigrations: vi.fn().mockResolvedValue({ ready: true, applied: [], pending: [] }),
@@ -75,10 +78,13 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
     store = new UserStore(users, {
       bootstrapAdmins: new Set([`entra:${tenant}/${subject}`]),
       bootstrapTenants: new Set([tenant]),
+      operations: new AdminOperations(mongo.db(database)),
     });
     resolver = new UserAccessResolver({ userStore: store, cache, enricher: null });
     _injectTestDependencies(createAllMockDependencies());
     _injectTestDependencies({
+      db: mongo.db(database),
+      usersCollection: users,
       authProvider: new EntraIdAuthProvider({
         authority: "https://login.microsoftonline.com/common",
         audience: "scope-api",
@@ -186,5 +192,81 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
     expect(missing.body.code).toBe("user_not_enrolled");
     expect((await users.findOne({ idpSubject: otherSubject }))?.lastLoginAt).toEqual(before?.lastLoginAt);
     expect(await users.countDocuments({ idpSubject: otherSubject })).toBe(1);
+  });
+
+  it("restricts paginated literal user search and named membership management to platform admins", async () => {
+    const db = mongo.db(database);
+    _injectTestDependencies({ projectStore: new ProjectStore(db.collection<ProjectDocument>("projects")) });
+    const adminSubject = randomUUID(), ordinarySubject = randomUUID();
+    const adminBearer = `Bearer ${token(adminSubject)}`, ordinaryBearer = `Bearer ${token(ordinarySubject)}`;
+    const enrolled = await request(app).post("/api/v1/users/me").set("Authorization", adminBearer);
+    expect(enrolled.status).toBe(200);
+    const adminId: string = enrolled.body.id;
+    await operatorAccess(db, {
+      database, confirmDatabase: database, idp: "entra", tenant, subject: adminSubject,
+      userId: adminId, revision: 0, role: "admin", disabled: "false", operator: "native-access-test",
+      reason: "Isolated administrative directory fixture", operationId: randomUUID(), bootstrapReviewed: true,
+    });
+    const ordinary = await request(app).post("/api/v1/users/me").set("Authorization", ordinaryBearer);
+    expect(ordinary.status).toBe(200);
+    const ordinaryId: string = ordinary.body.id;
+    const prefix = `Directory fixture ${randomUUID()}`;
+    const fixtures = await Promise.all(["Alice", "Bob.*[", "Charlie"].map(name => store.upsertOnLogin({
+      idp: "entra", idpTenant: tenant, idpSubject: randomUUID(),
+    }, { displayName: `${prefix} ${name}`, email: `${name}@example.test`, emailVerified: true })));
+
+    expect((await request(app).get("/api/v1/admin/users/search")).status).toBe(401);
+    expect((await request(app).get("/api/v1/admin/users/search").set("Authorization", ordinaryBearer)).status).toBe(403);
+    const first = await request(app).get("/api/v1/admin/users/search").query({ q: prefix.toUpperCase(), limit: 2 }).set("Authorization", adminBearer);
+    expect(first.status).toBe(200);
+    const firstPage: AccessUserSearchResult = first.body;
+    expect(firstPage.items).toHaveLength(2);
+    expect(firstPage.nextCursor).toBeTruthy();
+    const second = await request(app).get("/api/v1/admin/users/search")
+      .query({ q: prefix, limit: 2, cursor: firstPage.nextCursor }).set("Authorization", adminBearer);
+    expect(second.status).toBe(200);
+    const secondPage: AccessUserSearchResult = second.body;
+    expect(secondPage.items).toHaveLength(1);
+    expect(secondPage.nextCursor).toBeUndefined();
+    expect(new Set([...firstPage.items, ...secondPage.items].map(user => user.id))).toEqual(new Set(fixtures.map(user => user._id)));
+    for (const user of firstPage.items) {
+      expect(Object.keys(user).sort()).toEqual(["alias", "disabled", "displayName", "email", "id", "revision", "role"]);
+    }
+    const literal = await request(app).get("/api/v1/admin/users/search").query({ q: ".*[" }).set("Authorization", adminBearer);
+    expect(literal.status).toBe(200);
+    const matches: AccessUserSearchResult = literal.body;
+    expect(matches.items.map(user => user.id)).toEqual([fixtures[1]._id]);
+    for (const query of [{ limit: 0 }, { limit: 51 }, { q: "x".repeat(101) }, { cursor: "" }]) {
+      expect((await request(app).get("/api/v1/admin/users/search").query(query).set("Authorization", adminBearer)).status).toBe(400);
+    }
+    const project = await request(app).post("/api/v1/projects").set("Authorization", adminBearer).send({ name: "Directory access fixture" });
+    expect(project.status).toBe(201);
+    const projectId: string = project.body.id;
+    const grant = await request(app).put(`/api/v1/projects/${projectId}/members/${ordinaryId}`)
+      .set("Authorization", adminBearer).send({ role: "admin", revision: 0 });
+    expect(grant.status).toBe(200);
+    expect((await request(app).get("/api/v1/admin/users/search").set("Authorization", ordinaryBearer)).status).toBe(403);
+    expect((await request(app).get(`/api/v1/projects/${projectId}/members`).set("Authorization", ordinaryBearer)).status).toBe(403);
+    const roster = await request(app).get(`/api/v1/projects/${projectId}/members`).set("Authorization", adminBearer);
+    expect(roster.status).toBe(200);
+    const members: ProjectMembershipSummary[] = roster.body;
+    expect(members.find(member => member.userId === ordinaryId)).toMatchObject({
+      role: "admin", revision: 1, pending: false, user: { id: ordinaryId, displayName: "Integration User", disabled: false },
+    });
+    const disabled = fixtures[2];
+    await new AdminOperations(db).execute({
+      _id: randomUUID(), actor: adminId, reason: "Disabled directory fixture",
+      collection: "users", targetId: disabled._id, expectedRevision: 0,
+      change: { disabledAt: "$operationTime" }, unset: [], condition: { role: "user" },
+    });
+    expect((await request(app).put(`/api/v1/projects/${projectId}/members/${disabled._id}`)
+      .set("Authorization", adminBearer).send({ role: "reader", revision: 0 })).status).toBe(409);
+    const disabledSearch = await request(app).get("/api/v1/admin/users/search")
+      .query({ q: disabled._id }).set("Authorization", adminBearer);
+    const disabledResult: AccessUserSearchResult = disabledSearch.body;
+    expect(disabledResult.items[0]).toMatchObject({ id: disabled._id, disabled: true });
+    const exact = await request(app).get("/api/v1/admin/users").query({ userId: ordinaryId }).set("Authorization", adminBearer);
+    expect(exact.status).toBe(200);
+    expect(exact.body[0].id).toBe(ordinaryId);
   });
 });

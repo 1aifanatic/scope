@@ -1120,7 +1120,8 @@ export function RunDetail() {
               <Button
                 size="sm"
                 onClick={() => generateReport.mutate()}
-                disabled={generateReport.isPending}
+                disabled
+                title="New report generation is unavailable during the RBAC MVP"
                 className="gap-1.5"
               >
                 <Plus className="h-4 w-4" />

@@ -42,7 +42,13 @@ function renderLayout(
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <AuthContext.Provider value={signedInAuth}>
+      <AuthContext.Provider value={{
+        ...signedInAuth,
+        user: signedInAuth.user && { ...signedInAuth.user, capabilities: {
+          ...signedInAuth.user.capabilities, platformAdmin: true,
+          memberships: signedInAuth.user.capabilities.memberships.map(membership => ({ ...membership, projectId: "proj-1" })),
+        } },
+      }}>
         <ThemeProvider defaultTheme="light">
           <ProjectProvider>
             <MemoryRouter initialEntries={[path]}>

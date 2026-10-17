@@ -17,8 +17,19 @@ function baseEnv(): NodeJS.ProcessEnv {
 }
 
 describe("loadAuthConfigFromEnv", () => {
-  it("returns null when AUTH_* is not configured", () => {
-    expect(loadAuthConfigFromEnv({})).toBeNull();
+  it("fails closed when auth is enabled by default without IdP configuration", () => {
+    expect(() => loadAuthConfigFromEnv({})).toThrow(/AUTH_PROVIDER, AUTH_AUTHORITY, AUTH_API_CLIENT_ID/);
+  });
+
+  it.each(["false", "0", "no", "off", " FALSE "])("explicitly disables auth and ignores unused IdP settings with %j", value => {
+    expect(loadAuthConfigFromEnv({ SCOPE_AUTH_ENABLED: value })).toBeNull();
+    expect(loadAuthConfigFromEnv({
+      SCOPE_AUTH_ENABLED: value, AUTH_PROVIDER: "unused", AUTH_USER_CACHE_TTL_SECONDS: "unused",
+    })).toBeNull();
+  });
+
+  it.each(["", "typo", "true", "1", "on", "yes"])("does not let %j bypass missing IdP configuration", value => {
+    expect(() => loadAuthConfigFromEnv({ SCOPE_AUTH_ENABLED: value })).toThrow(/Incomplete authentication configuration/);
   });
 
   it("throws when any required variable is missing", () => {
@@ -68,11 +79,11 @@ describe("loadAuthConfigFromEnv", () => {
     })).toThrow(/AUTH_USER_CACHE_TTL_SECONDS must be a positive safe integer/);
   });
 
-  it("does not enable IdP configuration when only a valid cache TTL is set", () => {
-    expect(loadAuthConfigFromEnv({ AUTH_USER_CACHE_TTL_SECONDS: "60" })).toBeNull();
+  it("requires explicit opt-out even when only a valid cache TTL is set", () => {
+    expect(() => loadAuthConfigFromEnv({ AUTH_USER_CACHE_TTL_SECONDS: "60" })).toThrow(/Incomplete authentication configuration/);
   });
 
-  it("validates a supplied cache TTL even with authentication disabled", () => {
+  it("validates a supplied cache TTL when authentication defaults to enabled", () => {
     expect(() => loadAuthConfigFromEnv({ AUTH_USER_CACHE_TTL_SECONDS: "0" }))
       .toThrow(/AUTH_USER_CACHE_TTL_SECONDS/);
   });

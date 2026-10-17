@@ -3,6 +3,7 @@
 
 import type { Request, Response, NextFunction } from "express";
 import type { RouteContext } from "../route-context.js";
+import { Authorization } from "../auth/authorization.js";
 
 // =============================================================================
 // Token Manager proxy (admin CRUD - excludes /acquire which is worker-only)
@@ -18,6 +19,7 @@ export function registerSecretsRoutes(ctx: RouteContext): void {
 
   const proxyToTokenManager = async (req: Request, res: Response, next: NextFunction) => {
     try {
+      await new Authorization(ctx.db, ctx.authEnabled).guard(req, req.method.toLowerCase(), req.path, "platform");
       const targetUrl = `${TOKEN_MANAGER_URL}${req.originalUrl}`;
       const headers: Record<string, string> = { "content-type": "application/json" };
       const fetchOpts: RequestInit = {

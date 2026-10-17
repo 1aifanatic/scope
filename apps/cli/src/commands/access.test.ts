@@ -1,0 +1,125 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+import { Command } from "commander";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { registerAccessCommands } from "./access.js";
+import { resetApiClient } from "../utils/api-client.js";
+
+describe("access CLI operations", () => {
+  const fetchMock = vi.fn<typeof fetch>();
+  const output = vi.spyOn(console, "log").mockImplementation(() => {});
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  let originalExitCode: typeof process.exitCode;
+  let payload: unknown;
+
+  afterAll(() => { output.mockRestore(); errors.mockRestore(); });
+  beforeEach(() => {
+    originalExitCode = process.exitCode;
+    process.exitCode = undefined;
+    resetApiClient();
+    vi.stubEnv("SCOPE_TOKEN", "fixture-raw-idp-bearer");
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockReset();
+    payload = undefined;
+    output.mockClear();
+    errors.mockClear();
+  });
+  afterEach(() => {
+    resetApiClient();
+    process.exitCode = originalExitCode;
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+  async function run(...args: string[]) {
+    const program = new Command().exitOverride();
+    registerAccessCommands(program);
+    await program.parseAsync(["access", ...args, "--url", "http://localhost:3101"], { from: "user" });
+  }
+  function respond(status: number, body: unknown) {
+    fetchMock.mockImplementationOnce(async input => {
+      if (!(input instanceof Request)) throw new Error("Expected Request");
+      payload = input.body ? await input.clone().json() : undefined;
+      return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+    });
+  }
+  function request(): Request {
+    const input = fetchMock.mock.calls[0][0];
+    if (!(input instanceof Request)) throw new Error("CLI transport must send a Request");
+    return input;
+  }
+
+  it("forwards the unchanged raw bearer and explicit idempotency key with the expected revision", async () => {
+    respond(200, { operationId: "reviewed-assignment", state: "completed", revision: 5 });
+    await run("set-member", "project", "user", "--role", "reader", "--revision", "4", "--operation-id", "reviewed-assignment");
+    expect(request().headers.get("Authorization")).toBe("Bearer fixture-raw-idp-bearer");
+    expect(request().headers.get("Idempotency-Key")).toBe("reviewed-assignment");
+    expect(request().method).toBe("PUT");
+    expect(payload).toEqual({ role: "reader", revision: 4 });
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining("reviewed-assignment"));
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("prints a generated operation key before sending the mutation", async () => {
+    fetchMock.mockImplementationOnce(async input => {
+      if (!(input instanceof Request)) throw new Error("Expected Request");
+      const key = input.headers.get("Idempotency-Key");
+      if (!key) throw new Error("Missing idempotency key");
+      expect(key).toMatch(/^[0-9a-f-]{36}$/);
+      expect(errors).toHaveBeenCalledWith(expect.stringContaining(key));
+      return Response.json({ operationId: key, state: "completed", revision: 1 });
+    });
+    await run("disable-user", "user", "--revision", "0");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("reports an uncertain 202 without claiming completion or retrying it", async () => {
+    respond(202, { operationId: "uncertain", state: "pending", revision: 1 });
+    await run("revoke-member", "project", "user", "--revision", "0", "--operation-id", "uncertain");
+    expect(process.exitCode).toBe(2);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining("No completion claimed"));
+    expect(output).toHaveBeenCalledWith(expect.stringContaining('"state": "pending"'));
+  });
+
+  it("surfaces conflicts without retrying or logging successful output", async () => {
+    respond(409, { error: "idempotency_conflict" });
+    await run("set-member", "project", "user", "--role", "admin", "--revision", "0", "--operation-id", "reused");
+    expect(process.exitCode).toBe(1);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining("HTTP 409"));
+    expect(output).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid revisions before sending any request", async () => {
+    await run("disable-user", "user", "--revision", "-1");
+    expect(process.exitCode).toBe(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reads own account using GET and never implicitly enrolls", async () => {
+    respond(200, { id: "fixture" });
+    await run("me");
+    expect(request().method).toBe("GET");
+    expect(request().headers.has("Idempotency-Key")).toBe(false);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("searches the platform-only enrolled-user directory with paging and the raw bearer", async () => {
+    respond(200, { items: [], nextCursor: "next-user" });
+    await run("search-users", "Bob + Example", "--limit", "5", "--cursor", "previous-user");
+    const url = new URL(request().url);
+    expect(url.pathname).toBe("/api/v1/admin/users/search");
+    expect(url.searchParams.get("q")).toBe("Bob + Example");
+    expect(url.searchParams.get("limit")).toBe("5");
+    expect(url.searchParams.get("cursor")).toBe("previous-user");
+    expect(request().method).toBe("GET");
+    expect(request().headers.get("Authorization")).toBe("Bearer fixture-raw-idp-bearer");
+  });
+
+  it("rejects an invalid directory page size before sending a request", async () => {
+    await run("search-users", "--limit", "51");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+});

@@ -4,17 +4,7 @@
 import { ClaimsProfileEnricher } from "./claims-enricher.js";
 import { EntraIdAuthProvider } from "./entra.js";
 import type { AuthProvider, ProfileEnricher } from "./types.js";
-
-const AUTH_ENV_KEYS = [
-  "AUTH_PROVIDER",
-  "AUTH_AUTHORITY",
-  "AUTH_API_CLIENT_ID",
-  "AUTH_SCOPES",
-  "AUTH_ISSUER_TEMPLATE",
-  "AUTH_JWKS_URI",
-  "AUTH_BOOTSTRAP_ADMINS",
-  "AUTH_BOOTSTRAP_TENANTS",
-] as const;
+import { resolveAuthEnabledFlag } from "../rbac.js";
 
 const REQUIRED_AUTH_ENV_KEYS = [
   "AUTH_PROVIDER",
@@ -79,16 +69,14 @@ function parseUserCacheTtl(raw: string | undefined): number {
 
 /**
  * Build the {@link AuthRuntime} from environment variables. Returns `null` only
- * when every IdP auth setting is absent, so the API can still run in the
- * non-breaking anonymous mode. Partial configuration throws to prevent auth
- * from being disabled by a missing or misspelled required setting.
+ * when SCOPE_AUTH_ENABLED explicitly disables authentication and RBAC.
+ * Missing or partial IdP configuration otherwise throws rather than opening access.
  *
  * Required to enable auth: `AUTH_PROVIDER`, `AUTH_AUTHORITY`,
  * `AUTH_API_CLIENT_ID`. Optional: `AUTH_ISSUER_TEMPLATE`, `AUTH_JWKS_URI`,
  * `AUTH_BOOTSTRAP_ADMINS`, `AUTH_BOOTSTRAP_TENANTS`. Bootstrap tenants are
  * required whenever bootstrap admins are configured. `AUTH_USER_CACHE_TTL_SECONDS`
- * defaults to 300 when unset and is validated even without IdP configuration;
- * setting it alone does not enable authentication.
+ * defaults to 300 when unset. IdP settings are unused when auth is disabled.
  *
  * `AUTH_ISSUER_TEMPLATE` / `AUTH_JWKS_URI` override the Entra-cloud defaults so
  * a self-hosted issuer (e.g. the `entra-local` emulator, whose issuer is
@@ -98,14 +86,8 @@ function parseUserCacheTtl(raw: string | undefined): number {
 export function loadAuthConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): AuthRuntime | null {
+  if (!resolveAuthEnabledFlag(env.SCOPE_AUTH_ENABLED)) return null;
   const userCacheTtlSeconds = parseUserCacheTtl(env.AUTH_USER_CACHE_TTL_SECONDS);
-  const configuredKeys = AUTH_ENV_KEYS.filter(
-    (key) => (env[key]?.trim().length ?? 0) > 0,
-  );
-  if (configuredKeys.length === 0) {
-    return null;
-  }
-
   const missingKeys = REQUIRED_AUTH_ENV_KEYS.filter(
     (key) => !env[key]?.trim(),
   );

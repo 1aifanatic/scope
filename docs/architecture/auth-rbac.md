@@ -1,5 +1,353 @@
 # Authentication & RBAC
 
+> **Local implementation status:** Project-membership RBAC is implemented on this
+> branch and locally acceptance-tested. This is not production rollout approval.
+> The native-Mongo/emulator checks below do not prove Cosmos consistency.
+
+## Project-membership MVP
+
+The current policy is project membership, **not** creator ownership,
+private/shared visibility, public links, or an administrator content bypass.
+The historical proposal below is retained for context and is superseded wherever
+it differs from this section.
+
+### Deployment mode: one auth and RBAC switch
+
+`SCOPE_AUTH_ENABLED` controls both API authentication/authorization and Portal
+sign-in. It defaults to **enabled**; only `false`, `0`, `no` or `off` explicitly
+disable it (case-insensitive, trimmed). Missing/empty/invalid values stay enabled;
+missing IdP configuration then fails API startup. Configure and restart API and
+Portal together. Compose retains `VITE_AUTH_ENABLED_LOCAL` only as a fallback
+when the canonical variable is unset; native Vite also honors the canonical shell
+setting. Production Portal mode is injected at container startup.
+
+**Explicit off is unrestricted application access for trusted local/test
+deployments**, not a synthetic principal, public sharing feature, outage fallback
+or lockout-recovery path. API role/membership checks are skipped, while project
+scoping/existence and parent/reference validation remain enforced. Normal content,
+catalogs and project lifecycle work anonymously; project operations retain durable
+intent/completion with the existing anonymous actor and no creator membership.
+No user or membership is fabricated. `/users/me` returns `401`; identity and
+membership administration returns `503 authentication_disabled`. The Portal hides
+account/access management but permits project inventory, creation, settings,
+soft-delete and deleted-project restoration. Report generation stays disabled.
+
+All persisted identities, roles, memberships and audit records survive mode
+changes. Re-enabling restores the policy below; projects created anonymously need
+explicit membership assignment. A browser flag cannot turn API enforcement off.
+The Portal probes public no-store `/api/v1/version` before mounting the app and
+rechecks every 10 seconds; absent, invalid, mismatched or unavailable API mode
+blocks content rather than inferring anonymous access. CLI project selection uses
+the same explicit API mode and retains membership checks when enabled.
+See [environment setup](../../ENV_VARIABLES.md#scope_auth_enabled--combined-authentication-and-rbac-toggle)
+for coordinated configuration and workers-free emulator-free startup.
+
+The following identity, role and freshness contract applies when auth is enabled.
+
+| Principal | Project content | Project settings | Memberships and project lifecycle |
+|-----------|-----------------|------------------|----------------------------------|
+| Enrolled user with no membership | None; own account only | None | None |
+| Reader | Read, including stored reports/artifacts | None | None |
+| Contributor | Read/create/update/delete all project content, regardless of creator | None | None |
+| Project admin | Contributor permissions | Edit name/description | None |
+| Platform admin without membership | None | Control-plane metadata | Create/delete/restore projects, manage memberships, disable ordinary users |
+
+Platform admins explicitly add themselves through the same audited membership
+operation to read content or global agent/model catalogs, except that **new project
+creation grants the verified creator an audited project-admin membership**. This
+supersedes the earlier no-creator-membership decision. Other platform admins can
+discover/administer every project without membership but receive no blanket
+content access. Existing projects/memberships are not backfilled. Ordinary users
+cannot discover other projects or look up users.
+Platform admins can search existing enrolled Scope users by display name, email
+or Scope UUID. This minimal platform-only directory does not query the IdP
+directory, pre-provision accounts or send invitations. Exact identity lookup
+remains available for operator/API workflows. This supersedes the initial
+exact-lookup-only administration UI.
+No mandatory project-admin member, ownership transfer, invitation, configurable
+role, wildcard permission, or second user-security authority is introduced.
+
+### Verified identity, authority and freshness
+
+The unchanged IdP bearer is verified **before** identity-cache access on every
+authenticated request. `(idp, idpTenant, idpSubject)` identifies an enrolled user;
+`users._id` remains its stable Scope UUID. Any tenant accepted by the configured
+trusted verifier may enroll; bootstrap tenant restrictions limit promotion only.
+Only `POST /api/v1/users/me` enrolls, refreshes profiles/login timestamps or applies
+an exact-identity bootstrap promotion. GET remains read-only and no-store.
+Disabled identities cannot reenroll to undo a disable.
+
+Redis caches identity resolution, **not authorization grants**. After resolution,
+`Authorization` rereads canonical `users`, `project_memberships`, `projects` and
+relevant operation-completion markers. Fixed role bundles and the strict
+capability response live in `shared/rbac`. An unavailable/uninitialized authority
+denies protected requests. Public health/readiness/version/about endpoints retain
+their explicit classification; anonymous data access is not a recovery mechanism.
+
+The authorization decision has a **20-second total deadline**, with individual
+Mongo reads capped at the smaller of 5 seconds and the remaining original
+budget. Identity, membership, operation-marker and reference reads share that
+deadline; expired background work cannot start another lookup. SSE rechecks every second and stops writes when
+its monotonic lease expires; a lease cannot outlive the verified token. Closed
+streams cannot be revived by a late successful check. No Redis identity-cache hit
+can preserve a removed membership, disabled user or deleted project grant.
+Already-authorized requests may finish; accepted queued runs remain project work
+after the submitter loses access. There is no distributed worker cancellation.
+
+Portal refreshes capabilities using GET every 10 seconds with a 5-second timeout.
+Changes/failures clear cached project data; inaccessible selections are cleared.
+The no-access shell exposes the user's Scope UUID and sign-out, without content
+queries. Refresh/reload never repeatedly POST enrollment.
+
+### Durable changes and operator runbooks
+
+`AdminOperations` persists a fingerprinted intent in `admin_operations` **before**
+an access mutation. Target revision/CAS, exact preconditions and retained
+`appliedOperationIds` make uncertain writes and A-then-B reconciliation
+distinguishable. Targets carry their last operation marker; incomplete operations
+do not authorize access. `202`/pending is not completion: inspect and reconcile the
+same operation ID. Reusing an ID with different input returns conflict.
+There is no multi-document transaction or dedicated atomic audit-event collection.
+Migration 031 verifies membership uniqueness and rejects a TTL index on retained
+administrative evidence. Rollback retains memberships/evidence rather than
+reopening access.
+
+There is currently no automatic evidence pruning. Operation histories and target
+operation-ID arrays/backups grow; document-size/capacity monitoring and an approved
+retention/compaction policy are prerequisites for sustained production use.
+Intent-store failure prevents mutation; failed completion is reported pending,
+not silently successful. Completion requires an acknowledged, matched update or
+an observed identical completed operation; a zero-match/unacknowledged write
+cannot produce a successful response.
+
+Portal `/access` is the platform administration entry point.
+It lists current project members by name/email and role, with **Change role**
+and confirmed **Remove** actions. **Add people** opens a searchable user picker
+and a fixed-role selector; existing members and disabled users cannot be added.
+Revoked memberships are hidden from the current roster but retain their revisions
+for safe regrant. Disabled accounts and incomplete access changes are identified
+on member rows. Ordinary-user disable remains a separate, confirmed account-wide
+action. Uncertain changes lock further edits and retain the exact operation key
+for retry; inspection/reconciliation lives under collapsed advanced controls.
+Project creation, settings and deletion remain on **Projects**. Restoring a
+deleted project is available in Access administration, where platform admins can
+still discover it without content membership.
+Plain `/access` provides the full control-plane project selector, independent of
+the membership-only Projects page. Choosing an option leaves that selector
+available at `/access`. A deep link `/access?projectId=...` instead locks the view
+to that exact project, replaces the selector with its name, and offers **All
+project access** to return to the global view. Missing/invalid project links
+never fall back to another project; navigation between deep links resets the
+member editor and confirmation state.
+The roster has no separate member-filter box. User labels show the stored display
+name and email/sign-in alias rather than repeated UUIDs; the Scope UUID remains
+available in a hover tooltip and as a search key.
+
+Explicit enrollment refreshes display-only profile labels from verified token
+claims. `name` takes precedence over `given_name`/`family_name`; the signed
+`preferred_username`/`upn` is retained as an advisory `alias`, distinct from
+`email` (which still requires `email_verified` to persist). Missing alias claims
+can fall back to an advisory email label without marking it verified. These
+mutable labels never identify accounts, bootstrap admins or authorize access:
+the verified identity tuple and stable Scope UUID remain authoritative.
+The local emulator init enables its supported given/family-name, email and
+preferred-username optional claims on the seeded API registration. Existing
+profiles refresh only on explicit enrollment; GET remains read-only.
+
+`GET /api/v1/admin/users/search?q=...&limit=20&cursor=...` is platform-admin-only,
+supports literal case-insensitive substring matching, and pages by ascending
+Scope UUID. `limit` is 1–50 (default 20); the response contains `items` and an
+optional `nextCursor`. Only Scope UUID, display name, email/sign-in alias, platform role,
+disabled state and revision are returned, never IdP subjects or credentials.
+`GET /api/v1/projects/:id/members` enriches the administrative roster with those
+minimal user summaries and operation-pending state, including revoked rows for
+CAS/recovery. Substring search is bounded by a five-second query timeout; its
+Cosmos RU/index behavior still requires deployment-specific verification.
+
+Portal **Projects** (`/projects`) shows only projects with an explicit membership
+granting `content:read`, including for platform administrators. It uses the normal
+membership-filtered inventory, never `controlPlane=true`, and excludes deleted or
+non-readable projects defensively. Platform admins use `/access` to discover all
+projects and manage memberships; their own readable project rows link to the
+fixed-project access view. Projects uses a title-only header with an **Access
+administration** button, without an explanatory callout or subtitle.
+Creation remains on Projects and grants the creator
+an audited project-admin membership. The header switcher remains membership-only,
+and creation never synthesizes a membership in its cache or selects it automatically.
+Inventory failures are shown as errors rather than an empty-project success state.
+Capabilities refresh through GET; the creator's role appears on the next refresh
+(normally within 10 seconds). CLI `project create --use` confirms the current
+membership with GET before selecting, so replaying a creation cannot undo a later
+revocation.
+
+New project creation stores the creator-membership operation ID in the durable
+project intent before writing either target. It completes the deterministic
+membership sub-operation before completing the project operation. An interrupted
+step returns the **parent** operation as pending; reconciling that ID resumes both
+steps. An incomplete project marker withholds content authorization even if the
+membership target has been written. Identical retries never recreate a revoked
+membership or overwrite a newer role. This is recoverable sequencing, not a
+multi-document transaction.
+The creation dialog retains its idempotency key after a pending/failed response;
+retry identical input or inspect/reconcile the displayed operation ID before
+starting a different creation.
+
+Equivalent CLI commands use the existing raw IdP `SCOPE_TOKEN` environment variable:
+
+```bash
+pnpm cli access enroll --url http://localhost:3101
+pnpm cli access me --url http://localhost:3101
+pnpm cli access find-user "$USER_ID" --url http://localhost:3101
+pnpm cli access search-users "Bob" --limit 20 --url http://localhost:3101
+pnpm cli access projects --url http://localhost:3101
+pnpm cli access members "$PROJECT_ID" --url http://localhost:3101
+pnpm cli access set-member "$PROJECT_ID" "$USER_ID" --role reader \
+  --revision 0 --operation-id "$OPERATION_ID" --url http://localhost:3101
+pnpm cli access operation "$OPERATION_ID" --url http://localhost:3101
+pnpm cli access reconcile "$OPERATION_ID" --url http://localhost:3101
+```
+
+Retain the displayed operation ID for an uncertain outcome and fetch current
+revisions before a different change. Pending access-command operations exit 2;
+project mutation commands fail with an explicit pending/inspect error. There is no
+new CLI interactive login, PAT, service token or token exchange.
+
+Platform-admin lifecycle and lockout recovery are **operator-only**, using an
+existing exact identity and Scope UUID. After building the API, run with
+`AUTH_OPERATOR_MONGO_URI` supplied through secure operator configuration:
+
+```bash
+node apps/api/dist/auth/operator-access.js \
+  --database "$DATABASE" --confirm-database "$DATABASE" \
+  --idp entra --tenant "$TENANT_ID" --subject "$SUBJECT_ID" \
+  --user-id "$USER_ID" --revision "$REVISION" --role admin --disabled false \
+  --operator "$OPERATOR" --reason "$REASON" --operation-id "$OPERATION_ID" \
+  --bootstrap-reviewed
+```
+
+Review configured bootstrap identities before operator demotion/recovery; leaving
+an exact identity configured for bootstrap can intentionally promote it again at
+its next enrollment. Recovery records intent/completion and a prior-target backup,
+preserves memberships/data and grants no implicit content access. Keep auth and TLS
+verification on; when authority storage is unavailable, repair it rather than
+using an auth-off flag.
+
+Legacy projects receive **no automatic grants**. A reviewed JSON manifest includes
+`database`, `reviewedBy`, `reviewedAt`, `reason`, and explicit `entries` containing
+`projectId`, enrolled `userId`, fixed `role`, expected `revision`, and stable
+`operationId`. Validate all parents before applying:
+
+```bash
+node apps/api/dist/auth/legacy-memberships.js --database "$DATABASE" --manifest "$MANIFEST"
+node apps/api/dist/auth/legacy-memberships.js --database "$DATABASE" --manifest "$MANIFEST" \
+  --apply --confirm-reviewer "$REVIEWER"
+```
+
+The default is dry-run. Unmapped projects remain inaccessible to ordinary users;
+platform control-plane management can repair mappings. Never map everyone into
+every project.
+
+### Reports, internal callers and cutover
+
+All new report generation is disabled: manual/bulk/retrigger endpoints, automatic
+coder/post-processing producers, CLI/Portal actions and the updated queue consumer.
+The API returns `report_generation_disabled` without enqueueing. Migration 031
+marks pending/generating reports failed; the disabled consumer fails and removes
+queued work without invoking report tools. Existing stored reports remain
+project-readable.
+
+Deferred OBO/service issuance is not an exemption. Report-generator HTTP tools and
+worker codebase/skill/resource API clients do not gain an anonymous principal.
+They must satisfy the same verified identity/membership boundary or fail closed;
+enabling safe service callers is separate work. DB/queue-only workers and scheduler
+are trusted infrastructure, not human API callers.
+
+| Scope HTTP caller | Current protected-cutover behavior |
+|-------------------|------------------------------------|
+| Portal and CLI | Unchanged verified IdP bearer; canonical project/platform authorization |
+| Worker codebase, skill, extension, resource, MCP and prompt clients in `packages/shared/src` | No automatic bearer/service identity; unsigned calls receive `401`, not a bypass or an anonymous grant |
+| REST criteria/prompt-feature providers and gate prompt resolution | Same boundary when API-backed; do not claim these configured modes work without a supported credential |
+| Report tools/template fetches | Consumer and generation producers disabled before these paths execute |
+| `scripts/register-agent.sh` registration jobs | Existing unsigned registration POST fails `401`; keep these jobs out of protected worker rollout until registration uses an approved authenticated path |
+| `scripts/acceptance-codebase-astro.sh` | Existing unsigned benchmark script is not an authenticated RBAC acceptance command; do not run it as a workaround |
+
+At cutover stop old report producers/consumers and old anonymous API replicas
+before admitting protected traffic. This local workers-free environment does not
+prove mixed-version cutover or actual benchmark execution.
+
+### Local evidence and release gates
+
+The isolated core environment uses Portal `http://localhost:5101`, API
+`http://localhost:3101`, and Entra Local `https://localhost:8501`, with native Mongo,
+Redis and Azurite only. Trust the local CA; do not disable TLS/signature checking.
+The development Compose overlay gives Vite one CPU and 1 GiB of memory; the
+production nginx limits are insufficient for cold on-demand compilation.
+Entra Local's original password-optional picker may render an email-selection
+form once fixture counts grow. Account `hasPassword` does not mean password-mode
+is enabled: both picker/email selection use the emulator's genuine signed
+authorization state, authorization code and S256 PKCE exchange. Do not reset
+users/passwords merely to accommodate an acceptance-script picker assumption.
+
+Locally observed after the creator-membership policy update: 659 HTTP checks against the emulator-backed stack, plus raw-bearer
+CLI membership and project create/settings/delete/restore operations. All three
+roles exercised colliding project slugs, foreign lists/search/facets, stored
+reports, authorized Azurite artifact downloads, foreign artifact/SSE denials and
+parent/run mismatches. The live OpenAPI-derived sweep denied all 139 registered
+project-data operations for each of reader/contributor/admin against foreign
+fixtures. Report-generation attempts left the actual report queue
+empty; an isolated fixture-only queue and queued request remained project-owned
+after submitter removal, and a remaining contributor could cancel the request.
+
+Genuine Chromium/MSAL exercised Alice/Bob onboarding and GET-only reload, Portal
+Manage Projects creation with creator-admin access and role assignment, reader/contributor/admin negative and
+positive actions, colliding-slug project switching with old-data clearing, and
+selected/last-project removal. Browser cleanup occurred within about 10.5 seconds,
+with exactly one enrollment POST per sign-in and no browser runtime errors.
+Demotion denied a new write within 25 ms; membership removal and ordinary-user
+disable closed request/report streams within about 0.53 seconds. An isolated
+Mongo pause denied account/catalog/content requests in about 5.1 seconds and
+closed both streams within 6 seconds; services recovered after unpause.
+No workers or real benchmarks ran. These are local observations, not a production
+visibility guarantee or exhaustive endpoint-by-endpoint browser coverage.
+
+Combined-toggle native tests additionally cover anonymous project lifecycle,
+unchanged identities/memberships, project/reference isolation and retained
+identity-management/report gates. A separate scratch database and temporary
+loopback API/Portal pair exercised real anonymous browser create/select/content
+CRUD, catalogs and restore without any login, token or enrollment; a queued
+fixture's stream remained open beyond the protected 20-second lease. Both
+API/Portal mode mismatches blocked application data requests in Chromium.
+The original auth-on Alice/Bob browser role/revocation checks still passed.
+These helpers share no application database with the authenticated environment;
+they do not establish worker execution or production Cosmos behavior.
+
+Native Mongo tests exercise intent failures, uncertain writes, newer-target
+reconciliation, uniqueness/regrant, reviewed mapping, exact operator recovery and
+bootstrap races. The affected regression selection passed 2,689 tests across 216
+files before the creator-policy change, including access Storybook interactions.
+The creator-policy update also exercises durable creator-grant crash/acknowledgement
+recovery, concurrent creation and replay after revocation, plus administrative
+inventory visibility/error states and membership-scoped selection. Expired/wrong-audience/issuer/JWK-issuer credential rejection
+is covered by cryptographic verifier tests; browser acceptance did not wait for
+a genuine emulator token to expire.
+
+This standalone Mongo is **not** a replica set; no transaction,
+Cosmos partition/index compatibility, stale secondary/replica visibility, RU cost,
+or production <=60-second total visibility guarantee has been demonstrated.
+Cosmos authority topology/consistency and multi-replica rollout remain release
+gates. Production legacy mappings still require administrator review; only
+synthetic reviewed fixtures were applied locally. Same-tab MSAL account switching
+is covered by cancellation/cache unit tests, not by the browser walkthrough.
+
+<details>
+<summary>Historical pre-membership authentication design and deferred proposals (not the current RBAC contract)</summary>
+
+The following snapshot predates the project-membership MVP. In particular,
+references to "current" anonymous behavior, ownership/private/shared policy,
+wildcards, service credentials, security-audit collections and internal-token
+delivery are historical proposals, not shipped guarantees. The current contract
+is the Project-membership MVP section above.
+
 > Status: **Explicit-login authentication and user-access caching implemented; 
 > full RBAC, ownership enforcement, CLI interactive login, and internal-token
 > designs remain deferred.** Original RBAC proposal: 2026-06-10; auth contract updated:
@@ -1846,3 +2194,5 @@ the query-param fallback) given the proxy timeouts in
     **Resolved**: a deep link is a signed, revocable, read-only capability to one resource;
     it satisfies `readScope` for that resource only and **never** `writeScope`, so a
     recipient can view but never edit, and revoking the link removes view access.
+
+</details>

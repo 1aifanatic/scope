@@ -58,7 +58,8 @@ erDiagram
 
     CODEBASE {
         string _id "fresh UUID"
-        string slug "unique URL-safe identifier"
+        string projectId "immutable project scope"
+        string slug "unique within project"
         string name "display name"
         string sourceType "git | archive"
         string source "git only: owner/repo"
@@ -69,6 +70,7 @@ erDiagram
 
     CODEBASE_REVISION {
         string _id "fresh UUID"
+        string projectId "copied from parent"
         string codebaseId "FK to codebases"
         string slug "denormalized parent slug"
         number revisionNumber "1,2,3..."
@@ -78,7 +80,7 @@ erDiagram
     }
 ```
 
-- **Codebase** — Mutable metadata in the `codebases` collection. It has a fresh UUID `_id`, a unique `slug`, display `name`, optional `description`, `sourceType`, Git-only `source` (`owner/repo`) and `defaultBranch`, `revisionCounter`, `latestRevisionId`, optional `creator`, timestamps, and optional `deletedAt` for soft deletion.
+- **Codebase** — Mutable metadata in the `codebases` collection. It has a fresh UUID `_id`, immutable `projectId`, a project-unique `slug`, display `name`, optional `description`, `sourceType`, Git-only `source` (`owner/repo`) and `defaultBranch`, `revisionCounter`, `latestRevisionId`, optional `creator`, timestamps, and optional `deletedAt` for soft deletion.
 - **CodebaseRevision** — Immutable snapshot in the `codebase-revisions` collection. It has a fresh UUID `_id`, `codebaseId`, denormalized `slug`, sequential `revisionNumber`, canonical `ref`, `sourceType`, provenance fields, `archiveUrl`, optional size/file metadata, optional `creator`, `resolvedAt`, and `createdAt`.
 - **Request.codebaseRevisionId** — Optional foreign key to `CodebaseRevisionDocument._id`. When present, workers seed the run workspace from that revision before the agent starts.
 
@@ -97,6 +99,14 @@ Codebase revisions can be addressed in three forms:
 | `{slug}` | Resolve the latest revision; for Git codebases, submit-time resolution creates a new revision from the default branch |
 
 `parseCodebaseRevisionRef()` accepts `{slug}@r{N}` and bare `{slug}`. Inputs containing `@` but not the `@r{N}` shape are invalid.
+
+Slug/ref resolution always includes the authorized project. A raw UUID still
+requires matching project membership and consistent revision/parent project IDs;
+it is not an access capability. Migration 032 verifies unique `(projectId, slug)`
+and `(projectId, ref)` indexes before removing global slug/ref uniqueness.
+Different projects may reuse the same slug/ref; soft-deleted records reserve names
+within their own project. Incompatible indexes/data fail closed for operator
+repair. Native Mongo migration tests do not establish Cosmos compatibility.
 
 ## Lifecycle
 
@@ -137,6 +147,11 @@ The git `source` (`owner/repo`) is interpolated into the GitHub API URL, so it i
 Deletion is soft and cascading: `DELETE /api/v1/codebases/:id` sets `deletedAt` on the codebase and on all of its revisions. Soft-deleted revisions are hidden from listings (`listByCodebase`, `getLatest`) but are **never destroyed** — lookups by id/ref/number still resolve them, so historical and in-flight runs that reference a specific `codebaseRevisionId` keep working. The slug stays reserved so refs remain stable. Only the atomic-create rollback path performs a hard delete.
 
 ### 4. Delivery (Worker)
+
+With membership RBAC enforced, these HTTP reads require authorized credentials.
+Service/OBO issuance is deferred: workers without a suitable bearer fail closed,
+not through an anonymous exemption. The local RBAC acceptance stack has no workers
+and does not validate real benchmark execution; see [Authentication & RBAC](auth-rbac.md).
 
 When a worker dequeues a request, `QueueProcessor` runs setup first so the worker-specific `workspacePath` is available. If `RequestDocument.codebaseRevisionId` is set, it then:
 
