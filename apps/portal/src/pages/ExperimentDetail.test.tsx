@@ -246,7 +246,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("ExperimentDetail", () => {
+describe("ExperimentDetail", { timeout: 10_000 }, () => {
   it("starts an asynchronous deletion from the confirmation dialog", async () => {
     vi.mocked(api.deleteExperiment).mockResolvedValue({
       operationId: "operation-delete",
@@ -273,7 +273,7 @@ describe("ExperimentDetail", () => {
     await waitFor(() => {
       expect(api.deleteExperiment).toHaveBeenCalledWith("experiment-1");
     });
-  }, 10_000);
+  });
 
   it("shows deleted lifecycle progress and restores the Experiment", async () => {
     const user = userEvent.setup();
