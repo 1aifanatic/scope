@@ -128,6 +128,11 @@ describe("ExperimentsList", () => {
 
     expect((await screen.findAllByText("Alpha benchmark")).length).toBeGreaterThan(0);
     expect(screen.getByRole("complementary", { name: "Filters" })).toBeTruthy();
+    const listShell = screen.getByRole("heading", {
+      name: "Experiments",
+    }).closest("section")?.parentElement;
+    expect(listShell?.className).toContain("h-full");
+    expect(listShell?.className).not.toContain("px-6");
 
     fireEvent.change(screen.getByPlaceholderText("Search experiments…"), {
       target: { value: "Beta" },

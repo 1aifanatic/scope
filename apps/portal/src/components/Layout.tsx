@@ -95,8 +95,8 @@ const navGroups: NavGroup[] = [
     label: "Activity",
     scoped: true,
     items: [
-      { to: "/runs", label: "Runs", icon: List },
       { to: "/experiments", label: "Experiments", icon: Atom },
+      { to: "/runs", label: "Runs", icon: List },
       { to: "/statistics", label: "Statistics", icon: BarChart3 },
       { to: "/reports", label: "Reports", icon: FileText },
       { to: "/insights", label: "Insights", icon: Lightbulb },
@@ -157,6 +157,7 @@ const FULL_BLEED_ROUTE_PATTERNS = [
   "/agents/:id",
   "/models",
   "/models/:id",
+  "/experiments",
   "/runs",
   "/runs/:id/preview",
   "/task-prompts",

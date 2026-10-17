@@ -49,6 +49,18 @@ function renderLayout(
               <Routes>
                 <Route element={<Layout />}>
                   <Route path="/" element={<div>Home page</div>} />
+                  <Route
+                    path="/experiments"
+                    element={<div>Experiments page</div>}
+                  />
+                  <Route
+                    path="/experiments/new"
+                    element={<div>New experiment page</div>}
+                  />
+                  <Route
+                    path="/experiments/:id"
+                    element={<div>Experiment detail page</div>}
+                  />
                   <Route path="/runs" element={<div>Runs page</div>} />
                   <Route path="/secrets/keys" element={
                     <div>
@@ -99,6 +111,16 @@ describe("Layout", () => {
     expect(screen.getByRole("main").className).not.toContain("px-6");
   });
 
+  it.each(["/experiments/new", "/experiments/experiment-1"])(
+    "keeps the conventional padded shell for %s",
+    (route) => {
+      renderLayout(route);
+
+      expect(screen.getByRole("main").className).toContain("px-6");
+      expect(screen.getByRole("main").className).toContain("py-6");
+    },
+  );
+
   it.each(["/secrets/keys/new", "/secrets/keys/demo-key"])(
     "preserves page padding for %s",
     (path) => {
@@ -118,6 +140,17 @@ describe("Layout", () => {
     expect(
       screen.getByRole("link", { name: "Data collection and privacy" }),
     ).toBeTruthy();
+  });
+
+  it("uses the Runs full-bleed shell for Experiments", () => {
+    const runs = renderLayout("/runs");
+    const runsClasses = screen.getByRole("main").className;
+    runs.unmount();
+
+    renderLayout("/experiments");
+
+    expect(screen.getByRole("main").className).toBe(runsClasses);
+    expect(screen.getByRole("main").className).not.toContain("px-6");
   });
 
   it("expands the desktop sidebar to show navigation labels", () => {
@@ -176,6 +209,9 @@ describe("Layout", () => {
     });
     expect(experimentsLink.querySelector(".lucide-atom")).toBeTruthy();
     expect(criteriaLink.querySelector(".lucide-flask-conical")).toBeTruthy();
+    expect(experimentsLink.nextElementSibling).toBe(
+      within(sidebar).getByRole("link", { name: "Runs" }),
+    );
     expect(within(sidebar).getByRole("link", { name: "MCP" })).toBeTruthy();
     // The Integrations group holds Resources alongside MCP and Extensions; the
     // group and its Resources item deliberately no longer share a label.
