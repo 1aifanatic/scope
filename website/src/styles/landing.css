@@ -109,21 +109,26 @@ scope-showreel { display: block; max-width: 60rem; margin: 3rem auto 0; }
 .scope-strip-divider { width: 1px; height: 1.1rem; background: var(--scope-border); }
 .scope-section { margin-top: clamp(3.5rem, 7vw, 6rem); }
 .scope-demo-section { margin-top: 3.5rem; }
-.scope-kubernetes { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 2.5rem; padding: clamp(1.5rem, 5vw, 4rem); border: 1px solid #326ce5; border-radius: 1rem; color: #fff; background: radial-gradient(ellipse at 100% 0, #326ce5 0, transparent 65%), #102b64; box-shadow: 0 24px 70px -36px #326ce580; }
-.scope-kubernetes .scope-eyebrow { color: #c5dcff; }
-.scope-kubernetes h2 { margin-top: 1rem; font-size: clamp(2.5rem, 5vw, 4.5rem); font-weight: 650; line-height: 1.08; letter-spacing: -0.05em; }
-.scope-kubernetes h2 span { color: #fff; }
-.scope-home .scope-kubernetes-description { max-width: 49ch; margin-top: 1.5rem; color: #d9e6ff; font-size: 1rem; }
-.scope-kubernetes-link { margin-top: 1.75rem; background: #fff; color: #143572; }
-.scope-kubernetes-link:hover { background: #e5eeff; }
-.scope-kubernetes :focus-visible { outline-color: #fff; }
+.scope-kubernetes { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 2.5rem; padding: clamp(1.5rem, 5vw, 4rem); border: 1px solid #cbdcf3; border-radius: 1rem; color: #16365f; background: #f7faff; box-shadow: 0 24px 70px -36px #326ce530; }
+.scope-kubernetes .scope-eyebrow { color: #315ca3; }
+.scope-kubernetes h2 { margin-top: 1rem; color: #16365f; font-size: clamp(2.5rem, 5vw, 4.5rem); font-weight: 650; line-height: 1.08; letter-spacing: -0.05em; }
+.scope-kubernetes h2 span { color: #326ce5; }
+.scope-home .scope-kubernetes-description { max-width: 49ch; margin-top: 1.5rem; color: #405675; font-size: 1rem; }
+.scope-kubernetes-link { margin-top: 1.75rem; background: #326ce5; color: #fff; }
+.scope-kubernetes-link:hover { background: #255bbf; }
+.scope-kubernetes :focus-visible { outline-color: #2456ad; }
 .scope-kubernetes-brand { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 1.5rem; text-align: center; }
 .scope-kubernetes-brand img { display: block; width: min(100%, 240px); height: auto; }
-.scope-kubernetes-brand > span { max-width: 25ch; color: #d9e6ff; font: 0.75rem/1.6 var(--sl-font-mono); }
-.scope-home .scope-kubernetes-features { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; list-style: none; margin: 0; padding: 1.75rem 0 0; border-top: 1px solid #ffffff40; }
-.scope-kubernetes-features li { display: flex; flex-direction: column; gap: 0.4rem; }
-.scope-kubernetes-features strong { font-size: 0.9rem; font-weight: 600; }
-.scope-kubernetes-features span { color: #d9e6ff; font-size: 0.8rem; }
+.scope-kubernetes-brand > span { max-width: 25ch; color: #405675; font: 0.75rem/1.6 var(--sl-font-mono); }
+.scope-home .scope-kubernetes-features { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; list-style: none; margin: 0; padding: 1.75rem 0 0; border-top: 1px solid #cbdcf3; }
+.scope-kubernetes-features li { display: flex; flex-direction: column; gap: 0.5rem; }
+.scope-feature-graphic { display: flex; align-items: center; height: 3rem; color: #326ce5; }
+.scope-kubernetes-features strong { color: #16365f; font-size: 0.9rem; font-weight: 600; }
+.scope-kubernetes-features strong a { color: inherit; text-decoration: underline; text-underline-offset: 0.15em; }
+.scope-kubernetes-features strong a:hover { color: #2456ad; }
+.scope-kubernetes-features span { color: #405675; font-size: 0.8rem; }
+.scope-keda-brand { display: inline-flex; align-items: center; min-height: 3rem; border-radius: 0.2rem; }
+.scope-keda-brand img { display: block; width: 6rem; height: auto; }
 @media (max-width: 48rem) {
 	.scope-kubernetes { grid-template-columns: minmax(0, 1fr); }
 	.scope-kubernetes-brand img { width: 160px; }

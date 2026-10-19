@@ -57,13 +57,28 @@ Sidebar order is defined in `astro.config.mjs`, not by directory order.
 The landing page places its Kubernetes infrastructure section before the
 final Get started call to action in
 [Home.astro](src/components/Home.astro), styled with Kubernetes blue
-(`#326CE5`). Its unmodified white logo is vendored from the
+(`#326CE5`) accents on a light background in both site themes. Its
+unmodified full-color logo is vendored from the
 [CNCF Kubernetes artwork](https://github.com/cncf/artwork/tree/main/projects/kubernetes)
-in [public/kubernetes-stacked-white.svg](public/kubernetes-stacked-white.svg).
+in [public/kubernetes-stacked-color.svg](public/kubernetes-stacked-color.svg).
 Keep the official artwork intact rather than recreating or recoloring it.
 
 The Kubernetes section's Host on Kubernetes link opens the
 [Kubernetes self-hosting overview](src/content/docs/self-hosting/overview.md).
+The infrastructure description and autoscaling tile both name KEDA.
+The feature row starts with queue-driven scaling; its headline
+opens the [Autoscaling with KEDA guide](src/content/docs/self-hosting/scaling.md).
+The compact full-color [KEDA](https://keda.sh/) wordmark links to the
+project site and sits directly on the light section background, without a
+separate badge, keeping Kubernetes as the primary brand.
+The three borderless feature tiles share an equal-height graphic area
+above aligned headlines and descriptions. The KEDA wordmark, container
+icon, and GitOps icon are vertically centered in that area; the tiles
+stack on narrow screens.
+The unmodified SVG is vendored from the
+[CNCF KEDA artwork](https://github.com/cncf/artwork/tree/main/projects/keda)
+in [public/keda-horizontal-color.svg](public/keda-horizontal-color.svg),
+under the [CNCF artwork trademark policy](https://github.com/cncf/artwork/blob/main/LICENSE.md).
 
 Mermaid diagrams in Markdown and MDX are rendered client-side by
 `astro-mermaid`, which must remain before Starlight in the `integrations`
@@ -170,7 +185,9 @@ table of contents, code examples, and previous/next navigation.
   Green and red communicate criterion outcomes, always with text.
 - **Navigation:** a landing header with direct documentation and demo
   links, plus task-oriented guide groups: run experiments, design a
-  benchmark, and connect tools. Existing document URLs are preserved.
+  benchmark, and connect tools. The footer's Learn group links to the
+  [Kubernetes deployment guide](src/content/docs/self-hosting/deploy-helm.md).
+  Existing document URLs are preserved.
 - **Onboarding:** a concrete example before terminology, followed by
   separate Portal, CLI, and API entry points. Access requirements are
   explicit rather than promising instant access to a hosted service.
