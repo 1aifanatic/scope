@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 // @vitest-environment happy-dom
+import { composeStories } from "@storybook/react-vite";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,6 +12,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { PROJECT_STORAGE_KEY } from "@/lib/project-scope";
 import { CLI_INSTALL_COMMAND, buildRunSubmit } from "@/lib/cli/buildCommand";
 import { CliCommand } from "./CliCommand";
+import * as stories from "./CliCommand.stories";
 
 const command = buildRunSubmit({ task: "t", worker: "coder-acp-copilot", priority: 2 });
 
@@ -29,6 +31,13 @@ describe("CliCommand", () => {
   afterEach(() => {
     cleanup();
     localStorage.clear();
+  });
+
+  it.each(Object.entries(composeStories(stories)))("renders the %s story with its providers", async (_name, Story) => {
+    render(<Story />);
+    await userEvent.click(screen.getByRole("button", { name: /show cli equivalent/i }));
+
+    expect(screen.getByRole("dialog")).not.toBeNull();
   });
 
   it("shows the public installer, project env and generated command with notes", async () => {

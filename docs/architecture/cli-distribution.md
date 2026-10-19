@@ -263,6 +263,9 @@ its own copy button, plus any parity caveats.
      `export SCOPE_PROJECT=<id>` (see [Project scoping](#project-scoping)) — with
      a reminder to export `SCOPE_TOKEN` on deployments that require sign-in;
   3. the generated command.
+- **Storybook:** `CliCommand.stories.tsx` supplies a local `TooltipProvider`
+  decorator because the shared preview does not provide one. `CliCommand.test.tsx`
+  composes every story and verifies its dialog opens without extra providers.
 - **Builders:** `apps/portal/src/lib/cli/buildCommand.ts` — pure functions that
   translate Portal state into a command, mirroring the flags in
   `apps/cli/src/commands/run.ts`. They only emit flags the CLI actually supports;

@@ -3,6 +3,7 @@
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent } from "storybook/test";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { CliCommand } from "./CliCommand";
 import {
   buildRunGet,
@@ -14,6 +15,13 @@ import {
 const meta = {
   component: CliCommand,
   tags: ["ai-generated", "needs-work"],
+  decorators: [
+    (Story) => (
+      <TooltipProvider>
+        <Story />
+      </TooltipProvider>
+    ),
+  ],
 } satisfies Meta<typeof CliCommand>;
 
 export default meta;
