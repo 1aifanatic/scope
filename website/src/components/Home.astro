@@ -144,18 +144,47 @@ const paths = [
 			<p class="scope-kubernetes-description">
 				Your experiments deserve serious infrastructure. Scope runs on
 				Kubernetes, bringing containerized agent workers, queue-driven
-				scaling, and GitOps deployments to your benchmarking stack.
+				scaling with KEDA, and GitOps deployments to your benchmarking stack.
 			</p>
 			<a class="scope-btn scope-kubernetes-link" href={`${base}self-hosting/overview/`}>Host on Kubernetes <span aria-hidden="true">&rarr;</span></a>
 		</div>
 		<div class="scope-kubernetes-brand">
-			<img src={`${base}kubernetes-stacked-white.svg`} alt="Kubernetes" width="240" height="234" loading="lazy" />
+			<img src={`${base}kubernetes-stacked-color.svg`} alt="Kubernetes" width="240" height="234" loading="lazy" />
 			<span>Open infrastructure. Repeatable experiments.</span>
 		</div>
 		<ul class="scope-kubernetes-features">
-			<li><strong>Containerized workers</strong><span>Coding agents run in containers.</span></li>
-			<li><strong>Queue-driven scaling</strong><span>KEDA scales workers with demand.</span></li>
-			<li><strong>GitOps deployments</strong><span>Flux keeps deployments in sync.</span></li>
+			<li>
+				<div class="scope-feature-graphic">
+					<a class="scope-keda-brand" href="https://keda.sh/" target="_blank" rel="noopener noreferrer">
+						<img src={`${base}keda-horizontal-color.svg`} alt="KEDA" width="96" height="41" loading="lazy" />
+						<span class="sr-only"> (opens in a new tab)</span>
+					</a>
+				</div>
+				<strong><a href={`${base}self-hosting/scaling/`}>Queue-driven scaling</a></strong>
+				<span>KEDA scales workers with demand.</span>
+			</li>
+			<li>
+				<div class="scope-feature-graphic">
+					<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<path d="m12 3 9 5v8l-9 5-9-5V8l9-5Z" />
+						<path d="m3 8 9 5 9-5M12 13v8M7.5 5.5l9 5" />
+					</svg>
+				</div>
+				<strong>Containerized workers</strong>
+				<span>Coding agents run in containers.</span>
+			</li>
+			<li>
+				<div class="scope-feature-graphic">
+					<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<path d="M6 7v10M18 9v2a8 8 0 0 1-8 8H8" />
+						<circle cx="6" cy="5" r="2" />
+						<circle cx="6" cy="19" r="2" />
+						<circle cx="18" cy="7" r="2" />
+					</svg>
+				</div>
+				<strong>GitOps deployments</strong>
+				<span>Flux keeps deployments in sync.</span>
+			</li>
 		</ul>
 	</section>
 
