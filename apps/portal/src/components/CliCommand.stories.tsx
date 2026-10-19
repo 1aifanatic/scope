@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent } from "storybook/test";
+import { expect, screen, userEvent } from "storybook/test";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CliCommand } from "./CliCommand";
 import {
@@ -34,6 +34,9 @@ export const RunGet: Story = {
     const trigger = canvas.getByRole("button", { name: /show cli equivalent/i });
     await expect(trigger).toBeInTheDocument();
     await userEvent.click(trigger);
+    await expect(screen.getByRole("button", { name: "Copy install command" })).toBeInTheDocument();
+    await expect(screen.getByRole("button", { name: "Copy environment variables" })).toBeInTheDocument();
+    await expect(screen.getByRole("button", { name: "Copy cli command" })).toBeInTheDocument();
   },
 };
 

@@ -5,12 +5,12 @@
 import { composeStories } from "@storybook/react-vite";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ProjectProvider } from "@/contexts/ProjectContext";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { PROJECT_STORAGE_KEY } from "@/lib/project-scope";
-import { CLI_INSTALL_COMMAND, buildRunSubmit } from "@/lib/cli/buildCommand";
+import { CLI_INSTALL_COMMAND, buildEnvCommand, buildRunSubmit } from "@/lib/cli/buildCommand";
 import { CliCommand } from "./CliCommand";
 import * as stories from "./CliCommand.stories";
 
@@ -31,6 +31,7 @@ describe("CliCommand", () => {
   afterEach(() => {
     cleanup();
     localStorage.clear();
+    vi.restoreAllMocks();
   });
 
   it.each(Object.entries(composeStories(stories)))("renders the %s story with its providers", async (_name, Story) => {
@@ -56,5 +57,22 @@ describe("CliCommand", () => {
 
     expect(text).toContain("export SCOPE_API_URL=");
     expect(text).not.toContain("SCOPE_PROJECT");
+  });
+
+  it.each([
+    { name: "Copy install command", value: CLI_INSTALL_COMMAND },
+    { name: "Copy environment variables", value: buildEnvCommand(window.location.origin) },
+    { name: "Copy cli command", value: command.command },
+  ])("copies the correct block through the distinct '$name' button", async ({ name, value }) => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText");
+    await openModal(false);
+
+    const button = screen.getByRole("button", { name });
+    await user.click(button);
+
+    expect(writeText).toHaveBeenCalledOnce();
+    expect(writeText).toHaveBeenCalledWith(value);
+    expect(screen.getByRole("button", { name })).toBe(button);
   });
 });

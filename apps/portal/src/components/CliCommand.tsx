@@ -93,7 +93,7 @@ function CommandBlock({
         variant="outline"
         size="icon"
         className="shrink-0"
-        aria-label="Copy command"
+        aria-label={`Copy ${toastLabel.replace(/ copied$/, "").toLowerCase()}`}
         onClick={copy}
       >
         {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
