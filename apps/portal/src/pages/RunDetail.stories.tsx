@@ -53,7 +53,7 @@ const meta = {
     (Story, context) => {
       const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
       client.setQueryData(["run", run._id], context.parameters.emptyRun
-        ? { ...run, run: { ...run.run, status: "pending", turns: [], harUrl: undefined, videoUrls: [] } }
+        ? { ...run, run: { ...run.run, status: "done", turns: [], harUrl: undefined, videoUrls: [] } }
         : run);
       client.setQueryData(["run-reports", run._id], []);
       client.setQueryData(["report-templates"], []);
