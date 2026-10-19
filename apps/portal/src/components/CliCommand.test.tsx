@@ -75,4 +75,21 @@ describe("CliCommand", () => {
     expect(writeText).toHaveBeenCalledWith(value);
     expect(screen.getByRole("button", { name })).toBe(button);
   });
+
+  it("preserves multiline submit content and notes while copying the exact command", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText");
+    const { SubmitLongContent } = composeStories(stories);
+    const longCommand = stories.SubmitLongContent.args.command;
+    render(<SubmitLongContent />);
+    await user.click(screen.getByRole("button", { name: /show cli equivalent/i }));
+
+    expect(screen.getByText(/Requirement 30:/).textContent).toBe(longCommand.display);
+    expect(screen.getByText(longCommand.notes[0])).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Read the CLI documentation" })).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "Copy cli command" }));
+
+    expect(writeText).toHaveBeenCalledOnce();
+    expect(writeText).toHaveBeenCalledWith(longCommand.command);
+  });
 });

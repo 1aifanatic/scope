@@ -266,9 +266,14 @@ its own copy button, plus any parity caveats.
   Each copy button derives a distinct accessible name from its toast label so
   screen-reader users can distinguish the installer, environment setup, and
   generated command.
+  The modal is capped at 90% of the dynamic viewport height, with a fixed header
+  and a scrollable instructions row so long commands, multiline AGENTS.md content,
+  and notes remain reachable on short/mobile screens without hiding the close button.
 - **Storybook:** `CliCommand.stories.tsx` supplies a local `TooltipProvider`
   decorator because the shared preview does not provide one. `CliCommand.test.tsx`
   composes every story and verifies its dialog opens without extra providers.
+  `SubmitLongContent` covers multiline instructions and notes, with browser
+  interaction checks for viewport bounds and keyboard access to the documentation.
 - **Builders:** `apps/portal/src/lib/cli/buildCommand.ts` — pure functions that
   translate Portal state into a command, mirroring the flags in
   `apps/cli/src/commands/run.ts`. They only emit flags the CLI actually supports;

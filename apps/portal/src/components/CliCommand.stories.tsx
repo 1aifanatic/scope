@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, screen, userEvent } from "storybook/test";
+import { expect, screen, userEvent, waitFor } from "storybook/test";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CliCommand } from "./CliCommand";
 import {
@@ -83,6 +83,55 @@ export const SubmitProfileVariations: Story = {
       profileVariations: ["prof_fast", "prof_thorough@4"],
       occurrences: 3,
     }),
+  },
+};
+
+/** Multiline instructions and parity notes must stay reachable in short viewports. */
+export const SubmitLongContent: Story = {
+  args: {
+    label: "CLI",
+    title: "Submit from the CLI",
+    command: buildRunSubmit({
+      task: "Create a Snake game using React",
+      criteria: ["has-tests", "keyboard-controls"],
+      worker: "coder-acp-copilot",
+      model: "gpt-5",
+      reasoningEffort: "high",
+      maxIterations: 20,
+      occurrences: 3,
+      skills: ["typescript", "accessibility"],
+      agentsMd: [
+        "# Project instructions",
+        ...Array.from({ length: 30 }, (_, i) => `- Requirement ${i + 1}: Keep keyboard controls accessible and tested.`),
+      ].join("\n"),
+      priority: 3,
+    }),
+  },
+  play: async ({ canvas }) => {
+    await userEvent.click(canvas.getByRole("button", { name: /show cli equivalent/i }));
+
+    const dialog = screen.getByRole("dialog");
+    const close = screen.getByRole("button", { name: "Close" });
+    const docs = screen.getByRole("link", { name: "Read the CLI documentation" });
+    const expectInViewport = (element: HTMLElement) => {
+      const bounds = element.getBoundingClientRect();
+      expect(bounds.top).toBeGreaterThanOrEqual(0);
+      expect(bounds.bottom).toBeLessThanOrEqual(window.innerHeight);
+    };
+
+    await waitFor(() => {
+      expectInViewport(dialog);
+      expectInViewport(close);
+    });
+    await expect(screen.getByText(/Requirement 30:/)).toBeInTheDocument();
+    await expect(screen.getByText(/Priority \(3\)/)).toBeInTheDocument();
+
+    docs.focus();
+    await waitFor(() => {
+      expectInViewport(docs);
+      expectInViewport(close);
+      expectInViewport(screen.getByRole("heading", { name: "Submit from the CLI" }));
+    });
   },
 };
 

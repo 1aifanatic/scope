@@ -160,7 +160,7 @@ export function CliCommand({
         </TooltipTrigger>
         <TooltipContent>{tooltip}</TooltipContent>
       </Tooltip>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-h-[90dvh] max-w-2xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
@@ -169,7 +169,7 @@ export function CliCommand({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-w-0 space-y-5 py-1">
+        <div className="min-h-0 min-w-0 space-y-5 overflow-y-auto py-1">
           <Step n={1} label="Install the Scope CLI (one-time).">
             <CommandBlock copyValue={CLI_INSTALL_COMMAND} toastLabel="Install command copied" />
             <p className="text-xs text-muted-foreground">
