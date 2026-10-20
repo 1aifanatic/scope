@@ -16,7 +16,7 @@ added to CI without a separate design decision.
 
 ### Static prompt quality inventory
 
-The committed evaluation manifest covers ten Scope-owned runtime prompt
+The committed evaluation manifest covers eleven Scope-owned runtime prompt
 families:
 
 | Family | Variants and important coverage |
@@ -31,6 +31,7 @@ families:
 | Judge instructions | Bundled and independent strategies; file, tool-history, response, conflicting, missing, and prior-pass evidence |
 | Developer feedback | Default persona, custom persona, descendant guard on/off, and multiple root failures |
 | Run reports | Default and appended system prompts; override as a control where the default prompt is intentionally absent |
+| Contribution insights | Report-only P0 triage; docs-only proportionality, Portal parity, skipped fork checks/CLA, overlap, isolation, incomplete evidence, product decisions, and dependency notices |
 
 Judge and report tool descriptions are static AI-facing instructions, but they
 are evaluated through their owning end-to-end judge and report families rather
@@ -143,11 +144,29 @@ The production compositions are:
 | Persona instructions | Feedback generation uses the persona text as the base system message in place of the default feedback instructions; when enabled, the trusted descendant guard and descendant criterion prompts are appended. The user message contains the selected root-failure feedback under `What needs work:` inside the fixed feedback request wrapper. |
 | Report user prompt | The resolved template `userPrompt` is the Copilot SDK user message after replacing `{requestId}` or `{{requestId}}` with the run ID. The real report tools and their schemas remain registered. |
 | Report system prompt | No custom value uses `REPORT_SYSTEM_PROMPT`; `append` uses `REPORT_SYSTEM_PROMPT + "\\n\\n" + content`; `override` uses only the user-controlled content. The result is installed with `systemMessage.mode = "replace"`, alongside the real report tools, before the resolved report user prompt is sent. |
+| Community contributions | The trusted instruction body reads the bounded snapshot file, or the caller's top-level `<untrusted-contribution-snapshot>` block containing that file's contents. Similarly named blocks embedded in contribution data are not replacement snapshots. Contribution text and patches remain untrusted data, separate from trusted policy files. Only the artifact-only `contribution_report` output is registered for the assessment. |
 
 Every profile has a benign contract fixture comparing its adapter output with
 the corresponding runtime composition. The comparison covers message roles,
 ordering, static instructions, delimiters, tool names/descriptions/schemas, and
 the untrusted insertion point.
+
+The contribution adapter reads its instructions and tool description/schema
+from the production workflow, and calls the production report validator and
+renderer. It presents the captured file as a delimited user message and an
+untrusted file fixture, filling trusted policies through the same `readPolicies`
+helper as production. Its `fidelity: "partial"` is intentional: the owned
+instructions, snapshot boundary, and report contract are covered, but gh-aw's
+generated system wrapper, native file-reading transport, sandbox, and threat
+detection are not emulated. This is not evidence that a hosted Copilot run or
+cloud red-team assessment has occurred.
+
+The native `pnpm contribution-insights:local` command reuses this same builder,
+callback, validator, and renderer with an isolated empty-mode Copilot SDK
+transport. It makes a real inference call but does not invoke GitHub Actions or
+the hosted security jobs. Its model sees the supplied inline snapshot and only
+the report tool; it has no filesystem reader. Local policy citations refer to
+the captured working-tree policies, with their hashes saved in `run.json`.
 
 ## Static quality evaluation
 
@@ -440,6 +459,11 @@ pnpm eval:prompts -- --mode quality
 pnpm eval:static-prompts
 pnpm eval:static-prompts:smoke
 
+# Smallest contribution-workflow plumbing evaluation (fake model, no paid calls)
+pnpm --filter static-prompt-evals evaluate:quality -- \
+  --smoke --offline --samples 1 \
+  --dataset datasets/v1/contribution-insights.jsonl
+
 # Human-readable report from an existing ignored run
 pnpm --filter static-prompt-evals report -- \
   results/<run-id>
@@ -535,7 +559,7 @@ The implementation loop is:
 
 Completion requires all of the following:
 
-- all ten static families are present in the
+- all eleven static families are present in the
   machine-checked manifest with no missing or orphaned adapter, dataset,
   assertion, or rubric;
 - the curated dataset is redacted, approved, reproducible, balanced, and

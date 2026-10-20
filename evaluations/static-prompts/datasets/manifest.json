@@ -36,10 +36,19 @@
       "prompt-feature-extraction": 30,
       "judge-instructions": 30,
       "developer-feedback": 25,
-      "run-report": 30
+      "run-report": 30,
+      "contribution-insights": 8
     }
   },
   "files": [
+    {
+      "path": "v1/contribution-insights.jsonl",
+      "sha256": "249d6ae10744a7792fd19994dd8b97a27c55e1cd0e0268beaa6ef223aa3dd459",
+      "rows": 8,
+      "families": [
+        "contribution-insights"
+      ]
+    },
     {
       "path": "v1/criteria-authoring.jsonl",
       "sha256": "0aa535c259d7d6fa36433ac88017919432f92f2c50dd6278f5740330105055c5",

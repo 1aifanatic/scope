@@ -60,3 +60,18 @@ def test_feedback_uses_generation_context_not_grading_task():
     )[0]
     assert "Give actionable developer feedback" in row.query
     assert "Root failure" in row.context
+
+
+def test_contribution_graders_receive_rendered_report_not_raw_tool_payload():
+    row = normalize_rows(
+        [{"id": "contribution", "family": "contribution-insights",
+          "expected": {"referenceReport": "Skipped CI is not passing evidence."}}],
+        [{"caseId": "contribution", "output": {
+            "report": {"schemaVersion": 1, "assessments": []},
+            "markdown": "# Contribution Insights\n\nReport-only; skipped checks are not passes.",
+        }, "rawResponse": "Submitted."}],
+        expected_samples=1,
+    )[0]
+    assert row.response.startswith("# Contribution Insights")
+    assert "skipped checks are not passes" in row.response
+    assert row.response != "Submitted."

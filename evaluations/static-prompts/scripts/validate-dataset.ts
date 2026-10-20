@@ -26,6 +26,7 @@ const FAMILY_MINIMUMS: Record<QualityFamily, number> = {
   "judge-instructions": 25,
   "developer-feedback": 25,
   "run-report": 25,
+  "contribution-insights": 8,
 };
 
 interface DatasetManifest {
@@ -188,6 +189,11 @@ function validateFamilyContract(row: DatasetCase, prefix: string, errors: string
         assert(stringField(input, "systemPromptContent"), `${prefix}: input.systemPromptContent is required for ${row.variant}`, errors);
       }
       break;
+    case "contribution-insights":
+      assert(stringField(input, "snapshot"), `${prefix}: input.snapshot is required`, errors);
+      assert(stringField(expected, "referenceReport"), `${prefix}: expected.referenceReport is required`, errors);
+      assert(stringField(expected, "contribution_decision"), `${prefix}: expected.contribution_decision is required`, errors);
+      break;
   }
 }
 
@@ -345,9 +351,10 @@ export async function validateDataset(
   assert(
     syntheticCases.every((row) =>
       row.family === "judge-instructions"
+      || row.family === "contribution-insights"
       || (row.family === "run-report" && (row.variant === "default" || row.variant === "override-control"))
       || (row.family === "developer-feedback" && row.variant === "persona")),
-    "synthetic cases are only permitted for unavailable judge evidence, feedback persona, and report override controls",
+    "synthetic cases are only permitted for unavailable judge evidence, feedback persona, report controls, and contribution-workflow contracts",
     errors,
   );
   const hasTag = (family: QualityFamily, tag: string): boolean =>

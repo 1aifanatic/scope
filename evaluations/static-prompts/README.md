@@ -180,6 +180,51 @@ When that file is absent, the quality loader follows the ordered file list in
 `datasets/manifest.json` and verifies every SHA-256 and row count. It does not
 discover inputs by globbing `datasets/v1/`.
 
+## Contribution Insights family
+
+`contribution-insights/default` covers the report-only P0 community-PR workflow.
+Its adapter reads the actual workflow instructions and report-tool contract,
+loads trusted repository policies through the production helper, and uses the
+production validator and renderer. The gh-aw engine wrapper, sandbox, and
+native file transport are not reproduced; request fidelity is explicitly
+`partial`.
+
+For a real local assessment before deploying the Actions workflow:
+
+```bash
+pnpm contribution-insights:local --pr 1492
+```
+
+This runs the installed Copilot CLI through a restricted, isolated SDK session,
+using `gh` authentication (or `COPILOT_GITHUB_TOKEN` for inference). It reuses the
+same prompt/collector/report contract and saves local-only artifacts in
+`results/contribution-insights-local/`. It never dispatches Actions or posts
+feedback. The native run is not the hosted gh-aw sandbox or threat-detection
+pipeline, and is separate from the static-prompt evaluation baseline.
+
+Eight synthetic contract fixtures cover documentation-only changes, Portal/CLI
+parity, skipped fork checks and CLA, overlapping work, authentication/project
+isolation, truncated evidence, product decisions, and dependency notices.
+They are not assessments of real PRs at their example URLs. The repository
+workflow has no Scope integration endpoint, so harvesting retains these
+explicit synthetic fixtures alongside the integration-derived families.
+Expectations remain subject to normal human review before merge.
+
+Run the focused plumbing smoke from the repository root:
+
+```bash
+pnpm --filter static-prompt-evals evaluate:quality -- \
+  --smoke --offline --samples 1 \
+  --dataset datasets/v1/contribution-insights.jsonl
+```
+
+Smoke mode selects one case per family; the dataset adapter-contract suite
+parses all eight fixtures. Fake-model output verifies plumbing and deterministic
+contracts, not AI triage quality. A real model-quality baseline requires
+explicit approval. See
+[Contribution Insights](../../docs/architecture/contribution-insights.md)
+for workflow operation and the separate hosted rollout.
+
 ## Authoring quality cases
 
 Curated JSONL is input, not generated output. Each reviewed row must include:

@@ -12,6 +12,7 @@ import type {
   QualityCaseRow,
 } from "../adapter/protocol.js";
 import { validateDataset } from "./validate-dataset.js";
+import { fakeContributionReport } from "../adapter/targets/contribution-insights.js";
 
 const DATASET_ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -59,6 +60,8 @@ function fakeResponse(row: QualityCaseRow, request: ComposedPromptRequest): stri
     case "run-report":
       expect(request.tools?.length).toBeGreaterThan(0);
       return "# Run report\n\nThe run evidence was reviewed.";
+    case "contribution-insights":
+      return fakeContributionReport(request);
   }
 }
 

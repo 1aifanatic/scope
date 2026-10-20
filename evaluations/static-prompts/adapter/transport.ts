@@ -3,6 +3,7 @@
 
 import { acquireInferenceClient } from "../../../apps/api/src/llm-token.js";
 import { withRetry } from "../../../packages/shared/src/utils/retry.js";
+import { fakeContributionReport } from "./targets/contribution-insights.js";
 import type {
   AdapterContext,
   CompletionOptions,
@@ -146,6 +147,8 @@ export function createFakeAdapterContext(
         content = "Apply the requested correction.";
       } else if (adapterId.startsWith("run-report/")) {
         content = "# Fake report";
+      } else if (adapterId.startsWith("contribution-insights/")) {
+        content = fakeContributionReport(request);
       } else {
         throw new Error(
           `Fake transport has no response for adapter '${adapterId}'`,
