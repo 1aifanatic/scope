@@ -197,6 +197,37 @@ describe("production page + native worker protocol + shared API transport", () =
     bridge.close();
   });
 
+  it("serializes concurrent native reads while the upstream chunk is still pending", async () => {
+    const { sw } = environment();
+    let upstream!: ReadableStreamDefaultController<Uint8Array>;
+    let canceled = false;
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) { upstream = controller; },
+      cancel() { canceled = true; },
+    }, { highWaterMark: 0 });
+    vi.stubGlobal("fetch", vi.fn(async () => recording(source)));
+    const error = vi.fn();
+    const bridge = await openAuthenticatedMedia(path, "project-1", session().signal, error);
+    const response = await sw.fetch(bridge.url);
+    const reader = response.body!.getReader();
+    const reads = [reader.read(), reader.read(), reader.read(), reader.read(), reader.read()];
+    const completion = Promise.allSettled(reads);
+    for (const value of [1, 2, 3, 4]) {
+      await new Promise<void>(resolve => setTimeout(resolve, 10));
+      if (canceled) break;
+      upstream.enqueue(new Uint8Array([value]));
+    }
+    if (!canceled) upstream.close();
+    expect(await completion).toEqual([
+      ...[1, 2, 3, 4].map(value => ({
+        status: "fulfilled", value: { value: new Uint8Array([value]), done: false },
+      })),
+      { status: "fulfilled", value: { value: undefined, done: true } },
+    ]);
+    expect(error).not.toHaveBeenCalled();
+    bridge.close();
+  });
+
   it("uses the shared single 401 refresh for a range", async () => {
     const { sw } = environment();
     const token = vi.fn().mockResolvedValueOnce("expired").mockResolvedValueOnce("renewed");

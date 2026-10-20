@@ -77,6 +77,7 @@ async function mediaResponse(event, id) {
     let headersReceived = false;
     let finished = false;
     let awaitingChunk = false;
+    let completePull;
     let remaining = 0;
     let timer;
     const finish = () => {
@@ -86,6 +87,12 @@ async function mediaResponse(event, id) {
       session.pending.delete(cancel);
       event.request.signal.removeEventListener("abort", abort);
       channel.port1.close();
+      settlePull();
+    };
+    const settlePull = () => {
+      const complete = completePull;
+      completePull = undefined;
+      complete?.();
     };
     const cancel = (message, report = true) => {
       if (finished) return;
@@ -126,7 +133,15 @@ async function mediaResponse(event, id) {
         headersReceived = true;
         const body = new ReadableStream({
           start(controller) { stream = controller; },
-          pull() { awaitingChunk = true; armTimeout(); channel.port1.postMessage({ type: "pull" }); },
+          pull() {
+            // Keep the Streams pull pending until its MessagePort round trip completes.
+            return new Promise(resolvePull => {
+              completePull = resolvePull;
+              awaitingChunk = true;
+              armTimeout();
+              channel.port1.postMessage({ type: "pull" });
+            });
+          },
           cancel() { channel.port1.postMessage({ type: "cancel" }); finish(); },
         }, { highWaterMark: 0 });
         resolve(new Response(body, { status: data.status, headers }));
@@ -137,6 +152,7 @@ async function mediaResponse(event, id) {
         awaitingChunk = false;
         remaining -= data.bytes.byteLength;
         stream.enqueue(data.bytes);
+        settlePull();
       } else if (data?.type === "end" && headersReceived && awaitingChunk && remaining === 0) {
         stream.close();
         finish();

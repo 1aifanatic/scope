@@ -73,7 +73,11 @@ deliberate **Retry recording** action, not saved or played as media.
 
 Every native pull permits at most one `reader.read()` and one chunk on the
 MessagePort; transferable streams are not required. The native response stream
-has a zero high-water mark. The shared HTTP client's response hook can introduce
+has a zero high-water mark, and its `pull()` promise remains pending until the
+chunk round trip completes. This serializes queued/concurrent native reads;
+returning immediately would send overlapping requests while the page is still
+reading a chunk. Cancellation, errors and timeouts settle that pending pull.
+The shared HTTP client's response hook can introduce
 a bounded transport prefetch; neither bridge implementation eagerly drains the
 recording. Browser/network buffering is outside this protocol.
 
