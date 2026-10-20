@@ -17,6 +17,8 @@ A **request** is what you submit to Scope. It bundles:
 - A **criteria set** (by ID) — how the result is judged.
 - A **profile** (by ID or version ID) or an inline runtime
   configuration — which agent, model, and tools to use.
+- An optional **codebase revision** — the project snapshot seeded into
+  the worker's workspace.
 - A **priority** and a few options like `maxIterations`.
 
 You don't run anything yourself — submitting a request hands the work
@@ -67,6 +69,17 @@ saved version is **immutable** — once created, version 2 is frozen
 forever. This is what makes runs reproducible.
 
 See [Defining profiles](/guides/defining-profiles/).
+
+## Codebase
+
+A **codebase** is a reusable project source attached to a request.
+Codebases can come from GitHub repositories or uploaded archives.
+
+Every codebase has immutable, sequentially numbered revisions. A
+request resolves its selection to one exact revision before queueing,
+so the agent's starting workspace can be inspected and reproduced.
+
+See [Managing codebases](/guides/managing-codebases/).
 
 ## Judge
 
@@ -126,7 +139,7 @@ See [Using MCP servers, skills & extensions](/guides/mcp-skills-extensions/).
 | Personas | Configure the evaluation perspective and feedback style. |
 | Profiles and variations | Save an agent configuration and compare changes against a baseline. |
 | Skills and MCP servers | Provide agent instructions and tools through the Model Context Protocol. |
-| Codebases | Seed a run with a versioned starting workspace. |
+| Codebases | Seed a run with a versioned starting workspace. See [Managing codebases](/guides/managing-codebases/). |
 
 The YAML files in
 [config/](https://github.com/microsoft/scope/tree/main/config) are portable

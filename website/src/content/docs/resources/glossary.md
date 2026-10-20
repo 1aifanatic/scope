@@ -49,6 +49,20 @@ A reusable, versioned description of an agent runtime configuration
 profile has a stable identity and a series of immutable versions. See
 [Defining profiles](/guides/defining-profiles/).
 
+## Codebase
+
+A reusable source project that seeds a run workspace. A codebase is
+registered from a GitHub repository or uploaded archive and has a
+series of immutable revisions. See
+[Managing codebases](/guides/managing-codebases/).
+
+## Codebase revision
+
+An immutable snapshot of a codebase, addressed by a numbered ref such
+as `inventory-service@r3` or by its revision UUID. Requests store the
+resolved revision ID so later codebase changes do not alter a past
+run's starting workspace.
+
 ## Profile version
 
 An immutable snapshot of a profile's runtime configuration.

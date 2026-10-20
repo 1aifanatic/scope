@@ -133,6 +133,7 @@ export default defineConfig({
 							label: 'Design your benchmark',
 							collapsed: true,
 							items: [
+								{ label: 'Codebases', slug: 'guides/managing-codebases' },
 								{ label: 'Task prompts', slug: 'guides/managing-task-prompts' },
 								{ label: 'Evaluation criteria', slug: 'guides/defining-criteria' },
 								{ label: 'Agent profiles', slug: 'guides/defining-profiles' },
