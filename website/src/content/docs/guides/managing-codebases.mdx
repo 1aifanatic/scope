@@ -108,15 +108,15 @@ ref…** to resolve a branch, tag, or commit SHA.
 CLI equivalents:
 
 ```bash
-scope codebase resolve <codebase-id>
-scope codebase resolve <codebase-id> --ref release/2026-10
-scope codebase revisions <codebase-id>
+scope codebase resolve your-codebase-id
+scope codebase resolve your-codebase-id --ref release/2026-10
+scope codebase revisions your-codebase-id
 ```
 
 API equivalent:
 
 ```http
-POST /api/v1/codebases/{codebaseId}/revisions
+POST /api/v1/codebases/your-codebase-id/revisions
 Content-Type: application/json
 
 { "requestedRef": "release/2026-10" }
@@ -130,7 +130,7 @@ reuses that revision instead of creating a duplicate.
 In the Portal, select **Upload new revision**. From the CLI:
 
 ```bash
-scope codebase upload <codebase-id> ./inventory-fixture-v2.zip
+scope codebase upload your-codebase-id ./inventory-fixture-v2.zip
 ```
 
 If the uploaded content is identical to the latest revision, Scope
@@ -208,7 +208,7 @@ available to historical and in-flight runs.
 From the CLI:
 
 ```bash
-scope codebase delete <codebase-id>
+scope codebase delete your-codebase-id
 ```
 
 ## Reproducibility tips
