@@ -224,7 +224,50 @@ artifact or log request. Existing completed-worker archive bytes and stored
 authenticated log replay remained intact; no new worker execution was submitted.
 
 This recording was a **controlled fixture, not Electron-worker output**.
-Electron recording/upload end-to-end acceptance remains a separate local phase.
+The separate Electron-worker acceptance below additionally covers real capture
+and upload; it does not replace the broader fixture-based lifecycle matrix.
 Firefox/Safari playback, prefixed reverse-proxy deployment and an actual
 five-minute idle wait were not established by these browser checks; protocol
 tests do not replace those deployment/browser acceptance cases.
+
+### Recorded local Electron acceptance
+
+A separately authorized local execution on 2026-10-20 completed one request and
+one iteration using an existing prebuilt ARM64 Electron worker image with
+VS Code 1.126.0 and Copilot Chat 0.54.0. The worker used an isolated queue,
+workspace and project; no scheduler sweep, Judge, report worker or cloud
+deployment was started. Its normal queue processor uploaded the actual X11/ffmpeg
+recording and workspace snapshot. The snapshot contained the exact requested
+proof-file bytes, and a decoded recording frame showed the real VS Code session.
+
+The session-local startup adapter acquired a validated GitHub OAuth key through
+Token Manager's existing `copilot-sdk` capability and supplied it to the prebuilt
+worker's supported in-process token input. That image expects an internal-only
+legacy capability label which the public registry does not expose. No capability
+grants, project roles, public credential endpoint or TLS bypass were added; the
+key value was not written into Compose, a host environment file or container
+configuration. This local adapter is not a checked-in Electron deployment recipe.
+
+The uploaded WebM was **1,171,377 bytes**, with an encoded duration of
+**23.76 seconds** and SHA-256
+`1a195fbb2636cd21b238aa89bc848a3630ab282720799b3517864d53a40c7b29`.
+In Chromium 156.0.8078.12, genuine emulator/MSAL sign-in and normal project
+authorization allowed native playback to reach 0.6701 seconds and present 18
+frames after only 127,889 upstream bytes. The initial buffered interval ended
+at 2.078 seconds; seeking to 17 seconds issued a new authenticated
+`Range: bytes=622592-` request and resumed at 17.2695 seconds. Its `206` response
+preserved `Content-Range: bytes 622592-1171376/1171377` and the exact 548,785-byte
+response length.
+
+Anonymous API access returned `401`; a nonmember received the intentional
+existence-hiding `404`; another browser client could not use the native bridge
+URL (`403`). An invalid range retained `416` with
+`Content-Range: bytes */1171377`. Switching back to the Turns tab invalidated
+the old bridge route. No protected CacheStorage entries or token-bearing URLs
+were observed. The worker remained available with an empty dedicated work
+queue; its single post-processing notification was isolated without a consumer.
+The original Copilot worker, completed task and empty queue were preserved.
+
+These results establish actual worker capture/upload and authenticated native
+playback/seek, not recording wall-clock fidelity, audio capture, other browser
+engines or a production Electron deployment.
