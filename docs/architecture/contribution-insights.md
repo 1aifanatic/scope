@@ -23,6 +23,11 @@ Every captured PR receives all six P0 assessments:
 | Scope completeness | Consider CLI/Portal parity, Storybook, compatibility, migrations, notices, docs, and prompt evaluations where applicable. |
 | Reviewer brief and routing | Suggest CODEOWNERS, review order, uncertainties, and one/two-maintainer approval requirements. |
 
+Markdown reports start with a TL;DR table showing the recommendation, separate
+ratings, risk, confidence, contributor work, next action, and evidence caveat.
+The table never presents a score as merge approval. It is derived from the
+validated assessment and captured facts without another model call.
+
 Feedback is drafted under **Required**, **Optional**, and **Needs maintainer
 decision**. A required item should explain what to change, why, and how to
 demonstrate resolution. Team-owned decisions must not become contributor chores.

@@ -175,9 +175,50 @@ function list(values: string[]): string {
   return values.length ? values.map((value) => `- ${escape(value)}`).join("\n") : "None identified.";
 }
 
+function ratingLabel(rating: Rating): string {
+  return rating.score === null ? "Unassessed" : `${rating.score}/5`;
+}
+
 export function renderReport(report: ContributionReport, context: InsightsContext): string {
+  const recommendations: Record<ContributionAssessment["recommendation"], string> = {
+    "prioritize-review": "Prioritize review",
+    "request-clarification": "Clarification needed",
+    "request-contributor-changes": "Contributor changes needed",
+    "maintainer-scope-decision": "Maintainer scope decision",
+  };
   const sections = [
     "# Contribution Insights",
+    "",
+    "## TL;DR",
+  ];
+  if (!report.assessments.length) sections.push("", "No eligible community contributions were selected.");
+  for (const assessment of report.assessments) {
+    const contribution = context.contributions.find((candidate) => candidate.number === assessment.number);
+    if (!contribution) throw new Error("Cannot summarize an assessment without its snapshot");
+    if (report.assessments.length > 1) sections.push("", `### PR #${contribution.number}`);
+    const nextAction = assessment.feedback.required[0] ?? assessment.feedback.maintainerDecision[0] ??
+      assessment.reviewerBrief.reviewOrder[0] ?? assessment.reviewerBrief.summary;
+    const caveat = contribution.checks.length === 1 && contribution.cla === "passed"
+      ? "Only the CLA check passed in the captured evidence; behavioral tests were not verified."
+      : contribution.limitations[0] ?? assessment.limitations[0] ??
+        "Only captured evidence was considered; this assessment did not run tests.";
+    sections.push(
+      "", "| Signal | Summary |", "| --- | --- |",
+      `| Contribution | [#${contribution.number}](${contribution.url}): ${escape(contribution.title)} |`,
+      `| Recommendation | **${recommendations[assessment.recommendation]}** |`,
+      `| Value | **${ratingLabel(assessment.value)}** |`,
+      `| Correctness evidence | **${ratingLabel(assessment.correctnessEvidence)}** |`,
+      `| Risk | **${assessment.risk}** |`,
+      `| Confidence | **${assessment.confidence}** |`,
+      `| Contributor action | ${assessment.feedback.required.length
+        ? `${assessment.feedback.required.length} required item(s); see contributor feedback`
+        : "No required changes identified"} |`,
+      `| Next action | ${escape(nextAction)} |`,
+      `| Evidence caveat | ${escape(caveat)} |`,
+      "| Merge readiness | **Not assessed**; this report is not a merge approval |",
+    );
+  }
+  sections.push(
     "",
     "**Report-only pilot. AI-generated advice, not approval or a merge recommendation. Contributor feedback below is a draft and was not posted.**",
     "",
@@ -187,8 +228,7 @@ export function renderReport(report: ContributionReport, context: InsightsContex
     "",
     `Considered ${context.selection.considered} PRs; captured ${context.selection.selected}.`,
     list(context.selection.limitations),
-  ];
-  if (!report.assessments.length) sections.push("", "No eligible community contributions were selected.");
+  );
   for (const assessment of report.assessments) {
     const contribution = context.contributions.find((candidate) => candidate.number === assessment.number);
     if (!contribution) throw new Error("Cannot render an assessment without its snapshot");
@@ -200,8 +240,8 @@ export function renderReport(report: ContributionReport, context: InsightsContex
       "", "### Scorecard",
       "", "| Dimension | Assessment | Rationale |",
       "| --- | --- | --- |",
-      `| Value | ${assessment.value.score === null ? "Unassessed" : `${assessment.value.score}/5`} | ${escape(assessment.value.rationale)} ${citations(assessment.value.evidence)} |`,
-      `| Correctness evidence | ${assessment.correctnessEvidence.score === null ? "Unassessed" : `${assessment.correctnessEvidence.score}/5`} | ${escape(assessment.correctnessEvidence.rationale)} ${citations(assessment.correctnessEvidence.evidence)} |`,
+      `| Value | ${ratingLabel(assessment.value)} | ${escape(assessment.value.rationale)} ${citations(assessment.value.evidence)} |`,
+      `| Correctness evidence | ${ratingLabel(assessment.correctnessEvidence)} | ${escape(assessment.correctnessEvidence.rationale)} ${citations(assessment.correctnessEvidence.evidence)} |`,
       `| Review readiness | ${assessment.readiness} | Advisory; not merge readiness |`,
       `| Risk | ${assessment.risk} | Does not subtract from contribution value |`,
       `| Confidence | ${assessment.confidence} | Limited to captured evidence |`,

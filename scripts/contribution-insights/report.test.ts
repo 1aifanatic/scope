@@ -108,6 +108,28 @@ describe("contribution report validation", () => {
 });
 
 describe("report-only rendering", () => {
+  it("opens with a TL;DR table while keeping unknown evidence and merge readiness explicit", () => {
+    const markdown = renderReport(parseReport(json(), context), context);
+    const summary = markdown.split("**Report-only pilot.")[0];
+    expect(summary).toContain("## TL;DR");
+    expect(summary).toContain("| Signal | Summary |");
+    expect(summary).toContain("| Recommendation | **Clarification needed** |");
+    expect(summary).toContain("| Value | **3/5** |");
+    expect(summary).toContain("| Correctness evidence | **Unassessed** |");
+    expect(summary).toContain("| Contributor action | No required changes identified |");
+    expect(summary).toContain("| Next action | Confirm whether additional validation is needed. |");
+    expect(summary).toContain("| Merge readiness | **Not assessed**;");
+  });
+
+  it("prioritizes required contributor work and escapes model text in the TL;DR table", () => {
+    const value = assessment();
+    value.feedback.required = ["Add a regression test | demonstrate the fix."];
+    const markdown = renderReport(parseReport(json(value), context), context);
+    const summary = markdown.split("**Report-only pilot.")[0];
+    expect(summary).toContain("| Contributor action | 1 required item(s); see contributor feedback |");
+    expect(summary).toContain("| Next action | Add a regression test \\| demonstrate the fix. |");
+  });
+
   it("renders deterministic check/CLA facts and clearly separates required and optional feedback", () => {
     const markdown = renderReport(parseReport(json(), context), context);
     expect(markdown).toContain("Report-only pilot");
