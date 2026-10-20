@@ -50,7 +50,7 @@ The following identity, role and freshness contract applies when auth is enabled
 | Reader | Read, including stored reports/artifacts | None | None |
 | Contributor | Read/create/update/delete all project content, regardless of creator | None | None |
 | Project admin | Contributor permissions | Edit name/description | None |
-| Platform admin without membership | None | Control-plane metadata | Create/delete/restore projects, manage memberships, disable ordinary users |
+| Platform admin without membership | None | Control-plane metadata | Create/delete/restore projects, manage memberships, promote enrolled users to platform admin, disable ordinary users |
 
 Platform admins explicitly add themselves through the same audited membership
 operation to read content or global agent/model catalogs, except that **new project
@@ -99,6 +99,17 @@ Changes/failures clear cached project data; inaccessible selections are cleared.
 The no-access shell exposes the user's Scope UUID and sign-out, without content
 queries. Refresh/reload never repeatedly POST enrollment.
 
+Portal log streams use the same bearer-aware `apiClient` and account-session
+cancellation as ordinary API requests, with its existing one-time `401` refresh.
+The hook resets and immediately hides stale logs on project/account/attempt
+changes. Only transient establishment failures have a bounded retry; once an SSE
+response is accepted, a closed authorization lease or network disconnect is
+surfaced for deliberate reload/replay, not automatically resumed without a server
+cursor. `403`/`404` and named terminal events never reconnect or trigger login.
+See [realtime-data-flow.md](../research/realtime-data-flow.md#portal-consumer) for
+framing, replay and retry details. This changes no API grant/lease checks and adds
+no query-token, cookie or anonymous-auth workaround.
+
 ### Durable changes and operator runbooks
 
 `AdminOperations` persists a fingerprinted intent in `admin_operations` **before**
@@ -111,6 +122,16 @@ There is no multi-document transaction or dedicated atomic audit-event collectio
 Migration 031 verifies membership uniqueness and rejects a TTL index on retained
 administrative evidence. Rollback retains memberships/evidence rather than
 reopening access.
+
+RBAC does **not** require the separate codebase slug/ref uniqueness upgrade.
+Migration 032 is removed from automatic migration discovery and readiness;
+mandatory users identity uniqueness (029), membership uniqueness (031), scoped
+lookups and reference/parent checks remain unchanged. Existing codebase indexes
+and genuine historical migration records are retained. Legacy global constraints
+can still block cross-project name reuse; absent constraints still allow
+same-project duplicate races. The Cosmos-safe fix is deferred to
+[#1521](https://github.com/microsoft/scope/issues/1521), not silently skipped or
+recorded as applied. See the [migration release boundary](db-migrations.md#rbac-release-boundary-codebase-uniqueness-is-deferred).
 
 There is currently no automatic evidence pruning. Operation histories and target
 operation-ID arrays/backups grow; document-size/capacity monitoring and an approved
@@ -139,9 +160,32 @@ to that exact project, replaces the selector with its name, and offers **All
 project access** to return to the global view. Missing/invalid project links
 never fall back to another project; navigation between deep links resets the
 member editor and confirmation state.
+Project-specific views show project membership controls only: they do not render
+the platform-admin section or advanced recovery controls, or request the
+platform-admin roster. Pending membership changes retain their retry behavior;
+their recovery links carry the exact operation ID to
+`/access?operationId=...`, pre-filling and opening global operation recovery.
+This navigation never automatically inspects or reconciles an operation.
 The roster has no separate member-filter box. User labels show the stored display
 name and email/sign-in alias rather than repeated UUIDs; the Scope UUID remains
 available in a hover tooltip and as a search key.
+
+**Platform administrators** appears below project membership and above
+**Advanced: operation recovery**, on the global `/access` view only.
+This section is platform-wide and works without a selected project, including
+when there are no projects. It pages through users whose stored role is `admin`,
+with explicit disabled-account and pending-operation labels. Neither disabled
+accounts nor incomplete security operations grant authority.
+
+**Add platform admin** searches existing enrolled users, excluding disabled
+accounts, existing admins and unknown roles. Users must sign in once before they
+can be selected; no IdP directory lookup, invitation or pre-provisioning occurs.
+A separate confirmation explains that the grant allows platform-wide user,
+membership and project-lifecycle administration, including further promotions.
+It does not create a project membership or grant project-content access.
+This intentionally replaces operator-only promotion with delegation by existing
+platform admins. Demotion, administrator disable/re-enable and lockout recovery
+remain operator-only; there is no browser removal action.
 
 Explicit enrollment refreshes display-only profile labels from verified token
 claims. `name` takes precedence over `given_name`/`family_name`; the signed
@@ -163,6 +207,32 @@ disabled state and revision are returned, never IdP subjects or credentials.
 minimal user summaries and operation-pending state, including revoked rows for
 CAS/recovery. Substring search is bounded by a five-second query timeout; its
 Cosmos RU/index behavior still requires deployment-specific verification.
+
+`GET /api/v1/admin/platform-admins?limit=20&cursor=...` is
+platform-admin-only and filters roles on the server, not a page of directory
+search results. It pages by ascending Scope UUID with `limit` 1–50 (default 20)
+and returns `items` plus optional `nextCursor`. Each item contains the minimal
+user summary, `pending`, and optional `operationId`; it never exposes the IdP
+identity tuple or credentials. The response is no-store. Sorting uses the
+existing `_id` index; role-filter RU cost still needs verification on Cosmos
+at deployment scale. No collection, identity-uniqueness change or migration is
+required by this feature.
+
+`POST /api/v1/admin/users/:id/promote` accepts only `{ "revision": 0 }`
+(replace `0` with the observed user revision) and an `Idempotency-Key`.
+Only an existing platform admin can call it. The target must already exist;
+the final audited CAS requires `role: "user"` and no `disabledAt`, preventing
+a concurrent disable from being overwritten. A different pending target
+security operation must be reconciled first. No arbitrary role, disable flag
+or identity is accepted. Stale revisions, already-admin/disabled targets and
+conflicting idempotency inputs return `409`; missing users return `404`.
+An identical completed replay returns its original result without undoing
+a later operator demotion. Completion returns `200`; `202` means pending,
+not an effective grant. The Portal retains the same operation ID for retry
+and uses the existing inspection/reconciliation controls. Roster, directory
+and membership caches refresh after changes; the promoted user's capabilities
+are read canonically on their existing read-only refresh, without reenrollment.
+Auth-off mode keeps both endpoints unavailable.
 
 Portal **Projects** (`/projects`) shows only projects with an explicit membership
 granting `content:read`, including for platform administrators. It uses the normal
@@ -199,6 +269,9 @@ pnpm cli access enroll --url http://localhost:3101
 pnpm cli access me --url http://localhost:3101
 pnpm cli access find-user "$USER_ID" --url http://localhost:3101
 pnpm cli access search-users "Bob" --limit 20 --url http://localhost:3101
+pnpm cli access platform-admins --limit 20 --url http://localhost:3101
+pnpm cli access promote-admin "$USER_ID" --revision "$REVISION" \
+  --operation-id "$OPERATION_ID" --url http://localhost:3101
 pnpm cli access projects --url http://localhost:3101
 pnpm cli access members "$PROJECT_ID" --url http://localhost:3101
 pnpm cli access set-member "$PROJECT_ID" "$USER_ID" --role reader \
@@ -212,8 +285,11 @@ revisions before a different change. Pending access-command operations exit 2;
 project mutation commands fail with an explicit pending/inspect error. There is no
 new CLI interactive login, PAT, service token or token exchange.
 
-Platform-admin lifecycle and lockout recovery are **operator-only**, using an
-existing exact identity and Scope UUID. After building the API, run with
+Initial administrator seeding, demotion, administrator disable/re-enable and
+lockout recovery remain **operator-managed**, using an existing exact identity
+and Scope UUID. Existing platform admins can add admins through the Portal/API/CLI
+workflow above; an operator is still needed when no active admin remains.
+After building the API, run with
 `AUTH_OPERATOR_MONGO_URI` supplied through secure operator configuration:
 
 ```bash
@@ -272,10 +348,23 @@ are trusted infrastructure, not human API callers.
 | `scripts/acceptance-codebase-astro.sh` | Existing unsigned benchmark script is not an authenticated RBAC acceptance command; do not run it as a workaround |
 
 At cutover stop old report producers/consumers and old anonymous API replicas
-before admitting protected traffic. This local workers-free environment does not
-prove mixed-version cutover or actual benchmark execution.
+before admitting protected traffic. The initial core-only acceptance did not
+prove mixed-version cutover or actual benchmark execution; the later narrow
+worker acceptance below does not establish general protected-worker compatibility.
 
 ### Local evidence and release gates
+
+After separating the codebase migration, the rebuilt local API discovers/requires
+31 migrations and reports ready while preserving all 32 genuine historical
+records and installed indexes on the existing native database. A fresh isolated
+native database also runs the actual migration CLI through 031 and passes
+readiness without any 032 entry. Real emulator-token checks cover all three
+membership roles, creator membership, foreign codebase/revision and submission
+reference denial, concurrent archive creation, revocation and the platform-admin
+content boundary. Chromium/MSAL checks retain role-based actions, fixed-project
+access management and project-switch/revocation cache clearing. No workers or
+benchmark submissions are needed. These observations do not resolve the remaining
+Cosmos identity/membership index or consistency release gates.
 
 The isolated core environment uses Portal `http://localhost:5101`, API
 `http://localhost:3101`, and Entra Local `https://localhost:8501`, with native Mongo,
@@ -338,6 +427,33 @@ Cosmos authority topology/consistency and multi-replica rollout remain release
 gates. Production legacy mappings still require administrator review; only
 synthetic reviewed fixtures were applied locally. Same-tab MSAL account switching
 is covered by cancellation/cache unit tests, not by the browser walkthrough.
+
+#### Authenticated streaming and narrow Copilot worker acceptance
+
+Subsequent, explicitly authorized log-stream acceptance extended the original
+core-only environment with one `coder-acp-copilot` instance. Genuine emulator/MSAL
+sessions exercised current-run and historical-attempt replay, stored-report replay,
+live logs, reader submission denial, foreign-project denial, membership removal
+closing the stream, and project/logout/account changes clearing old logs.
+No new report was generated.
+
+A single disposable, select-only task with no criteria or optional resources
+exercised real Copilot consumption, live tool-progress rendering, terminal replay,
+and verification of the task's file in its saved workspace snapshot. An
+authenticated platform administrator registered a separate local agent/version;
+only that task was claimed and dispatched using the scheduler's existing
+queued-state/message contract to a new dedicated queue. No scheduler, judge,
+report, post-processing or other coder consumer was started. The resulting ATIF
+message remains in a separate, unconsumed quarantine queue.
+
+This narrow path uses the existing private `GITHUB_TOKEN` fallback and the
+embedded Select task; it does **not** establish service identity for protected
+worker API clients. No human Scope bearer is forwarded to the worker. The local
+override removes the Docker socket, retains TLS verification, and sets
+`DEV_PROXY_ENABLED` to an **empty string**: the existing proxy helper treats any
+nonempty value, including `"false"`, as enabled. Native standalone Mongo does not
+prove Change Stream completion; this acceptance uses Redis final-event delivery.
+The Cosmos and multi-replica release gates above remain unchanged.
 
 <details>
 <summary>Historical pre-membership authentication design and deferred proposals (not the current RBAC contract)</summary>
@@ -1285,15 +1401,16 @@ The remaining interactive CLI design is **deferred**:
 effective permissions, self-scoped runs, and user-management UI belong to RBAC.
 The current Scope `role` is authoritative metadata, not evidence those features ship.
 
-### 9. Deferred: SSE / log streaming authorization
+### 9. SSE / log streaming transport
 
-`EventSource` cannot set custom headers, so **`fetch`-based streaming (`ReadableStream`)
-is the preferred transport** for the live-log SSE endpoints in both Portal and CLI: it can
-send the **normal `Authorization: Bearer` header**, identical to every other request. A
-query-param token (`?access_token=`) is a **fallback only** (for clients that genuinely
-cannot use fetch-streaming) and, when used, the token **must be short-lived and narrowly
-scoped** to the stream, and **must never be logged** (scrubbed at the proxy and app layers).
-The SSE endpoint applies the same `readScope` access check on the parent run.
+Native browser `EventSource` cannot set custom headers. The Portal now uses
+**`fetch`-based streaming (`ReadableStream`) through `apiClient`** to send the normal
+`Authorization: Bearer` header, identical to other requests. It does not implement
+query-param tokens. The SSE endpoint applies the same project-read access check
+on the parent run/report and maintains the bounded canonical authorization lease
+described above. The older owner/private wording and CLI migration checklist below
+are design history, not a claim that a query-token fallback or internal service
+identity has been implemented.
 
 ### 10. Deferred RBAC/internal-auth secret storage
 

@@ -6,7 +6,8 @@ import { z } from "zod";
 import type { UserDocument } from "shared";
 import {
   AccessUserSearchResultSchema, AccessUserSummarySchema, ProjectMembershipSummarySchema, ProjectRoleSchema,
-  type AccessUserSummary, type ProjectMembership, type ProjectMembershipSummary,
+  PlatformAdminListSchema, PlatformAdminPromotionSchema,
+  type AccessUserSummary, type PlatformAdminSummary, type ProjectMembership, type ProjectMembershipSummary,
 } from "shared/rbac";
 import type { Filter } from "mongodb";
 import type { RouteContext } from "../route-context.js";
@@ -38,6 +39,62 @@ function userSummary(user: UserDocument): AccessUserSummary {
 
 export function registerAccessRoutes(ctx: RouteContext): void {
   const auth = () => new Authorization(ctx.db);
+  apiRoute(ctx.app, ctx.registry, {
+    method: "get", path: "/api/v1/admin/platform-admins", tags: ["Access"], summary: "List platform administrators, including disabled accounts and pending changes",
+    query: z.object({
+      cursor: z.string().min(1).max(200).optional(),
+      limit: z.coerce.number().int().min(1).max(50).default(20),
+    }).strict(),
+    response: PlatformAdminListSchema,
+    handler: async (req, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      const { cursor, limit } = req.query;
+      const users = await ctx.usersCollection.find({
+        role: "admin", ...(cursor ? { _id: { $gt: cursor } } : {}),
+      }, { projection: { ...userProjection, lastOperationId: 1 }, timeoutMS: 5_000 })
+        .sort({ _id: 1 }).limit(limit + 1).toArray();
+      const page = users.slice(0, limit);
+      const markers = page.flatMap(user => user.lastOperationId ? [user.lastOperationId] : []);
+      const operations = markers.length ? await ctx.db.collection<AdminOperation>("admin_operations")
+        .find({ _id: { $in: markers }, state: "completed" }, { projection: { _id: 1 }, timeoutMS: 5_000 }).toArray() : [];
+      const completed = new Set(operations.map(operation => operation._id));
+      const items: PlatformAdminSummary[] = page.map(user => ({
+        ...userSummary(user), role: "admin",
+        pending: user.lastOperationId !== undefined && !completed.has(user.lastOperationId),
+        operationId: user.lastOperationId,
+      }));
+      res.json({ items, ...(users.length > limit ? { nextCursor: page[page.length - 1]._id } : {}) });
+    },
+  });
+  apiRoute(ctx.app, ctx.registry, {
+    method: "post", path: "/api/v1/admin/users/:id/promote", tags: ["Access"], summary: "Promote an enabled enrolled user to platform administrator",
+    body: PlatformAdminPromotionSchema, response: z.object({
+      operationId: z.string(), state: z.enum(["completed", "pending"]), revision: z.number().int().positive(),
+    }),
+    successStatus: 200,
+    errorResponses: {
+      202: { description: "Promotion is pending; inspect or reconcile the same operation ID before claiming completion" },
+      404: { description: "Enrolled user not found" },
+      409: { description: "Revision, role, enabled state or idempotency precondition conflict" },
+    },
+    handler: async (req, res) => {
+      const id = operationId(req);
+      const user = await ctx.usersCollection.findOne({ _id: req.params.id }, { timeoutMS: 5_000 });
+      if (!user) throw new AccessError(404, "not_found", "Enrolled user not found");
+      const authority = auth();
+      if (user.lastOperationId && user.lastOperationId !== id && !await authority.operations.isComplete(user.lastOperationId)) {
+        throw new AccessError(409, "operation_pending", `User access change ${user.lastOperationId} must be reconciled before promotion`);
+      }
+      const result = await authority.operations.execute({
+        _id: id, actor: req.user!.id, reason: "Explicit platform-admin promotion of an enrolled user",
+        collection: "users", targetId: user._id, expectedRevision: req.body.revision,
+        change: { role: "admin" }, unset: [],
+        condition: { role: "user", disabledAt: { $exists: false } },
+      });
+      res.setHeader("Cache-Control", "no-store");
+      res.status(result.state === "pending" ? 202 : 200).json(result);
+    },
+  });
   apiRoute(ctx.app, ctx.registry, {
     method: "get", path: "/api/v1/admin/users/search", tags: ["Access"], summary: "Search enrolled platform users (platform administration)",
     query: z.object({
@@ -134,7 +191,7 @@ export function registerAccessRoutes(ctx: RouteContext): void {
     handler: async (req, res) => {
       const user = await ctx.usersCollection.findOne({ _id: req.params.id }, { timeoutMS: 5_000 });
       if (!user) throw new AccessError(404, "not_found", "User not found");
-      if (user.role !== "user") throw new AccessError(403, "operator_required", "Platform-admin lifecycle is operator-managed");
+      if (user.role !== "user") throw new AccessError(403, "operator_required", "Disabling platform administrators is operator-managed");
       const result = await auth().operations.execute({
         _id: operationId(req), actor: req.user!.id, reason: "Platform-admin ordinary-user disable",
         collection: "users", targetId: user._id, expectedRevision: req.body.revision,

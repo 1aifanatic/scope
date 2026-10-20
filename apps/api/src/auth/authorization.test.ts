@@ -23,6 +23,8 @@ describe("Explicit HTTP route classification", () => {
     expect(routePolicy("post", "/api/v1/users/me")).toBe("self");
     expect(routePolicy("get", "/api/v1/admin/users")).toBe("platform");
     expect(routePolicy("get", "/api/v1/admin/users/search")).toBe("platform");
+    expect(routePolicy("get", "/api/v1/admin/platform-admins")).toBe("platform");
+    expect(routePolicy("post", "/api/v1/admin/users/:id/promote")).toBe("platform");
     expect(routePolicy("get", "/api/v1/agents")).toBe("metadata");
     expect(routePolicy("post", "/api/v1/agents")).toBe("platform");
     expect(routePolicy("get", "/api/v1/projects")).toBe("projects");
@@ -87,7 +89,8 @@ describe("Canonical authority work budget", () => {
   describe("Explicit authentication opt-out", () => {
     const authority = () => new Authorization(new MongoClient("mongodb://127.0.0.1:1").db("unused_unit_fixture"), false);
 
-    it.each(["/api/v1/admin/users", "/api/v1/admin/operations/:id", "/api/v1/projects/:id/members", "/api/v1/projects/:id/members/:userId"])(
+    it.each(["/api/v1/admin/users", "/api/v1/admin/platform-admins", "/api/v1/admin/users/:id/promote",
+      "/api/v1/admin/operations/:id", "/api/v1/projects/:id/members", "/api/v1/projects/:id/members/:userId"])(
       "does not open identity or membership administration at %s", async path => {
         await expect(authority().guard(express.request, "get", path, routePolicy("get", path)))
           .rejects.toMatchObject({ code: "authentication_disabled" });

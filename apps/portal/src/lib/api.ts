@@ -11,8 +11,8 @@ import { getSelectedProjectId, ProjectRequiredError } from "./project-scope";
 import { MAX_ARCHIVE_UPLOAD_LABEL } from "./codebaseUpload";
 import {
   AccessCapabilitiesSchema, AccessUserSearchResultSchema, ProjectMembershipSummarySchema,
-  ApiAuthModeSchema,
-  type AccessCapabilities, type AccessUserSearchResult, type ProjectMembershipSummary,
+  ApiAuthModeSchema, PlatformAdminListSchema,
+  type AccessCapabilities, type AccessUserSearchResult, type PlatformAdminList, type ProjectMembershipSummary,
 } from "shared/rbac";
 
 const BASE = "/api/v1";
@@ -176,6 +176,9 @@ export const api = {
   searchAccessUsers: (options: { q?: string; cursor?: string; signal?: AbortSignal } = {}): Promise<AccessUserSearchResult> =>
     request<unknown>(`/admin/users/search${qs({ q: options.q, cursor: options.cursor })}`, { signal: options.signal })
       .then(data => AccessUserSearchResultSchema.parse(data)),
+  listPlatformAdmins: (options: { cursor?: string; signal?: AbortSignal } = {}): Promise<PlatformAdminList> =>
+    request<unknown>(`/admin/platform-admins${qs({ cursor: options.cursor })}`, { signal: options.signal, cache: "no-store" })
+      .then(data => PlatformAdminListSchema.parse(data)),
   listProjectMembers: (projectId: string, signal?: AbortSignal): Promise<ProjectMembershipSummary[]> =>
     request<unknown>(`/projects/${encodeURIComponent(projectId)}/members`, { signal })
       .then(data => ProjectMembershipSummarySchema.array().parse(data)),

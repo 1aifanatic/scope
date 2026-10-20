@@ -59,6 +59,19 @@ export function registerAccessCommands(program: Command): void {
     }));
   command("projects", "Platform-only project control-plane inventory")
     .action(action((options: AccessOptions) => request(options, "/projects?controlPlane=true&includeDeleted=true")));
+  command("platform-admins", "List platform administrators, including disabled accounts and pending changes")
+    .option("--cursor <id>", "Continue from the previous response's nextCursor")
+    .option("--limit <number>", "Maximum administrators per page (1-50)", "20")
+    .action(action((options: AccessOptions) => {
+      const limit = Number(options.limit);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new Error("Limit must be an integer from 1 to 50");
+      const params = new URLSearchParams({ limit: String(limit) });
+      if (options.cursor) params.set("cursor", options.cursor);
+      return request(options, `/admin/platform-admins?${params}`);
+    }));
+  mutation(command("promote-admin <userId>", "Grant platform-wide administration to an enabled enrolled user (no project membership)"))
+    .action(action((userId: string, options: AccessOptions) =>
+      request(options, `/admin/users/${encodeURIComponent(userId)}/promote`, "POST", { revision: revision(options) })));
   command("members <projectId>", "Platform-only membership roster")
     .action(action((projectId: string, options: AccessOptions) => request(options, `/projects/${encodeURIComponent(projectId)}/members`)));
   mutation(command("set-member <projectId> <userId>", "Explicitly assign or change a project membership")
@@ -68,7 +81,7 @@ export function registerAccessCommands(program: Command): void {
   mutation(command("revoke-member <projectId> <userId>", "Soft-revoke a membership"))
     .action(action((projectId: string, userId: string, options: AccessOptions) =>
       request(options, `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`, "DELETE", { revision: revision(options) })));
-  mutation(command("disable-user <userId>", "Disable an ordinary user; platform-admin lifecycle is operator-only"))
+  mutation(command("disable-user <userId>", "Disable an ordinary user; administrator disable and demotion remain operator-only"))
     .action(action((userId: string, options: AccessOptions) => request(options, `/admin/users/${encodeURIComponent(userId)}/disable`, "POST", { revision: revision(options) })));
   command("operation <id>", "Inspect durable operation state")
     .action(action((id: string, options: AccessOptions) => request(options, `/admin/operations/${encodeURIComponent(id)}`)));

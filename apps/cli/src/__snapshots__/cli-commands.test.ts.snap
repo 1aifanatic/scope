@@ -36,8 +36,22 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--url",
         ],
       },
+      "platform-admins": {
+        "options": [
+          "--cursor",
+          "--limit",
+          "--url",
+        ],
+      },
       "projects": {
         "options": [
+          "--url",
+        ],
+      },
+      "promote-admin": {
+        "options": [
+          "--operation-id",
+          "--revision",
           "--url",
         ],
       },

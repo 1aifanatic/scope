@@ -106,13 +106,16 @@ describe.runIf(Boolean(uri))("Explicit anonymous deployment mode with native Mon
     for (const method of ["get", "post"] as const) {
       expect((await request(app)[method]("/api/v1/users/me")).status).toBe(401);
     }
-    for (const path of ["/admin/users", "/admin/users/search", "/admin/operations/fixture", "/projects/fixture/members"]) {
+    for (const path of ["/admin/users", "/admin/users/search", "/admin/platform-admins", "/admin/operations/fixture", "/projects/fixture/members"]) {
       const response = await request(app).get(`/api/v1${path}`);
       expect(response.status).toBe(503);
       expect(response.body.code).toBe("authentication_disabled");
     }
     const write = await request(app).put("/api/v1/projects/fixture/members/fixture-user").send({ role: "admin", revision: 0 });
     expect(write.status).toBe(503);
+    const promotion = await request(app).post("/api/v1/admin/users/fixture-user/promote").send({ revision: 0 });
+    expect(promotion.status).toBe(503);
+    expect(promotion.body.code).toBe("authentication_disabled");
     expect(await db.collection("project_memberships").countDocuments()).toBe(0);
   });
 

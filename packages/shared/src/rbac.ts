@@ -75,6 +75,23 @@ export const AccessUserSearchResultSchema = z.object({
 });
 export type AccessUserSearchResult = z.infer<typeof AccessUserSearchResultSchema>;
 
+export const PlatformAdminSummarySchema = AccessUserSummarySchema.extend({
+  role: z.literal("admin"),
+  pending: z.boolean(),
+  operationId: z.string().optional(),
+});
+export type PlatformAdminSummary = z.infer<typeof PlatformAdminSummarySchema>;
+
+export const PlatformAdminListSchema = z.object({
+  items: z.array(PlatformAdminSummarySchema),
+  nextCursor: z.string().optional(),
+});
+export type PlatformAdminList = z.infer<typeof PlatformAdminListSchema>;
+
+export const PlatformAdminPromotionSchema = z.object({
+  revision: z.number().int().nonnegative(),
+}).strict();
+
 export const ProjectMembershipSummarySchema = z.object({
   _id: z.string(),
   projectId: z.string(),

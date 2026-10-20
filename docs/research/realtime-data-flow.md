@@ -11,9 +11,15 @@ The portal uses **two mechanisms** for real-time updates:
 
 ```
 GET /api/v1/requests/:id/logs?fromStart=true
+GET /api/v1/requests/:id/runs/:runId/logs?fromStart=true
+GET /api/v1/reports/:id/logs?fromStart=true
 ```
 
-Defined in `apps/api/src/index.ts`. Accepts an optional `fromStart=true` query param to replay existing logs from MongoDB before switching to live streaming.
+Defined in `apps/api/src/routes/requests/logs.ts` and `routes/reports.ts`.
+`fromStart=true` replays append-blob logs before switching to live streaming;
+terminal runs/reports replay and then send `done`. Historical attempts use the
+per-run URL. These endpoints use the same verified bearer and canonical
+project authorization as other protected reads.
 
 ### Server-Side Flow
 
@@ -24,7 +30,7 @@ sequenceDiagram
     participant Redis
     participant MongoDB
 
-    Browser->>API: GET /api/v1/requests/:id/logs (SSE)
+    Browser->>API: GET logs (Authorization bearer, SSE)
     API->>MongoDB: findOne (verify request exists)
     alt Request already terminal
         API-->>Browser: event: done
@@ -35,8 +41,13 @@ sequenceDiagram
             Redis-->>API: Log event published by worker
             API-->>Browser: data: {log event}
         end
-        MongoDB-->>API: Status changed to terminal
-        API-->>Browser: event: done
+        alt Redis log has data.final = true
+            Redis-->>API: Final worker log
+            API-->>Browser: event: done
+        else Change Stream observes terminal status
+            MongoDB-->>API: Status changed to terminal
+            API-->>Browser: event: done
+        end
     end
 ```
 
@@ -44,14 +55,50 @@ sequenceDiagram
 
 - **SSE heartbeat** every 30s (`:\n\n` comment) to prevent proxy/LB disconnects
 - **Inactivity timeout** of 5 minutes — closes stream if no log messages forwarded
-- **Redis pub/sub** is the primary log transport (workers publish per-run)
-- **MongoDB Change Stream** is a **completion detector only** — watches for status field updates to `completed`/`failed`/`exhausted`
+- **Redis pub/sub** is the primary log transport (`logs:<requestId>`); a worker
+  log with `data.final === true` also sends `done` and closes the stream.
+- **MongoDB Change Stream** is a **completion detector only** — watches for run status `done` or report status `completed`/`failed`
+- **Authorization lease** rechecks canonical authority every second and closes a
+  denied/unverifiable stream; its deadline is at most 20 seconds and cannot
+  outlive the verified token. A late authority response cannot revive it.
 - Cleanup on client disconnect (`req.on("close")`)
 
 ### Portal Consumer
 
-- `useLogStream` hook in `apps/portal/src/hooks/use-log-stream.ts` — uses browser `EventSource` API
-- Used by `RunDetail.tsx` and `LogViewer.tsx`
+`useLogStream` in `apps/portal/src/hooks/use-log-stream.ts` opens a streaming
+response through the existing `apiClient`, not native `EventSource`. The same
+MSAL token provider attaches the bearer header, combines the account-session
+abort signal, and performs one forced-refresh retry on `401`. Tokens are never
+added to stream URLs. HTTP success, SSE content type and response body are checked
+before reporting a connection.
+The hook waits for a selected project and sends its explicit `projectId`, so a
+still-rendering previous resource cannot reopen under a different selection.
+
+`lib/log-stream.ts` incrementally decodes UTF-8 and uses `eventsource-parser` for
+SSE framing (split chunks, CR/LF/CRLF, multiline data and comment heartbeats).
+Log entries are type-checked; the known `turns_summary` payload is ignored.
+Named `done`, `timeout` and server `error` events terminate the reader; malformed
+log/error payloads and HTTP/network failures surface separately. This is shared by
+current/historical `RunDetail`, stored-report `ReportDetail` and `LogViewer`.
+
+Only establishment failures may retry: at most two retries for network failures,
+`429` and transient `500`/`502`/`503`/`504`, with exponential jittered backoff.
+`Retry-After` seconds or HTTP dates take precedence; waits over 30 seconds stop
+instead of retrying early. Every attempt reacquires its bearer. Other HTTP
+statuses do not enter that transient retry loop; `401` remains owned by the
+common transport.
+
+There are **no SSE event IDs or supported resume cursors**. Once a stream is
+accepted, EOF (including lease expiry/revocation/authority outage) or network
+failure disconnects with an explicit error; it never silently reconnects and
+duplicates replay or drops live logs. Reload the page to deliberately replay
+stored logs. Server `done`/`timeout`/`error` events never reconnect.
+
+Changing the request, attempt, URL builder, selected project or authenticated
+account/Scope user cancels the fetch/reader and resets state. Disabling the hook,
+logout and unmount also cancel it. A render-time identity guard hides previous
+project/account logs before effect cleanup, and late replaced-reader callbacks
+cannot append them to the new stream. `clear` clears displayed logs only.
 
 ## Append-Blob Artifacts
 

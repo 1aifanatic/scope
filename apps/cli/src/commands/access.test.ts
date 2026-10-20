@@ -122,4 +122,40 @@ describe("access CLI operations", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
+
+  it("lists only platform administrators using server-side cursor pagination", async () => {
+    respond(200, { items: [], nextCursor: "next-admin" });
+    await run("platform-admins", "--limit", "5", "--cursor", "previous-admin");
+    const url = new URL(request().url);
+    expect(url.pathname).toBe("/api/v1/admin/platform-admins");
+    expect(url.searchParams.get("limit")).toBe("5");
+    expect(url.searchParams.get("cursor")).toBe("previous-admin");
+    expect(request().method).toBe("GET");
+    expect(request().headers.has("Idempotency-Key")).toBe(false);
+  });
+
+  it("promotes an exact enrolled Scope user with revision and stable operation ID, not arbitrary role input", async () => {
+    respond(200, { operationId: "approved-promotion", state: "completed", revision: 5 });
+    await run("promote-admin", "scope/user", "--revision", "4", "--operation-id", "approved-promotion");
+    expect(new URL(request().url).pathname).toBe("/api/v1/admin/users/scope%2Fuser/promote");
+    expect(request().method).toBe("POST");
+    expect(request().headers.get("Idempotency-Key")).toBe("approved-promotion");
+    expect(payload).toEqual({ revision: 4 });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("preserves a pending administrator promotion instead of retrying with a new operation", async () => {
+    respond(202, { operationId: "pending-promotion", state: "pending", revision: 1 });
+    await run("promote-admin", "user", "--revision", "0", "--operation-id", "pending-promotion");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(process.exitCode).toBe(2);
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining("No completion claimed"));
+  });
+
+  it("rejects invalid administrator revisions and page sizes locally", async () => {
+    await run("promote-admin", "user", "--revision", "1.5");
+    await run("platform-admins", "--limit", "0");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
 });

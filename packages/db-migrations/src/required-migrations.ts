@@ -44,5 +44,4 @@ export const REQUIRED_MIGRATIONS: readonly string[] = [
   "029-create-users-collection.ts",
   "030-create-resource-indexes.ts",
   "031-create-project-memberships.ts",
-  "032-scope-codebase-uniqueness.ts",
 ];

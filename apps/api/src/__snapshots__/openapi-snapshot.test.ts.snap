@@ -4312,6 +4312,108 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/admin/platform-admins": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "properties": {
+                          "alias": {
+                            "type": "string",
+                          },
+                          "disabled": {
+                            "type": "boolean",
+                          },
+                          "displayName": {
+                            "type": "string",
+                          },
+                          "email": {
+                            "type": "string",
+                          },
+                          "id": {
+                            "type": "string",
+                          },
+                          "operationId": {
+                            "type": "string",
+                          },
+                          "pending": {
+                            "type": "boolean",
+                          },
+                          "revision": {
+                            "minimum": 0,
+                            "type": "integer",
+                          },
+                          "role": {
+                            "enum": [
+                              "admin",
+                            ],
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "id",
+                          "role",
+                          "disabled",
+                          "revision",
+                          "pending",
+                        ],
+                        "type": "object",
+                      },
+                      "type": "array",
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "items",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+          },
+        ],
+        "summary": "List platform administrators, including disabled accounts and pending changes",
+        "tags": [
+          "Access",
+        ],
+      },
+    },
     "/api/v1/admin/users": {
       "get": {
         "parameters": [
@@ -4543,6 +4645,80 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
         ],
         "summary": "Disable an ordinary user",
+        "tags": [
+          "Access",
+        ],
+      },
+    },
+    "/api/v1/admin/users/{id}/promote": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "revision": {
+                    "minimum": 0,
+                    "type": "integer",
+                  },
+                },
+                "required": [
+                  "revision",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "operationId": {
+                      "type": "string",
+                    },
+                    "revision": {
+                      "exclusiveMinimum": 0,
+                      "type": "integer",
+                    },
+                    "state": {
+                      "enum": [
+                        "completed",
+                        "pending",
+                      ],
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "operationId",
+                    "state",
+                    "revision",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "202": {
+            "description": "Promotion is pending; inspect or reconcile the same operation ID before claiming completion",
+          },
+          "404": {
+            "description": "Enrolled user not found",
+          },
+          "409": {
+            "description": "Revision, role, enabled state or idempotency precondition conflict",
+          },
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+          },
+        ],
+        "summary": "Promote an enabled enrolled user to platform administrator",
         "tags": [
           "Access",
         ],
