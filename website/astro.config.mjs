@@ -134,6 +134,7 @@ export default defineConfig({
 							collapsed: true,
 							items: [
 								{ label: 'Task prompts', slug: 'guides/managing-task-prompts' },
+								{ label: 'Codebases', slug: 'guides/managing-codebases' },
 								{ label: 'Evaluation criteria', slug: 'guides/defining-criteria' },
 								{ label: 'Agent profiles', slug: 'guides/defining-profiles' },
 								{ label: 'Prompt features', slug: 'guides/prompt-features' },
