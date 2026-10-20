@@ -29,17 +29,26 @@ async function handleVideo(
   ctx: RouteContext,
   req: Request,
   res: Response,
-  targetRun: RunState,
+  targetRun: RunState | undefined,
   id: string,
 ): Promise<void> {
   res.setHeader("Cache-Control", "no-store");
-  const iterationParam = req.query.iteration as string | undefined;
-  const phaseParam = req.query.phase as string | undefined;
-  const indexParam = req.query.index as string | undefined;
-  const videoIndex = indexParam ? parseInt(indexParam, 10) : 0;
-
-  if (isNaN(videoIndex) || videoIndex < 0) {
+  const iterationParam = req.query.iteration;
+  const phaseParam = req.query.phase;
+  const indexParam = req.query.index;
+  const videoIndex = indexParam === undefined ? 0
+    : typeof indexParam === "string" && /^\d+$/.test(indexParam) ? Number(indexParam) : NaN;
+  if (!Number.isSafeInteger(videoIndex) || videoIndex < 0) {
     res.status(400).json({ error: "Invalid video index" });
+    return;
+  }
+  if (phaseParam !== undefined && phaseParam !== "setup") {
+    res.status(400).json({ error: "Invalid video phase" });
+    return;
+  }
+  if (iterationParam !== undefined && (typeof iterationParam !== "string" ||
+      !/^[1-9]\d*$/.test(iterationParam) || !Number.isSafeInteger(Number(iterationParam)))) {
+    res.status(400).json({ error: "Invalid iteration number" });
     return;
   }
 
@@ -48,22 +57,18 @@ async function handleVideo(
   let label: string;
 
   if (phaseParam === "setup") {
-    videoUrls = targetRun.setupVideoUrls;
+    videoUrls = targetRun?.setupVideoUrls;
     label = `${id}-setup-video-${videoIndex}`;
   } else if (iterationParam) {
-    const iterNum = parseInt(iterationParam, 10);
-    if (isNaN(iterNum) || iterNum < 1) {
-      res.status(400).json({ error: "Invalid iteration number" });
-      return;
-    }
-    const turns = targetRun.turns;
+    const iterNum = Number(iterationParam);
+    const turns = targetRun?.turns;
     const turn = turns?.find((t: { iteration: number }) => t.iteration === iterNum);
     videoUrls = turn?.videoUrls;
     label = `${id}-iteration-${iterNum}-video-${videoIndex}`;
   } else {
     // One-shot: videoUrls on run; multi-turn fallback: last turn
-    const turns = targetRun.turns;
-    videoUrls = targetRun.videoUrls ?? turns?.[turns.length - 1]?.videoUrls;
+    const turns = targetRun?.turns;
+    videoUrls = targetRun?.videoUrls ?? turns?.[turns.length - 1]?.videoUrls;
     label = `${id}-video-${videoIndex}`;
   }
 
@@ -146,7 +151,7 @@ apiRoute(ctx.app, ctx.registry, {
         return;
       }
 
-      await handleVideo(ctx, req, res, resource.run!, id);
+      await handleVideo(ctx, req, res, resource.run, id);
     } catch (error) {
       if (error instanceof RestError && (error.statusCode === 404 || error.code === "ContainerNotFound" || error.code === "BlobNotFound")) {
         res.status(404).json({ error: "Video file not found — the blob may have been deleted or is no longer available" });
