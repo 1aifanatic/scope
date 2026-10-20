@@ -168,8 +168,11 @@ These are protocol/component checks, **not native browser playback evidence**.
 
 Only the integration owner controls the shared local stack, real MSAL/emulator
 accounts and isolated fixtures. Use an existing completed run or a clearly
-identified representative WebM fixture; no new benchmark/worker execution is
-needed. Record browser/version and whether media is fixture- or agent-produced.
+identified representative WebM fixture for delivery checks without submitting
+a new benchmark. This does not validate worker-side recording or upload:
+end-to-end recording acceptance additionally needs a real recording-producing
+worker and an explicitly authorized local execution. Record browser/version
+and whether media is fixture- or agent-produced.
 
 1. Rebuild only local API/Portal as needed. Confirm the worker asset is JavaScript,
    no-store, not HTML; confirm uncontrolled bridge URLs return no-store `403`.
@@ -199,3 +202,29 @@ needed. Record browser/version and whether media is fixture- or agent-produced.
 8. Recheck existing authenticated log streaming/replay without submitting a new
    worker task. Test every supported browser engine before making a
    cross-browser support claim.
+
+### Recorded local delivery acceptance
+
+On 2026-10-20, genuine emulator/MSAL sign-in and project-membership checks passed
+in local headless Chromium 156.0.8078.12. A generated 90-second, 640x360 VP8 WebM
+was 15,835,511 bytes. In a visible browser document under network throttling,
+native playback reached 0.7608 seconds and presented 20 frames with only
+237,965 upstream bytes observed; the buffered interval ended at 1.255 seconds.
+Seeking to 70 seconds issued a new authenticated range and resumed at 70.256
+seconds. This is actual native playback evidence, not only a `206` assertion.
+
+Setup, top-level, iteration/index, historical-attempt and timeline-dialog
+recordings loaded. Other-client access returned `403`; invalid ranges retained
+`416` and exact `Content-Range`. Removing the isolated reader membership denied
+the next range, then the membership was restored. Project switching, logout,
+dialog closure and an actual Chromium service-worker termination invalidated
+old routes and cleared the native source. CacheStorage stayed empty. Delayed,
+missing, invalid and foreign historical selections exposed no latest-attempt
+artifact or log request. Existing completed-worker archive bytes and stored
+authenticated log replay remained intact; no new worker execution was submitted.
+
+This recording was a **controlled fixture, not Electron-worker output**.
+Electron recording/upload end-to-end acceptance remains a separate local phase.
+Firefox/Safari playback, prefixed reverse-proxy deployment and an actual
+five-minute idle wait were not established by these browser checks; protocol
+tests do not replace those deployment/browser acceptance cases.

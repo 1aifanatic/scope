@@ -157,6 +157,10 @@ in browser memory before dispatch**; very large archives remain limited by
 browser memory, and cancellation cannot remove a file already saved by the
 browser. This is not the progressive video path.
 
+Video uses a client-bound streaming bridge rather than buffering the recording.
+See [authenticated-media.md](authenticated-media.md) for per-range authorization,
+service-worker isolation, teardown and browser/deployment requirements.
+
 Focused unit tests cover binary gzip integrity, filenames/types, auth refresh,
 permanent/transient failures, range metadata, origins/redirects, body cancellation,
 URL lifecycle, repeated clicks, cache/account/attempt changes, concrete historical
@@ -164,6 +168,15 @@ pinning and both codebase entry points. Artifact Storybook plays run in
 `artifact-stories.play.test.tsx`; real signed-in downloaded-file and progressive
 range acceptance remains a separate integration step, not a claim established
 by mocked/unit media tests.
+
+Local emulator/MSAL Chromium acceptance on 2026-10-20 saved and checked 19 files:
+the existing real worker archive and nested proof file, current/historical
+archives, snapshots, HAR and ATIF, list/batch archives and both codebase controls.
+Reader and contributor downloads preserved exact stored bytes. Slow-download
+cancel, project change and logout stopped the old transfer without a late file;
+a real missing blob returned a visible `404`. Labeled browser-injected `403`
+and exhausted `503` faults produced visible errors without saving fake files.
+These faults are not claims of an actual backend outage.
 
 ### Durable changes and operator runbooks
 
