@@ -248,6 +248,29 @@ describe("authenticated artifact delivery", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("never retries a batch POST after an uncertain network failure", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Network unavailable"));
+    await expect(downloadBatchArtifacts(["r1"], "p", controller().signal)).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a transient GET establishment, but never restarts a failed accepted body", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockRejectedValueOnce(new TypeError("Network unavailable")).mockResolvedValueOnce(archive());
+    const result = downloadArtifact(path, "p", controller().signal);
+    await vi.runAllTimersAsync();
+    await result;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    fetchMock.mockReset();
+    create.mockClear();
+    fetchMock.mockResolvedValue(archive(new ReadableStream({
+      start(c) { c.enqueue(new Uint8Array([1])); c.error(new Error("Transfer interrupted")); },
+    })));
+    await expect(downloadArtifact(path, "p", controller().signal)).rejects.toThrow("Transfer interrupted");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("posts the selected batch once with explicit project and binary response", async () => {
     let body: unknown;
     fetchMock.mockImplementation(async input => {

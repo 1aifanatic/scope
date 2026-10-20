@@ -2161,7 +2161,7 @@ export function RunsList() {
           <ArtifactDownloadButton variant="outline" size="sm" className="gap-1.5"
             disabled={isBusy || selectedIds.size === 0} url="/api/v1/requests/archive"
             batchIds={[...selectedIds]} onPendingChange={setBatchDownloading}
-            title="Download selected runs as archive">
+            title="Download latest attempts of selected runs as archive">
             <Download className="h-3.5 w-3.5" /> Download
           </ArtifactDownloadButton>
 

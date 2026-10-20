@@ -110,6 +110,61 @@ See [realtime-data-flow.md](../research/realtime-data-flow.md#portal-consumer) f
 framing, replay and retry details. This changes no API grant/lease checks and adds
 no query-token, cookie or anonymous-auth workaround.
 
+### Authenticated artifact downloads
+
+Portal archive, snapshot, HAR, ATIF and codebase-revision download controls use
+`ArtifactDownloadButton` and `lib/artifact-delivery.ts`, not protected API URLs
+in browser anchors. HAR/JSONL display queries use the same delivery transport.
+`fetchArtifact(path, projectId, signal, range?)` calls the existing `apiClient`:
+there is no separate MSAL provider, query bearer, signed URL, cookie grant or
+anonymous exception. The existing centralized single `401` refresh is preserved;
+`403`/`404` fail visibly without retrying authentication. Transient GET
+establishment failures have at most two bounded retries; an accepted body is
+never restarted. Batch POSTs are not replayed on network/5xx failures.
+
+Only allowlisted, same-origin Scope request-artifact and codebase-revision
+routes are accepted, with explicit `projectId` and validated iteration/index/setup
+parameters. Redirects and mismatching projects are rejected. Successful status
+and an artifact-appropriate media type are checked before saving; an HTML login
+page or JSON archive error cannot become a fake `.tar.gz`. `ArtifactError`
+retains HTTP status and response headers, including `416` range metadata for
+the media bridge. Filenames prefer UTF-8 `filename*`, then `filename`, then a
+sanitized fallback; path separators, controls and bidi controls are removed or
+replaced. Invalid UTF-8 filename encoding fails visibly.
+
+Run-detail, list-row and timeline downloads pin the concrete current/historical
+attempt `_id` when available. Missing or still-loading selected history never
+falls back to the latest attempt or its logs. Both codebase revision controls
+construct the canonical revision route instead of trusting a stored blob URL.
+**Batch download intentionally means the latest attempts at server processing
+time:** the existing `POST /requests/archive` body remains `{ ids }`, not
+per-attempt IDs. A concurrent retry may therefore change what a batch includes.
+
+`useArtifactSession` binds operations and query caches to project, request/attempt,
+Scope user, MSAL account and an ephemeral account-signal epoch. Project/account/
+logout/attempt changes and unmount abort stale work; the global API account
+signal also cancels before React rerenders. StrictMode setup replaces aborted
+controllers. HAR and JSONL readers check this combined signal after parsing,
+isolate caches, hide cached data when auth is not ready and expose failures in
+Network, Conversation and Tool Calls rather than presenting an empty success.
+
+The action prevents repeated clicks while pending, shows a spinner and a cancel
+control, and reports errors through the existing toast UI. Downloads consume exact
+binary chunks without unpacking/re-encoding archives, then dispatch a page-local
+object URL. URLs are revoked on cancellation/session cleanup, pagehide, dispatch
+failure or after a 60-second browser-dispatch grace period. **Files are buffered
+in browser memory before dispatch**; very large archives remain limited by
+browser memory, and cancellation cannot remove a file already saved by the
+browser. This is not the progressive video path.
+
+Focused unit tests cover binary gzip integrity, filenames/types, auth refresh,
+permanent/transient failures, range metadata, origins/redirects, body cancellation,
+URL lifecycle, repeated clicks, cache/account/attempt changes, concrete historical
+pinning and both codebase entry points. Artifact Storybook plays run in
+`artifact-stories.play.test.tsx`; real signed-in downloaded-file and progressive
+range acceptance remains a separate integration step, not a claim established
+by mocked/unit media tests.
+
 ### Durable changes and operator runbooks
 
 `AdminOperations` persists a fingerprinted intent in `admin_operations` **before**

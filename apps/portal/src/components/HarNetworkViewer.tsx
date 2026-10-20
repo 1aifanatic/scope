@@ -193,7 +193,7 @@ export function HarNetworkViewer({ runId, iteration, attemptRunId }: HarNetworkV
 
   if (error) {
     return (
-      <div className="text-center py-8 text-muted-foreground">
+      <div role="alert" className="text-center py-8 text-destructive">
         Failed to load HAR data: {error instanceof Error ? error.message : String(error)}
       </div>
     );

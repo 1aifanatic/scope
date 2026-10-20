@@ -43,7 +43,8 @@ export function ArtifactDownloadButton({ url, filename, batchIds, onPendingChang
             if (!session.controller.signal.aborted) setPending(current => current === session ? null : current);
           });
         }}>
-        {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-label="Downloading artifact" /> : children}
+        {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+        {children}
       </Button>
       {busy && <Button type="button" variant="ghost" size="icon" title="Cancel download"
         onClick={(event) => { event.stopPropagation(); operation.current?.controller.abort(); }}>

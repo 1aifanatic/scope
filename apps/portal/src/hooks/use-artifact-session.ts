@@ -6,16 +6,21 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSelectedProjectId } from "@/contexts/ProjectContext";
 import { getApiSessionSignal } from "@/lib/api-client";
 
+const accountKeys = new WeakMap<AbortSignal, string>();
+
 export function useArtifactSession(resource: string) {
   const { account, user, isReady } = useAuth();
   const projectId = useSelectedProjectId();
+  const accountSignal = getApiSessionSignal();
+  if (accountSignal && !accountKeys.has(accountSignal)) accountKeys.set(accountSignal, crypto.randomUUID());
   const session = useMemo(() => ({
     resource, projectId, ready: isReady && !!projectId, controller: new AbortController(),
-    accountSignal: getApiSessionSignal(),
-    key: [resource, projectId, user?.id, account?.homeAccountId, account?.localAccountId, account?.tenantId, account?.environment],
+    accountSignal,
+    key: [resource, projectId, user?.id, account?.homeAccountId, account?.localAccountId,
+      account?.tenantId, account?.environment, accountSignal ? accountKeys.get(accountSignal) : undefined],
   }), [
     resource, projectId, isReady, user?.id, account?.homeAccountId,
-    account?.localAccountId, account?.tenantId, account?.environment,
+    account?.localAccountId, account?.tenantId, account?.environment, accountSignal,
   ]);
   useLayoutEffect(() => {
     const controller = new AbortController();

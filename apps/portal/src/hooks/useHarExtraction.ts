@@ -18,6 +18,34 @@ import {
 
 export type { ConversationSegment, HarExtractedData, ToolCall };
 
+async function readHar<T>(url: string, projectId: string, signal: AbortSignal): Promise<T> {
+  const response = await fetchArtifact(url, projectId, signal);
+  const data: T = await response.json();
+  signal.throwIfAborted();
+  if (!data || typeof data !== "object" || !("log" in data) || !data.log ||
+      typeof data.log !== "object" || !("entries" in data.log) || !Array.isArray(data.log.entries)) {
+    throw new Error("The server returned an invalid HAR file.");
+  }
+  return data;
+}
+
+function parseToolCall(line: string): ToolCall {
+  const value: unknown = JSON.parse(line);
+  if (!value || typeof value !== "object" || !("id" in value) || typeof value.id !== "string" ||
+      !("name" in value) || typeof value.name !== "string" ||
+      !("arguments" in value) || !value.arguments || typeof value.arguments !== "object" ||
+      Array.isArray(value.arguments) ||
+      ("timestamp" in value && typeof value.timestamp !== "string") ||
+      ("response" in value && typeof value.response !== "string")) {
+    throw new Error("The server returned an invalid tool-call record.");
+  }
+  return {
+    id: value.id, name: value.name, arguments: value.arguments as Record<string, unknown>,
+    timestamp: "timestamp" in value ? value.timestamp as string : "",
+    ...("response" in value ? { response: value.response as string } : {}),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Shared HAR data hook — single source of truth for fetching HAR JSON.
 // All tabs (Conversation, Network, Tool Calls) share this cache.
@@ -25,18 +53,17 @@ export type { ConversationSegment, HarExtractedData, ToolCall };
 // ---------------------------------------------------------------------------
 export function useHarData<T = unknown>(runId: string, iteration?: number, enabled = true, attemptRunId?: string) {
   const session = useArtifactSession(`${runId}/${attemptRunId ?? "latest"}`);
-  return useQuery<T>({
+  const result = useQuery<T>({
     queryKey: ["har", runId, iteration, attemptRunId, session.key],
     queryFn: async ({ signal }) => {
       const url = attemptRunId ? api.runHarUrl(runId, attemptRunId, iteration) : api.harUrl(runId, iteration);
-      const res = await fetchArtifact(url, session.projectId!, AbortSignal.any([signal, session.controller.signal]));
-      const data: T = await res.json();
-      return data;
+      return readHar<T>(url, session.projectId!, AbortSignal.any([signal, session.controller.signal]));
     },
     enabled: enabled && session.ready,
     retry: false,
     staleTime: Infinity, // HAR data is immutable once created
   });
+  return { ...result, data: session.ready ? result.data : undefined };
 }
 
 // ---------------------------------------------------------------------------
@@ -45,15 +72,16 @@ export function useHarData<T = unknown>(runId: string, iteration?: number, enabl
 export function useHarExtraction(runId: string, iteration?: number, hasHar?: boolean, attemptRunId?: string): {
   data: HarExtractedData | undefined;
   isLoading: boolean;
+  error: Error | null;
 } {
-  const { data: har, isLoading } = useHarData<HarFile>(runId, iteration, !!hasHar, attemptRunId);
+  const { data: har, isLoading, error } = useHarData<HarFile>(runId, iteration, !!hasHar, attemptRunId);
 
   const data = useMemo(() => {
     if (!har) return undefined;
     return extractFromHar(har);
   }, [har]);
 
-  return { data, isLoading };
+  return { data, isLoading, error };
 }
 
 // ---------------------------------------------------------------------------
@@ -68,7 +96,7 @@ export function useAllTurnsToolCalls(
   turns?: ConversationTurn[],
   topLevelHarUrl?: string,
   attemptRunId?: string,
-): { allToolCalls: AggregatedToolCall[]; isLoading: boolean } {
+): { allToolCalls: AggregatedToolCall[]; isLoading: boolean; error: Error | null } {
   const session = useArtifactSession(`${runId}/${attemptRunId ?? "latest"}`);
   // Turns that already have pre-computed `toolCalls` (legacy inline shape)
   // don't need any blob fetch.
@@ -107,12 +135,14 @@ export function useAllTurnsToolCalls(
       queryKey: ["tool-calls", runId, q.iteration, attemptRunId, session.key],
       queryFn: async ({ signal }: { signal: AbortSignal }) => {
         const url = attemptRunId ? api.runToolCallsUrl(runId, attemptRunId, q.iteration) : api.toolCallsUrl(runId, q.iteration);
-        const res = await fetchArtifact(url, session.projectId!, AbortSignal.any([signal, session.controller.signal]));
+        const scopedSignal = AbortSignal.any([signal, session.controller.signal]);
+        const res = await fetchArtifact(url, session.projectId!, scopedSignal);
         const text = await res.text();
+        scopedSignal.throwIfAborted();
         return text
           .split("\n")
           .filter((line) => line.trim().length > 0)
-          .map((line) => JSON.parse(line) as ToolCall);
+          .map(parseToolCall);
       },
       enabled: session.ready,
       retry: false,
@@ -150,9 +180,7 @@ export function useAllTurnsToolCalls(
       queryKey: ["har", runId, q.iteration, attemptRunId, session.key],
       queryFn: async ({ signal }: { signal: AbortSignal }) => {
         const url = attemptRunId ? api.runHarUrl(runId, attemptRunId, q.iteration) : api.harUrl(runId, q.iteration);
-        const res = await fetchArtifact(url, session.projectId!, AbortSignal.any([signal, session.controller.signal]));
-        const data: HarFile = await res.json();
-        return data;
+        return readHar<HarFile>(url, session.projectId!, AbortSignal.any([signal, session.controller.signal]));
       },
       enabled: q.enabled && session.ready,
       retry: false,
@@ -189,5 +217,6 @@ export function useAllTurnsToolCalls(
 
   const isLoading = results.some((r) => r.isLoading) || jsonlResults.some((r) => r.isLoading);
 
-  return { allToolCalls, isLoading };
+  const error = [...jsonlResults, ...results].find(result => result.error)?.error ?? null;
+  return { allToolCalls: session.ready ? allToolCalls : [], isLoading, error };
 }

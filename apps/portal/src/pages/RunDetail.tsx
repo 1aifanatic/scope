@@ -286,10 +286,10 @@ export function RunDetail() {
 
   // Fetch all attempts when this request has been retried
   const hasMultipleAttempts = (run?.run?.attemptNumber ?? 1) > 1;
-  const { data: rawAttempts } = useQuery({
+  const { data: rawAttempts, isPending: loadingAttempts, error: attemptsError } = useQuery({
     queryKey: ["run-attempts", id],
     queryFn: () => api.listRunAttempts(id!),
-    enabled: !!id && hasMultipleAttempts,
+    enabled: !!id && !!run && (hasMultipleAttempts || (!!selectedRunId && selectedRunId !== run.run?._id)),
   });
 
   // Merge the live run.run into the attempts list so the latest attempt
@@ -303,10 +303,10 @@ export function RunDetail() {
 
   // When viewing a historical attempt via ?runId=xxx, use that RunState
   // instead of the current one. The selected attempt may come from the
-  // attempts list or fall back to the current run.
+  // attempts list. Never substitute the latest run for missing historical data.
   const activeRun: RunState | undefined = useMemo(() => {
     if (!selectedRunId || selectedRunId === run?.run?._id) return run?.run;
-    return attempts?.find((a) => a._id === selectedRunId) ?? run?.run;
+    return attempts?.find((a) => a._id === selectedRunId);
   }, [selectedRunId, run?.run, attempts]);
   const isViewingHistorical = !!selectedRunId && selectedRunId !== run?.run?._id;
 
@@ -329,7 +329,7 @@ export function RunDetail() {
 
   const logStream = useLogStream({
     id: run?._id ?? "",
-    enabled: !!run,
+    enabled: !!run && !!activeRun,
     fromStart: true,
     attemptNumber: activeRun?.attemptNumber,
     urlBuilder: logStreamUrlBuilder,
@@ -519,6 +519,20 @@ export function RunDetail() {
         <div className="text-center py-12 text-destructive">
           {error instanceof Error ? error.message : "Run not found"}
         </div>
+      </div>
+    );
+  }
+
+  if (isViewingHistorical && !activeRun) {
+    return (
+      <div className="space-y-4">
+        <Link to={`/runs/${run._id}`}><Button variant="ghost" className="gap-1.5">
+          <ArrowLeft className="h-4 w-4" /> Back to latest attempt
+        </Button></Link>
+        {loadingAttempts ? <p role="status">Loading selected run attempt...</p> :
+          <p role="alert" className="text-destructive">
+            {attemptsError ? `Unable to load selected run attempt: ${attemptsError.message}` : "Selected run attempt not found."}
+          </p>}
       </div>
     );
   }
@@ -1834,7 +1848,7 @@ function ExpandableCell({ children, className = "" }: { children: React.ReactNod
 }
 
 function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; turns?: ConversationTurn[]; harUrl?: string; attemptRunId?: string }) {
-  const { allToolCalls, isLoading } = useAllTurnsToolCalls(runId, turns, harUrl, attemptRunId);
+  const { allToolCalls, isLoading, error } = useAllTurnsToolCalls(runId, turns, harUrl, attemptRunId);
 
   // Group by tool name for summary
   const byName = new Map<string, number>();
@@ -1878,7 +1892,10 @@ function ToolCallsTab({ runId, turns, harUrl, attemptRunId }: { runId: string; t
         </div>
       )}
 
-      {!isLoading && allToolCalls.length === 0 && (
+      {error && <p role="alert" className="text-sm text-destructive">
+        Unable to load tool calls: {error.message}
+      </p>}
+      {!isLoading && !error && allToolCalls.length === 0 && (
         <div className="text-center py-8 text-muted-foreground">
           <p>No tool calls captured. HAR file may still be available for download.</p>
         </div>
