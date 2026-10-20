@@ -4,7 +4,8 @@
 import { useQuery, useQueries } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { api } from "@/lib/api";
-import { apiClient } from "@/lib/api-client";
+import { fetchArtifact } from "@/lib/artifact-delivery";
+import { useArtifactSession } from "./use-artifact-session";
 import type { ConversationTurn } from "@/types";
 import {
   extractChronologicalSegments,
@@ -23,15 +24,17 @@ export type { ConversationSegment, HarExtractedData, ToolCall };
 // Generic so each consumer can use their own HAR type definition.
 // ---------------------------------------------------------------------------
 export function useHarData<T = unknown>(runId: string, iteration?: number, enabled = true, attemptRunId?: string) {
+  const session = useArtifactSession(`${runId}/${attemptRunId ?? "latest"}`);
   return useQuery<T>({
-    queryKey: ["har", runId, iteration, attemptRunId],
-    queryFn: async () => {
+    queryKey: ["har", runId, iteration, attemptRunId, session.key],
+    queryFn: async ({ signal }) => {
       const url = attemptRunId ? api.runHarUrl(runId, attemptRunId, iteration) : api.harUrl(runId, iteration);
-      const res = await apiClient(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
+      const res = await fetchArtifact(url, session.projectId!, AbortSignal.any([signal, session.controller.signal]));
+      const data: T = await res.json();
+      return data;
     },
-    enabled,
+    enabled: enabled && session.ready,
+    retry: false,
     staleTime: Infinity, // HAR data is immutable once created
   });
 }
@@ -66,6 +69,7 @@ export function useAllTurnsToolCalls(
   topLevelHarUrl?: string,
   attemptRunId?: string,
 ): { allToolCalls: AggregatedToolCall[]; isLoading: boolean } {
+  const session = useArtifactSession(`${runId}/${attemptRunId ?? "latest"}`);
   // Turns that already have pre-computed `toolCalls` (legacy inline shape)
   // don't need any blob fetch.
   const preComputed = useMemo(() => {
@@ -100,17 +104,18 @@ export function useAllTurnsToolCalls(
 
   const jsonlResults = useQueries({
     queries: jsonlQueries.map((q) => ({
-      queryKey: ["tool-calls", runId, q.iteration, attemptRunId],
-      queryFn: async () => {
+      queryKey: ["tool-calls", runId, q.iteration, attemptRunId, session.key],
+      queryFn: async ({ signal }: { signal: AbortSignal }) => {
         const url = attemptRunId ? api.runToolCallsUrl(runId, attemptRunId, q.iteration) : api.toolCallsUrl(runId, q.iteration);
-        const res = await apiClient(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const res = await fetchArtifact(url, session.projectId!, AbortSignal.any([signal, session.controller.signal]));
         const text = await res.text();
         return text
           .split("\n")
           .filter((line) => line.trim().length > 0)
           .map((line) => JSON.parse(line) as ToolCall);
       },
+      enabled: session.ready,
+      retry: false,
       staleTime: Infinity,
     })),
   });
@@ -142,14 +147,15 @@ export function useAllTurnsToolCalls(
 
   const results = useQueries({
     queries: queries.map((q) => ({
-      queryKey: ["har", runId, q.iteration, attemptRunId],
-      queryFn: async () => {
+      queryKey: ["har", runId, q.iteration, attemptRunId, session.key],
+      queryFn: async ({ signal }: { signal: AbortSignal }) => {
         const url = attemptRunId ? api.runHarUrl(runId, attemptRunId, q.iteration) : api.harUrl(runId, q.iteration);
-        const res = await apiClient(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json() as Promise<HarFile>;
+        const res = await fetchArtifact(url, session.projectId!, AbortSignal.any([signal, session.controller.signal]));
+        const data: HarFile = await res.json();
+        return data;
       },
-      enabled: q.enabled,
+      enabled: q.enabled && session.ready,
+      retry: false,
       staleTime: Infinity,
     })),
   });
