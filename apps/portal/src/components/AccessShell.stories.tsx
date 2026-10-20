@@ -4,7 +4,12 @@
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent } from "storybook/test";
-import { NoAccessView } from "./AccessShell";
+import { Navigate, Route, Routes } from "react-router-dom";
+import { AuthContext } from "@/contexts/AuthContext";
+import { signedInAuth } from "@/contexts/authFixtures";
+import { ProjectProvider } from "@/contexts/ProjectContext";
+import { PROJECT_STORAGE_KEY } from "@/lib/project-scope";
+import { AccessShell, NoAccessView } from "./AccessShell";
 
 const meta = {
   component: NoAccessView,
@@ -25,5 +30,31 @@ export const EnrolledWithoutMembership: Story = {
     await expect(canvas.queryByRole("link")).not.toBeInTheDocument();
     await userEvent.click(canvas.getByRole("button", { name: "Sign out" }));
     await expect(canvas.getByText("Signed out")).toBeVisible();
+  },
+};
+
+export const GlobalSecretsWithoutProject: Story = {
+  beforeEach: () => localStorage.removeItem(PROJECT_STORAGE_KEY),
+  render: () => <AuthContext.Provider value={{
+    ...signedInAuth, user: signedInAuth.user && { ...signedInAuth.user, role: "admin",
+      capabilities: { platformAdmin: true, reportsEnabled: false, memberships: [] } },
+  }}><ProjectProvider><Routes>
+    <Route path="/" element={<Navigate to="/secrets/keys/new" replace />} />
+    <Route path="/secrets/keys/new" element={<AccessShell><h1>Register global key</h1></AccessShell>} />
+  </Routes></ProjectProvider></AuthContext.Provider>,
+  play: async ({ canvas }) => {
+    await expect(await canvas.findByRole("heading", { name: "Register global key" })).toBeVisible();
+    await expect(canvas.queryByText("Your project role permits reading only.")).not.toBeInTheDocument();
+  },
+};
+
+export const ProjectContributorCannotManageSecrets: Story = {
+  render: () => <AuthContext.Provider value={signedInAuth}><ProjectProvider><Routes>
+    <Route path="/" element={<Navigate to="/secrets/accounts/new" replace />} />
+    <Route path="/secrets/accounts/new" element={<AccessShell><h1>Register global account</h1></AccessShell>} />
+  </Routes></ProjectProvider></AuthContext.Provider>,
+  play: async ({ canvas }) => {
+    await expect(await canvas.findByText("Platform administration is not permitted.")).toBeVisible();
+    await expect(canvas.queryByRole("heading", { name: "Register global account" })).not.toBeInTheDocument();
   },
 };

@@ -9,6 +9,7 @@ import { AuthContext, type AuthContextValue } from "@/contexts/AuthContext";
 import { anonymousAuth, signedInAuth } from "@/contexts/authFixtures";
 import { ProjectProvider } from "@/contexts/ProjectContext";
 import { PROJECT_STORAGE_KEY } from "@/lib/project-scope";
+import { projectPermissions } from "shared/rbac";
 import { AccessShell } from "./AccessShell";
 
 afterEach(() => { cleanup(); localStorage.removeItem(PROJECT_STORAGE_KEY); });
@@ -62,4 +63,43 @@ it("allows platform control-plane onboarding without implicit membership", () =>
   render(tree(admin, "/access"));
   expect(screen.getByRole("link", { name: "Access administration" })).toBeTruthy();
   expect(screen.getByText("Project content")).toBeTruthy();
+});
+
+const secretsPaths = [
+  "/secrets", "/secrets/keys", "/secrets/keys/new", "/secrets/keys/example",
+  "/secrets/keys/example/preview", "/secrets/accounts", "/secrets/accounts/new", "/secrets/accounts/example",
+];
+const platformAdmin: AuthContextValue = {
+  ...noMembership, user: noMembership.user && { ...noMembership.user, role: "admin",
+    capabilities: { platformAdmin: true, reportsEnabled: false, memberships: [] } },
+};
+
+it.each(secretsPaths)("allows a platform admin without any project to open %s", path => {
+  render(tree(platformAdmin, path));
+  expect(screen.getByText("Project content")).toBeTruthy();
+  expect(screen.queryByText("Your project role permits reading only.")).toBeNull();
+});
+
+it.each(["reader", "contributor", "admin"] as const)("does not grant global Secrets access to a project %s", role => {
+  const member: AuthContextValue = { ...signedInAuth, user: signedInAuth.user && { ...signedInAuth.user,
+    capabilities: { ...signedInAuth.user.capabilities, memberships: signedInAuth.user.capabilities.memberships.map(m => ({ ...m, role, permissions: projectPermissions(role) })) } } };
+  render(tree(member, "/secrets/keys/new"));
+  expect(screen.getByText("Platform administration is not permitted.")).toBeTruthy();
+  expect(screen.queryByText("Project content")).toBeNull();
+});
+
+it.each(["/secrets/keys/new", "/secrets/accounts/new"])("keeps %s global when an admin selects a read-only project", path => {
+  localStorage.setItem(PROJECT_STORAGE_KEY, "demo-project");
+  const admin: AuthContextValue = { ...platformAdmin, user: platformAdmin.user && { ...platformAdmin.user,
+    capabilities: { ...platformAdmin.user.capabilities, memberships: [
+      { projectId: "demo-project", role: "reader", permissions: ["content:read"], revision: 1 },
+    ] } } };
+  render(tree(admin, path));
+  expect(screen.getByText("Project content")).toBeTruthy();
+});
+
+it("still blocks project creation forms without a project content grant", () => {
+  render(tree(platformAdmin, "/runs/new"));
+  expect(screen.getByText("Your project role permits reading only.")).toBeTruthy();
+  expect(screen.queryByText("Project content")).toBeNull();
 });

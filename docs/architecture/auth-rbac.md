@@ -67,6 +67,29 @@ exact-lookup-only administration UI.
 No mandatory project-admin member, ownership transfer, invitation, configurable
 role, wildcard permission, or second user-security authority is introduced.
 
+### Global Secrets administration
+
+The Portal **Secrets** area (provider keys and service accounts) is global.
+With authentication enabled, only platform administrators can list, preview,
+create, edit, validate or delete these records through `/api/v1/keys` and
+`/api/v1/accounts`. A platform admin needs neither a selected project nor any
+project membership; selecting a read-only project does not restrict global
+Secrets administration. Project reader, contributor and admin roles grant no
+Secrets access. The Portal blocks direct Secrets URLs as well as hiding the
+navigation entry; the API independently enforces the platform role.
+
+Secrets creation routes are excluded from the generic project `/new` gate.
+Existing project-content creation remains membership-gated. Key/account
+records have no project ownership, and the CLI uses the same global API.
+This does not change project-scoped MCP server `env`/`headers` secrets or their
+runtime resolution.
+
+The local environment needs both Token Manager and its Lowkey Vault backing
+service to create credentials. An absent/unreachable Token Manager returns
+`503 token_manager_unavailable` with an actionable message, not raw
+`fetch failed`. See [Token Manager](token-manager.md#administration-and-availability)
+for proxy failure and TLS requirements.
+
 ### Verified identity, authority and freshness
 
 The unchanged IdP bearer is verified **before** identity-cache access on every

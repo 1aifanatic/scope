@@ -20,6 +20,7 @@ export function AccessShell({ children }: { children: ReactNode }) {
   const { user, logout, authEnabled } = useAuth();
   const { selectedProjectId, setSelectedProjectId } = useProjectContext();
   const location = useLocation();
+  const secretsRoute = location.pathname === "/secrets" || location.pathname.startsWith("/secrets/");
   const capabilities = user?.capabilities;
   const member = capabilities?.memberships.some(m => m.projectId === selectedProjectId);
   useEffect(() => {
@@ -34,16 +35,16 @@ export function AccessShell({ children }: { children: ReactNode }) {
   if (!capabilities.platformAdmin && !capabilities.memberships.length) {
     return <NoAccessView userId={user!.id} onLogout={() => { void logout(); }} />;
   }
-  if ((location.pathname.startsWith("/admin") || location.pathname.startsWith("/secrets") || location.pathname === "/access") &&
+  if ((location.pathname.startsWith("/admin") || secretsRoute || location.pathname === "/access") &&
     !capabilities.platformAdmin) return <main className="p-10">Platform administration is not permitted.</main>;
   if (["/agents", "/models"].some(path => location.pathname.startsWith(path)) && !capabilities.memberships.length) {
     return <main className="p-10">Catalog access requires an active project membership.</main>;
   }
-  if (location.pathname.endsWith("/new") && !capabilities.memberships.some(m => m.projectId === selectedProjectId && m.permissions.includes("content:write"))) {
+  if (!secretsRoute && location.pathname.endsWith("/new") && !capabilities.memberships.some(m => m.projectId === selectedProjectId && m.permissions.includes("content:write"))) {
     return <main className="p-10">Your project role permits reading only.</main>;
   }
   return <>
     {capabilities.platformAdmin && <div className="border-b px-4 py-2 text-sm"><Link to="/access">Access administration</Link></div>}
-    {selectedProjectId && !member ? <main className="p-10">Project access has changed. Select an accessible project.</main> : children}
+    {!secretsRoute && selectedProjectId && !member ? <main className="p-10">Project access has changed. Select an accessible project.</main> : children}
   </>;
 }
