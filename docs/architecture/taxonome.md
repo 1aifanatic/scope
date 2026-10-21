@@ -291,6 +291,20 @@ specific: all project instructions belong in `AGENTS.md`. The manifest records
 all 27 guidance/loader/TypeScript hashes, zero model calls, and unchanged frozen
 evidence.
 
+The local stack-integration merge
+`8dda331288926cb87e7d3323653a085bc69fd20a` has parents
+`f78af8d4a602339de41ade6d689fc8779e0dfab8` (published spike) and
+`6ae17ce30247bb893ab85af170c4c5e290228dd5` (prepared PR 1517 parent).
+It preserves both histories without rebasing. The generic Code Readability
+section and exact `CLAUDE.md` loader are inherited from the lower guidance
+layer; the only parent-relative `AGENTS.md` change is the Taxonome
+documentation-table row. The two merge conflicts were additive static-prompt
+inventory/coverage updates: 19 Experiment-stack quality targets plus the
+standalone Taxonome SDK target. No Experiment/API/Portal/Judge/scheduler/readout
+implementation file appears in the Taxonome parent-relative diff. The manifest
+records the integration/current-source hashes separately; frozen model evidence
+was not rerun or rewritten.
+
 | Experiment | Case result | Actual SDK requests | Interpretation |
 |---|---:|---:|---|
 | Original neutral-ID baseline, 18 cases twice | 33/36 | 36 | Two relevance/inapplicability confusions and one false certainty with unknown completeness |

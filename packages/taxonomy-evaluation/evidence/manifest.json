@@ -284,7 +284,7 @@
     "readout.atif.json": "d5671045bd8b2a12914a5195742caa26dcf201ddf6e8717970cb27f0d35f5766",
     "timeout.atif.json": "4ab30ba785d9ad390d25d9246907c419ab204700bde35e35adb4d57fa0fcd110"
   },
-  "source_fingerprint_semantics": "final_review_source_hashes identify the source snapshot that produced frozen model evidence; readability_revision records the behavior-preserving refactor; comment_coverage_revision records WHAT-comment coverage; tsdoc_revision records semantic parameter/type/field documentation plus the CLAUDE loader. Frozen artifacts/cases/ledger retain original hashes.",
+  "source_fingerprint_semantics": "final_review_source_hashes identify source that produced frozen model evidence; readability/comment/TSDoc revisions record source-only follow-ups; stack_integration_revision records the history-preserving prepared-parent merge and current parent-relative source/config hashes. Frozen artifacts/cases/ledger retain original hashes.",
   "readability_revision": {
     "guidance_commit": "05bd8b7e",
     "evidence_source_commit": "7d217d727ac0adaa4cc4121767316fab62d09f3c",
@@ -421,6 +421,92 @@
       "packages/taxonomy-evaluation/src/sdk-call.ts": "54324eea90266e85b8ceb164e98b75e8edcdade259bb1675522ea413886251c7",
       "packages/taxonomy-evaluation/src/timeout.test.ts": "5a855815e275eac99b2c42f263cf32c2ce9521b0f5228de0b3680d13965d3292",
       "packages/taxonomy-evaluation/src/timeout.ts": "43545ebbba944cf1320ea71d1286317be4b47984f1e60b11de095047c9d3846b"
+    }
+  },
+  "stack_integration_revision": {
+    "merge_commit": "8dda331288926cb87e7d3323653a085bc69fd20a",
+    "merge_parents": [
+      "f78af8d4a602339de41ade6d689fc8779e0dfab8",
+      "6ae17ce30247bb893ab85af170c4c5e290228dd5"
+    ],
+    "prepared_parent_commit": "6ae17ce30247bb893ab85af170c4c5e290228dd5",
+    "prepared_parent_parents": [
+      "250d0f1088b0a15b1faba75117c2b307557835a9",
+      "eaec849c4cd5257a5b7b1777cced1ce5b1f0e35b"
+    ],
+    "guidance_ancestor": "2afb5cfa7308f9fa1ba64ac88ab983d6b25e75a1",
+    "conflicts_resolved": [
+      "docs/architecture/prompt-evaluations.md",
+      "evaluations/static-prompts/scripts/validate-coverage.test.ts"
+    ],
+    "resolution": "Preserved 19 prepared-parent quality targets and the Taxonome standalone SDK target/documentation.",
+    "parent_relative_contract": {
+      "incremental_path_count": 67,
+      "generic_guidance_inherited": true,
+      "claude_loader_inherited": true,
+      "agents_increment": "Taxonome documentation-table row only",
+      "duplicate_experiment_paths": []
+    },
+    "model_calls": 0,
+    "model_evidence_regenerated": false,
+    "preserved_prompt_text_contracts_fixtures_gold_outputs_and_ledger": true,
+    "validation": [
+      "frozen lockfile offline install",
+      "taxonomy-evaluation build/typecheck",
+      "taxonome build/typecheck",
+      "61 focused offline tests",
+      "static prompt build/typecheck",
+      "36 merged static prompt tests",
+      "19 quality targets + 1 standalone target",
+      "1085 license headers",
+      "NOTICE check",
+      "23 frozen artifact/case hashes",
+      "private and committed 256-call ledger byte equality"
+    ],
+    "current_source_hashes": {
+      "AGENTS.md": "b8c31126746db769a201dbd98f6edefbe267716d58f7ed7cef48e8c82001c6f2",
+      "NOTICE": "9adf3fee914878afacf449ce45e86ca926130c689b4cab5ba58b3c3d949272de",
+      "apps/taxonome/README.md": "5de10a4ce464820bdd2ec96d2df2e0c6a1d54e51dcd5c2206beb33a5c6d7bde6",
+      "apps/taxonome/package.json": "f3052f45657c3e0c90ee2d895a2a1097ca1dc53dcea6fe8e55a2d060384721d6",
+      "apps/taxonome/src/cli.test.ts": "8f1ebe82505a2f72c3f68777611ae68ef86010164059d6ebb2c6437bc5004d96",
+      "apps/taxonome/src/cli.ts": "83f5628720f8f43988c82aa2befa71533955c554f72ef1b6b79cebdfb8a836b6",
+      "apps/taxonome/src/index.ts": "769fc6214c396319992e84b3ad8cf48fca758b059766bb9ab17c2847d2bb1750",
+      "apps/taxonome/tsconfig.json": "e3d9144af9cbef01916c25675b8304cb7659c7bf0d88542bf471297f085a3c22",
+      "docs/architecture/prompt-evaluations.md": "3b097d673f9b558cbe0e501199837c503d5d69a483f9c76ec9908f408a78faa4",
+      "docs/architecture/taxonome.md": "5474b78b2fad70bc821b096ac677cd6d2eae7a2d64adfd3f2739eae4d7409ba8",
+      "evaluations/static-prompts/adapter/registry.ts": "b8ebdb95b0a77e5833a7be79b1a9a42b0102d6954836560f776d7dfd7925d86a",
+      "evaluations/static-prompts/adapter/standalone.ts": "edd9b944fe5791660ae5d2ac2f8a3eb38e305ed6105ec0e4325d21e295f3bfec",
+      "evaluations/static-prompts/adapter/vitest.config.ts": "a33c2be2c237e270c6581b78d0f6645dc8ae4bdf5c1e198f83cd59b333852941",
+      "evaluations/static-prompts/evaluation-manifest.yaml": "1e5602020c232f30753fc32cbf52e19af4cd8d0358350a270c17888fff4f369e",
+      "evaluations/static-prompts/package.json": "4d6a60df050b50df5ec103eacf755b60ed400028767dd471c3bda47e41da6962",
+      "evaluations/static-prompts/scripts/validate-coverage.test.ts": "e5dd8b61b1e1221f501e095c51950678193eb79cbcde9d9802908bf9ff906acf",
+      "evaluations/static-prompts/scripts/validate-coverage.ts": "3024dc637eef80520f9a776de68a00e64c477c837bf5aed4cc9e60c41df88ff1",
+      "package.json": "a67f7adfe000ba292b7b2cb8e7ec65c2ce8c18266cc0eb367c9f22d78181714c",
+      "packages/taxonomy-evaluation/package.json": "828e76936a5134079657f5f4ee596eae1374b74833d8bd18fcbc8a6386cbc48f",
+      "packages/taxonomy-evaluation/src/cases.test.ts": "e7288122933e236b40fc0b46fe9307bebd83c44003997dcab0dc681bbd7b63be",
+      "packages/taxonomy-evaluation/src/cases.ts": "980aa1e8f55087ab7aef70ae945d1de5c37f920826816d6c7fc83111c83a6b39",
+      "packages/taxonomy-evaluation/src/contracts.test.ts": "92fe2dc969463469c3021323c40044bb795141553e5e9ac97ab7baedf68a469a",
+      "packages/taxonomy-evaluation/src/contracts.ts": "5a1bcee6a12a3d92ac7a3aa1b94062666db4124fd354d4fba2c9355d831edde2",
+      "packages/taxonomy-evaluation/src/copilot.test.ts": "f4d4b249904a1c5981595c382f8f7c7350bb96b5e7cdf070918ab828bf753dc8",
+      "packages/taxonomy-evaluation/src/copilot.ts": "8b99a364d7656ce2e68d4d1aac64a54effbdf89ccbe9f7567b7429f4dd521cad",
+      "packages/taxonomy-evaluation/src/engine.ts": "d53a031c448665dc8a7a45ac9c209a5e4ebe1ea0d8c604a749a53a9ae52a8376",
+      "packages/taxonomy-evaluation/src/evidence.test.ts": "a534516595dbe529cf7a0840c1d51c101002d4de7eecf94bbee677fbbe40a762",
+      "packages/taxonomy-evaluation/src/index.ts": "cb0636019f04b6396f2ba28b7087aaa360cf98016f14bf5d2f52b3d087b5586e",
+      "packages/taxonomy-evaluation/src/input.test.ts": "5770253c8836ca4ffe2f452f82426847bd438f98fc0bd1b6f77d66dc07ebf18f",
+      "packages/taxonomy-evaluation/src/input.ts": "b9d8f3af840bb966736a4dc83bab0c9b3338150554e14a66958c66bf26e639d5",
+      "packages/taxonomy-evaluation/src/ledger.test.ts": "838621ce1d329a5012e4332634252d54e444c5fdc661cdcb533b3d5796c51276",
+      "packages/taxonomy-evaluation/src/ledger.ts": "9a3ffcb7d6ba45a32923c121f3aa335ef0bb70fbf0d288a5d46a91f0baa98fc5",
+      "packages/taxonomy-evaluation/src/optimization.ts": "9208b9bfc90895bf9be1e4e36ac9aa04bb9d6aa6a286b0eb30f2a1ddcd5de004",
+      "packages/taxonomy-evaluation/src/prompt.test.ts": "ac23c64052ad476f3533e22cb2d186ab2ef2456d38ca15c2ac622cceda64401a",
+      "packages/taxonomy-evaluation/src/prompt.ts": "de76c3a492ade6bb2e881aa00b08af2d766e491f1c9055b0952670d7c5760b26",
+      "packages/taxonomy-evaluation/src/readout.test.ts": "05ec946aa3083aabcaf8cb32b0b7b66fc1635755b89b64ab26e5502019d2827c",
+      "packages/taxonomy-evaluation/src/readout.ts": "e647ecd8da6d78eb7ac84670f594b87dd7c00d3c5369c9416d0878b490e698c1",
+      "packages/taxonomy-evaluation/src/sdk-call.ts": "54324eea90266e85b8ceb164e98b75e8edcdade259bb1675522ea413886251c7",
+      "packages/taxonomy-evaluation/src/timeout.test.ts": "5a855815e275eac99b2c42f263cf32c2ce9521b0f5228de0b3680d13965d3292",
+      "packages/taxonomy-evaluation/src/timeout.ts": "43545ebbba944cf1320ea71d1286317be4b47984f1e60b11de095047c9d3846b",
+      "packages/taxonomy-evaluation/tsconfig.json": "e3d9144af9cbef01916c25675b8304cb7659c7bf0d88542bf471297f085a3c22",
+      "pnpm-lock.yaml": "1ce8d157cbd4594ed1aee4d822ae91958a7a7f6156588a09dea101aed9efaffc",
+      "pnpm-workspace.yaml": "c55d269b1f6e9ca9dd08d6f20fab1e825a8694ef8053ecbbf425eb139ac8f37f"
     }
   }
 }
