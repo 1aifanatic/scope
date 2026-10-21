@@ -266,6 +266,9 @@ configuration and expansion count and adds Experiment metadata. No selected
 scenario creates an empty Experiment; selecting a scenario reveals the run
 composition controls and creates the expanded run count. Optional description
 editing is collapsed by default and preserves its value when reopened. The
+revealed Observation picker opens the shared authoring wizard in locked
+`mode="observation"` and adds the created ID only to the Experiment
+composition's selected observations. The
 project-scoped creation launcher keeps **New Run** as the primary action and
 expands to expose **New Experiment** on pointer hover or keyboard focus; the
 expanded sidebar and mobile sheet keep both destinations directly available.

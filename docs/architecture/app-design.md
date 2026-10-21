@@ -711,13 +711,14 @@ Observation evaluation happens off the coding-agent critical path in the `pp-obs
 
 ### Inline Observation authoring
 
-The Portal's **New Run** form opens the shared `CreateCriterionDialog` with
-`mode="observation"` from **New Observation**. This fixes the kind to observation,
-uses Observation labels throughout both wizard steps and notifications, and limits
-parent/child pickers to observations. The existing optional dimension selector and
-evaluation subject remain available: the subject defaults to whole-run, accepts the
-AI suggestion, and can be overridden by the user. Creation omits gate compatibility
-and adds the new ID to the run's selected observations, not its gate criteria.
+The Portal's **New Run** and composed **New Experiment** forms open the shared
+`CreateCriterionDialog` with `mode="observation"` from **New Observation**.
+This fixes the kind to observation, uses Observation labels throughout both
+wizard steps and notifications, and limits parent/child pickers to
+observations. The existing optional dimension selector and evaluation subject
+remain available: the subject defaults to whole-run, accepts the AI suggestion,
+and can be overridden by the user. Creation omits gate compatibility and adds
+the new ID to selected observations, not gate criteria.
 
 Omitting `mode` retains generic **New Criteria** authoring, including the kind
 selector, `defaultKind`, and gate defaults/locks. This is a presentation-only
