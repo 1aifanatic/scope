@@ -268,9 +268,11 @@ behavior-preserving readability pass under the repository's code-readability
 guidance. It renamed local variables, separated logical phases, documented
 public and non-obvious contracts, and simplified control flow without changing
 prompt text, schemas, fixtures, gold facts, recorded outputs, or the 256-call
-ledger. The manifest preserves the evidence-generating source fingerprints and
-records the later readability source revision separately; no model evidence
-was regenerated for that source-only change.
+ledger. Local commit `23c27e3b18a506cf639e54aa668387fea9993536`
+contains that source-only revision, based on evidence source commit
+`7d217d727ac0adaa4cc4121767316fab62d09f3c` and readability guidance commit
+`05bd8b7e`. The manifest preserves both source fingerprint sets and records zero
+additional model calls; no model evidence was regenerated.
 
 | Experiment | Case result | Actual SDK requests | Interpretation |
 |---|---:|---:|---|
