@@ -2,10 +2,12 @@
 // Licensed under the MIT License.
 
 import { useEffect, type ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, matchRoutes, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { Button } from "@/components/ui/button";
+
+const platformRoutes = ["/agents/*", "/models/*", "/secrets/*", "/admin/*", "/access"].map(path => ({ path }));
 
 export function NoAccessView({ userId, onLogout }: { userId: string; onLogout: () => void }) {
   return <main className="mx-auto max-w-xl space-y-4 p-10">
@@ -17,34 +19,31 @@ export function NoAccessView({ userId, onLogout }: { userId: string; onLogout: (
 }
 
 export function AccessShell({ children }: { children: ReactNode }) {
-  const { user, logout, authEnabled } = useAuth();
+  const { user, logout, authEnabled, isReady } = useAuth();
   const { selectedProjectId, setSelectedProjectId } = useProjectContext();
   const location = useLocation();
-  const secretsRoute = location.pathname === "/secrets" || location.pathname.startsWith("/secrets/");
+  const platformMatch = matchRoutes(platformRoutes, location)?.[0];
+  const platformRoute = Boolean(platformMatch);
   const capabilities = user?.capabilities;
   const member = capabilities?.memberships.some(m => m.projectId === selectedProjectId);
   useEffect(() => {
     if (authEnabled && selectedProjectId && !member) setSelectedProjectId(undefined);
   }, [authEnabled, selectedProjectId, member, setSelectedProjectId]);
   if (!authEnabled) {
-    return location.pathname === "/access"
+    return platformMatch?.route.path === "/access"
       ? <main className="p-10">Access administration requires authentication to be enabled.</main>
       : <>{children}</>;
   }
-  if (!capabilities) return <main className="p-10">Access capabilities are unavailable.</main>;
+  if (!isReady || !capabilities) return <main className="p-10">Access capabilities are unavailable.</main>;
   if (!capabilities.platformAdmin && !capabilities.memberships.length) {
     return <NoAccessView userId={user!.id} onLogout={() => { void logout(); }} />;
   }
-  if ((location.pathname.startsWith("/admin") || secretsRoute || location.pathname === "/access") &&
-    !capabilities.platformAdmin) return <main className="p-10">Platform administration is not permitted.</main>;
-  if (["/agents", "/models"].some(path => location.pathname.startsWith(path)) && !capabilities.memberships.length) {
-    return <main className="p-10">Catalog access requires an active project membership.</main>;
-  }
-  if (!secretsRoute && location.pathname.endsWith("/new") && !capabilities.memberships.some(m => m.projectId === selectedProjectId && m.permissions.includes("content:write"))) {
+  if (platformRoute && !capabilities.platformAdmin) return <main className="p-10">Platform administration is not permitted.</main>;
+  if (!platformRoute && location.pathname.endsWith("/new") && !capabilities.memberships.some(m => m.projectId === selectedProjectId && m.permissions.includes("content:write"))) {
     return <main className="p-10">Your project role permits reading only.</main>;
   }
   return <>
     {capabilities.platformAdmin && <div className="border-b px-4 py-2 text-sm"><Link to="/access">Access administration</Link></div>}
-    {!secretsRoute && selectedProjectId && !member ? <main className="p-10">Project access has changed. Select an accessible project.</main> : children}
+    {!platformRoute && selectedProjectId && !member ? <main className="p-10">Project access has changed. Select an accessible project.</main> : children}
   </>;
 }

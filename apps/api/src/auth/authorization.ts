@@ -160,7 +160,7 @@ export class Authorization {
       if (policy === "platform") {
         if (user.role !== "admin") throw new AccessError(403, "insufficient_permission", "Platform administration required");
       } else if (policy === "metadata") {
-        if (!(await this.memberships(user._id, budgetDeadline)).length) throw new AccessError(403, "membership_required", "An active project membership is required");
+        if (user.role !== "admin" && !(await this.memberships(user._id, budgetDeadline)).length) throw new AccessError(403, "membership_required", "An active project membership is required");
       } else if (policy === "projects") {
         const control = path.includes("/members") || method === "delete" || method === "post" ||
           (path === "/api/v1/projects" && req.query.controlPlane === "true");

@@ -10,13 +10,15 @@ import { anonymousAuth, signedInAuth } from "@/contexts/authFixtures";
 import { ProjectProvider } from "@/contexts/ProjectContext";
 import { PROJECT_STORAGE_KEY } from "@/lib/project-scope";
 import { projectPermissions } from "shared/rbac";
+import type { ReactNode } from "react";
+import { vi } from "vitest";
 import { AccessShell } from "./AccessShell";
 
 afterEach(() => { cleanup(); localStorage.removeItem(PROJECT_STORAGE_KEY); });
 
-function tree(auth: AuthContextValue, path = "/runs") {
+function tree(auth: AuthContextValue, path = "/runs", children: ReactNode = <p>Project content</p>) {
   return <AuthContext.Provider value={auth}><ProjectProvider>
-    <MemoryRouter initialEntries={[path]}><AccessShell><p>Project content</p></AccessShell></MemoryRouter>
+    <MemoryRouter initialEntries={[path]}><AccessShell>{children}</AccessShell></MemoryRouter>
   </ProjectProvider></AuthContext.Provider>;
 }
 const noMembership: AuthContextValue = {
@@ -32,8 +34,8 @@ it("renders anonymous content without manufacturing capabilities or clearing a s
   expect(screen.queryByText("Access capabilities are unavailable.")).toBeNull();
   expect(screen.queryByRole("link", { name: "Access administration" })).toBeNull();
 });
-it("does not expose access administration when auth is disabled", () => {
-  render(tree(anonymousAuth, "/access"));
+it.each(["/access", "/ACCESS", "/acc%65ss"])("does not expose %s administration when auth is disabled", path => {
+  render(tree(anonymousAuth, path));
   expect(screen.getByText("Access administration requires authentication to be enabled.")).toBeTruthy();
   expect(screen.queryByText("Project content")).toBeNull();
 });
@@ -69,26 +71,35 @@ const secretsPaths = [
   "/secrets", "/secrets/keys", "/secrets/keys/new", "/secrets/keys/example",
   "/secrets/keys/example/preview", "/secrets/accounts", "/secrets/accounts/new", "/secrets/accounts/example",
 ];
+const platformPaths = [
+  ...secretsPaths, "/agents", "/agents/example", "/models", "/models/example", "/admin", "/admin/settings",
+  "/AGENTS", "/ag%65nts", "/agents/EXAMPLE", "/MODELS/example", "/mod%65ls/example",
+  "/SECRETS/keys", "/secr%65ts/keys/new", "/ADMIN", "/adm%69n/settings",
+];
 const platformAdmin: AuthContextValue = {
   ...noMembership, user: noMembership.user && { ...noMembership.user, role: "admin",
     capabilities: { platformAdmin: true, reportsEnabled: false, memberships: [] } },
 };
 
-it.each(secretsPaths)("allows a platform admin without any project to open %s", path => {
+it.each(platformPaths)("allows a platform admin without any project to open %s", path => {
   render(tree(platformAdmin, path));
   expect(screen.getByText("Project content")).toBeTruthy();
   expect(screen.queryByText("Your project role permits reading only.")).toBeNull();
 });
 
-it.each(["reader", "contributor", "admin"] as const)("does not grant global Secrets access to a project %s", role => {
+it.each(["reader", "contributor", "admin"] as const)("does not grant platform management access to a project %s", role => {
   const member: AuthContextValue = { ...signedInAuth, user: signedInAuth.user && { ...signedInAuth.user,
     capabilities: { ...signedInAuth.user.capabilities, memberships: signedInAuth.user.capabilities.memberships.map(m => ({ ...m, role, permissions: projectPermissions(role) })) } } };
-  render(tree(member, "/secrets/keys/new"));
-  expect(screen.getByText("Platform administration is not permitted.")).toBeTruthy();
-  expect(screen.queryByText("Project content")).toBeNull();
+  const ProtectedPage = vi.fn(() => <p>Protected page queried</p>);
+  for (const path of platformPaths) {
+    const view = render(tree(member, path, <ProtectedPage />));
+    expect(screen.getByText("Platform administration is not permitted.")).toBeTruthy();
+    expect(ProtectedPage).not.toHaveBeenCalled();
+    view.unmount();
+  }
 });
 
-it.each(["/secrets/keys/new", "/secrets/accounts/new"])("keeps %s global when an admin selects a read-only project", path => {
+it.each(platformPaths)("keeps %s global when an admin selects a read-only project", path => {
   localStorage.setItem(PROJECT_STORAGE_KEY, "demo-project");
   const admin: AuthContextValue = { ...platformAdmin, user: platformAdmin.user && { ...platformAdmin.user,
     capabilities: { ...platformAdmin.user.capabilities, memberships: [
@@ -96,6 +107,22 @@ it.each(["/secrets/keys/new", "/secrets/accounts/new"])("keeps %s global when an
     ] } } };
   render(tree(admin, path));
   expect(screen.getByText("Project content")).toBeTruthy();
+});
+
+it.each(platformPaths)("preserves explicit auth-disabled access to %s", path => {
+  render(tree(anonymousAuth, path));
+  expect(screen.getByText("Project content")).toBeTruthy();
+});
+
+it.each(["/agents", "/models", "/secrets/keys"])("blocks %s while capabilities are resolving and after admin removal", path => {
+  const view = render(tree(platformAdmin, path));
+  expect(screen.getByText("Project content")).toBeTruthy();
+  view.rerender(tree({ ...platformAdmin, isReady: false, status: "resolving" }, path));
+  expect(screen.queryByText("Project content")).toBeNull();
+  expect(screen.getByText("Access capabilities are unavailable.")).toBeTruthy();
+  view.rerender(tree(signedInAuth, path));
+  expect(screen.queryByText("Project content")).toBeNull();
+  expect(screen.getByText("Platform administration is not permitted.")).toBeTruthy();
 });
 
 it("still blocks project creation forms without a project content grant", () => {

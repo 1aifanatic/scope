@@ -58,3 +58,50 @@ export const ProjectContributorCannotManageSecrets: Story = {
     await expect(canvas.queryByRole("heading", { name: "Register global account" })).not.toBeInTheDocument();
   },
 };
+
+export const GlobalAgentsWithoutProject: Story = {
+  beforeEach: () => localStorage.removeItem(PROJECT_STORAGE_KEY),
+  render: () => <AuthContext.Provider value={{
+    ...signedInAuth, user: signedInAuth.user && { ...signedInAuth.user, role: "admin",
+      capabilities: { platformAdmin: true, reportsEnabled: false, memberships: [] } },
+  }}><ProjectProvider><Routes>
+    <Route path="/" element={<Navigate to="/agents/example" replace />} />
+    <Route path="/agents/example" element={<AccessShell><h1>Agent administration</h1></AccessShell>} />
+  </Routes></ProjectProvider></AuthContext.Provider>,
+  play: async ({ canvas }) => {
+    await expect(await canvas.findByRole("heading", { name: "Agent administration" })).toBeVisible();
+  },
+};
+
+export const ProjectMemberCannotOpenModels: Story = {
+  render: () => <AuthContext.Provider value={signedInAuth}><ProjectProvider><Routes>
+    <Route path="/" element={<Navigate to="/models/example" replace />} />
+    <Route path="/models/example" element={<AccessShell><h1>Model administration</h1></AccessShell>} />
+  </Routes></ProjectProvider></AuthContext.Provider>,
+  play: async ({ canvas }) => {
+    await expect(await canvas.findByText("Platform administration is not permitted.")).toBeVisible();
+    await expect(canvas.queryByRole("heading", { name: "Model administration" })).not.toBeInTheDocument();
+  },
+};
+
+export const PlatformRoleRemoved: Story = {
+  render: () => {
+    const [admin, setAdmin] = useState(true);
+    return <AuthContext.Provider value={{
+      ...signedInAuth, user: signedInAuth.user && { ...signedInAuth.user,
+        capabilities: { ...signedInAuth.user.capabilities, platformAdmin: admin } },
+    }}><ProjectProvider><Routes>
+      <Route path="/" element={<Navigate to="/models/example" replace />} />
+      <Route path="/models/example" element={<>
+        <button onClick={() => setAdmin(false)}>Remove platform role</button>
+        <AccessShell><h1>Model administration</h1></AccessShell>
+      </>} />
+    </Routes></ProjectProvider></AuthContext.Provider>;
+  },
+  play: async ({ canvas }) => {
+    await expect(await canvas.findByRole("heading", { name: "Model administration" })).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Remove platform role" }));
+    await expect(canvas.getByText("Platform administration is not permitted.")).toBeVisible();
+    await expect(canvas.queryByRole("heading", { name: "Model administration" })).not.toBeInTheDocument();
+  },
+};

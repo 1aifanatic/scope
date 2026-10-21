@@ -197,6 +197,39 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
     vi.restoreAllMocks();
   });
 
+  it("allows global admin catalogs without membership and retains member selection without administration", async () => {
+    const { adminId, userId, adminBearer, userBearer } = await administrationFixture();
+    expect(await db.collection("project_memberships").countDocuments({ userId: adminId })).toBe(0);
+    for (const path of ["/api/v1/agents", "/api/v1/models"]) {
+      expect((await request(app).get(path).set("Authorization", adminBearer)).status).toBe(200);
+      expect((await request(app).get(path).set("Authorization", userBearer)).status).toBe(403);
+      expect((await request(app).get(path)).status).toBe(401);
+    }
+    const project = await request(app).post("/api/v1/projects")
+      .set("Authorization", adminBearer).send({ name: "Catalog selection fixture" });
+    expect(project.status).toBe(201);
+    const projectId: string = project.body.id;
+    let revision = 0;
+    for (const role of ["reader", "contributor", "admin"]) {
+      const grant = await request(app).put(`/api/v1/projects/${projectId}/members/${userId}`)
+        .set("Authorization", adminBearer).send({ role, revision });
+      expect(grant.status).toBe(200);
+      revision++;
+      for (const path of ["/api/v1/agents", "/api/v1/models"]) {
+        expect((await request(app).get(path).set("Authorization", userBearer)).status).toBe(200);
+      }
+      for (const path of ["/api/v1/agents", "/api/v1/models/sync", "/api/v1/keys", "/api/v1/accounts"]) {
+        expect((await request(app).post(path).set("Authorization", userBearer).send({})).status).toBe(403);
+      }
+    }
+    const revoke = await request(app).delete(`/api/v1/projects/${projectId}/members/${userId}`)
+      .set("Authorization", adminBearer).send({ revision });
+    expect(revoke.status).toBe(200);
+    for (const path of ["/api/v1/agents", "/api/v1/models"]) {
+      expect((await request(app).get(path).set("Authorization", userBearer)).status).toBe(403);
+    }
+  });
+
   describe("Platform administrator HTTP operations", () => {
     it("lists only platform administrators with server-side pagination and no identity secrets", async () => {
       const { adminBearer, userBearer, userId } = await administrationFixture();
@@ -258,7 +291,13 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
       expect(me.status).toBe(200);
       expect(me.body.capabilities).toMatchObject({ platformAdmin: true, memberships: [] });
       expect(await db.collection("project_memberships").countDocuments({ userId })).toBe(0);
-      expect((await request(app).get("/api/v1/agents").set("Authorization", userBearer)).status).toBe(403);
+      expect((await request(app).get("/api/v1/agents").set("Authorization", userBearer)).status).toBe(200);
+      expect((await request(app).get("/api/v1/models").set("Authorization", userBearer)).status).toBe(200);
+      const project = await request(app).post("/api/v1/projects")
+        .set("Authorization", adminBearer).send({ name: "No catalog content bypass" });
+      expect(project.status).toBe(201);
+      expect((await request(app).get("/api/v1/requests").query({ projectId: project.body.id })
+        .set("Authorization", userBearer)).status).toBe(404);
       expect((await request(app).post(`/api/v1/admin/users/${userId}/disable`).set("Authorization", adminBearer).send({ revision: 1 })).status).toBe(403);
       const reused = await request(app).post(path).set("Authorization", adminBearer).set("Idempotency-Key", id).send({ revision: 1 });
       expect(reused.status).toBe(409);

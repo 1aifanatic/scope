@@ -53,7 +53,7 @@ The following identity, role and freshness contract applies when auth is enabled
 | Platform admin without membership | None | Control-plane metadata | Create/delete/restore projects, manage memberships, promote enrolled users to platform admin, disable ordinary users |
 
 Platform admins explicitly add themselves through the same audited membership
-operation to read content or global agent/model catalogs, except that **new project
+operation to read project content, except that **new project
 creation grants the verified creator an audited project-admin membership**. This
 supersedes the earlier no-creator-membership decision. Other platform admins can
 discover/administer every project without membership but receive no blanket
@@ -67,6 +67,32 @@ exact-lookup-only administration UI.
 No mandatory project-admin member, ownership transfer, invitation, configurable
 role, wildcard permission, or second user-security authority is introduced.
 
+### Global Agents and Models administration
+
+With authentication enabled, the Portal **Agents**, **Models** and **Secrets**
+management pages and their nested/direct URLs require server-resolved
+`capabilities.platformAdmin`. Their navigation group is hidden for all ordinary
+users, including project admins, on desktop and mobile. The separate **Admin**
+navigation button follows the same platform-admin visibility rule; direct
+`/admin` routes remain platform-admin-only. Resolving or unavailable
+capabilities do not mount these pages or expose management links. Agent badges
+retain their names, versions and metadata for ordinary users but do not link to
+agent management.
+Route guards use the same case-insensitive, decoded route matching as the
+Portal router, so uppercase or percent-encoded path variants cannot bypass them.
+
+Agent/model catalog reads remain available to users with an active project
+membership so run submission, profile creation, filters and existing metadata
+displays continue to work. This is selection metadata access, not management
+page access. Platform admins may read these global catalogs and open management
+pages without selecting or joining a project, including when the selected
+project is read-only. Agent/model mutations remain platform-admin-only.
+CLI catalog reads use the same API authorization. These global permissions
+do not grant access to project content without membership.
+
+The explicit authentication-disabled mode described above retains unrestricted
+application access, including these management pages and agent links.
+
 ### Global Secrets administration
 
 The Portal **Secrets** area (provider keys and service accounts) is global.
@@ -78,7 +104,8 @@ Secrets administration. Project reader, contributor and admin roles grant no
 Secrets access. The Portal blocks direct Secrets URLs as well as hiding the
 navigation entry; the API independently enforces the platform role.
 
-Secrets creation routes are excluded from the generic project `/new` gate.
+Global Agents, Models and Secrets routes are excluded from the generic project
+`/new` and selected-project membership gates.
 Existing project-content creation remains membership-gated. Key/account
 records have no project ownership, and the CLI uses the same global API.
 This does not change project-scoped MCP server `env`/`headers` secrets or their
