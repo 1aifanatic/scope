@@ -284,7 +284,7 @@
     "readout.atif.json": "d5671045bd8b2a12914a5195742caa26dcf201ddf6e8717970cb27f0d35f5766",
     "timeout.atif.json": "4ab30ba785d9ad390d25d9246907c419ab204700bde35e35adb4d57fa0fcd110"
   },
-  "source_fingerprint_semantics": "final_review_source_hashes identify source that produced frozen model evidence; readability/comment/TSDoc revisions record source-only follow-ups; stack_integration_revision records the history-preserving prepared-parent merge and current parent-relative source/config hashes. Frozen artifacts/cases/ledger retain original hashes.",
+  "source_fingerprint_semantics": "final_review_source_hashes identify source that produced frozen model evidence; readability/comment/TSDoc revisions record source-only follow-ups; stack_integration_revision records the prepared-parent merge; cli_polish_revision records dependency-free TTY/color/help and pnpm invocation updates. Frozen artifacts/cases/ledger retain original hashes.",
   "readability_revision": {
     "guidance_commit": "05bd8b7e",
     "evidence_source_commit": "7d217d727ac0adaa4cc4121767316fab62d09f3c",
@@ -507,6 +507,56 @@
       "packages/taxonomy-evaluation/tsconfig.json": "e3d9144af9cbef01916c25675b8304cb7659c7bf0d88542bf471297f085a3c22",
       "pnpm-lock.yaml": "1ce8d157cbd4594ed1aee4d822ae91958a7a7f6156588a09dea101aed9efaffc",
       "pnpm-workspace.yaml": "c55d269b1f6e9ca9dd08d6f20fab1e825a8694ef8053ecbbf425eb139ac8f37f"
+    }
+  },
+  "cli_polish_revision": {
+    "commit": "94305d5ac8eb3b9387770d4964b9653fa632f019",
+    "parent_integration_head": "66da075b941204c49f3a03d2542a2682842e25be",
+    "patterns_reused": [
+      "node:util styleText semantic styles from apps/cli/src/utils/style.ts",
+      "Commander configureHelp style hooks from apps/cli/src/utils/helpFormatter.ts"
+    ],
+    "dependency_added": false,
+    "diagnostic_stream": "stderr",
+    "machine_output_stream": "stdout",
+    "color_policy": {
+      "tty_default": true,
+      "pipe_default": false,
+      "ci_default": false,
+      "term_dumb_default": false,
+      "no_color_disables": true,
+      "force_color_zero_disables": true,
+      "force_color_nonzero_enables": true,
+      "no_color_precedence": true
+    },
+    "documented_command": "pnpm --silent taxonome",
+    "model_calls": 0,
+    "model_evidence_regenerated": false,
+    "preserved_prompt_text_contracts_fixtures_gold_outputs_and_ledger": true,
+    "validation": [
+      "taxonomy-evaluation build/typecheck",
+      "taxonome build/typecheck",
+      "67 focused offline tests / 11 files",
+      "static prompt build/typecheck",
+      "36 merged static prompt tests / 6 files",
+      "19 quality targets + 1 standalone target",
+      "1085 license headers",
+      "NOTICE check",
+      "real pseudo-TTY colored help",
+      "NO_COLOR pseudo-TTY plain help",
+      "pnpm --silent taxonome JSON stdout parse",
+      "23 frozen artifact/case hashes",
+      "private and committed 256-call ledger byte equality"
+    ],
+    "current_source_hashes": {
+      "apps/taxonome/src/style.ts": "cfc14f68145a4e1e71d8a1bd27f13a8ab7f8bda5bf37141bc23748d08e7fbbb2",
+      "apps/taxonome/src/style.test.ts": "12ae40b7df683ba144e032975c1c5a82f92109f9bde7e376145e152dbe464c23",
+      "apps/taxonome/src/cli.ts": "95194fa958119128af804b87c4c0b4a7ed0883e023dc1e78bcd86b097a36c36a",
+      "apps/taxonome/src/cli.test.ts": "05dc5011689664f8ae7339d011b883eb648b2cb76e9149829b10f4a2aae5613d",
+      "apps/taxonome/src/index.ts": "4544c403162b518bf622b7c37538672c7a87b26c95e363b4c2793380ce5804e3",
+      "docs/architecture/taxonome.md": "0b536a8b91fd58cc295ce8143b6ea43519107cf1507e776b1aa9df24df8111af",
+      "docs/architecture/prompt-evaluations.md": "ea6cb11de6622637b8d0faef91a0d41fc48172c71f64910fd01aa8f4c011456f",
+      "evaluations/static-prompts/evaluation-manifest.yaml": "a8cd58704dc951faebe689145e35845a23c3ea5fde86ba28645841e9429e88a7"
     }
   }
 }
