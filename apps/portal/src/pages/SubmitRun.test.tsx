@@ -105,6 +105,41 @@ function renderExperimentForm() {
   );
 }
 
+function renderRunForm() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <SubmitRun />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+describe("SubmitRun legacy composition guidance", () => {
+  it("keeps neutral guidance beside composition controls", async () => {
+    renderRunForm();
+
+    const link = await screen.findByRole("link", { name: "New Experiment" });
+    const guidance = link.parentElement;
+    expect(guidance?.textContent).toBe(
+      "Creating multiple runs or profile variations? Use New Experiment.",
+    );
+    expect(guidance?.className).toContain("bg-muted/30");
+    expect(guidance?.className).not.toContain("amber");
+    expect(guidance?.getAttribute("role")).toBeNull();
+    expect(link.getAttribute("href")).toBe("/experiments/new");
+    expect(screen.queryByText(/legacy-request-composition/)).toBeNull();
+    expect(screen.queryByText(/Deprecated composition/)).toBeNull();
+    expect(
+      guidance?.previousElementSibling?.querySelector("#occurrences"),
+    ).toBeTruthy();
+  });
+});
+
 describe("SubmitRun Experiment composition", () => {
   it("infers an empty Experiment until a scenario is entered", async () => {
     renderExperimentForm();

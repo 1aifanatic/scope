@@ -35,6 +35,21 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+export const LegacyCompositionGuidance: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+
+    const link = await canvas.findByRole("link", { name: "New Experiment" });
+    await expect(link).toHaveAttribute("href", "/experiments/new");
+    await expect(
+      canvas.getByText(/Creating multiple runs or profile variations/),
+    ).toBeVisible();
+    await expect(
+      canvas.queryByText(/legacy-request-composition|Deprecated composition/),
+    ).not.toBeInTheDocument();
+  },
+};
+
 export const ExperimentProgressiveDisclosure: Story = {
   args: {
     mode: "experiment",

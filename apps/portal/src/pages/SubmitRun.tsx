@@ -5,10 +5,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type RunCreateInput } from "@/lib/api";
-import {
-  LEGACY_REQUEST_COMPOSITION_DEPRECATION,
-  type ExperimentView,
-} from "@/lib/experiments";
+import type { ExperimentView } from "@/lib/experiments";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -941,24 +938,6 @@ export function SubmitRun({
         </Card>
       )}
 
-      {usesLegacyComposition && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
-        >
-          <span className="font-medium">
-            Deprecated composition ({LEGACY_REQUEST_COMPOSITION_DEPRECATION}).
-          </span>{" "}
-          Multi-run and profile-variation expansion remains supported here, but
-          new compositions should be created from{" "}
-          <Link className="underline" to="/experiments/new">
-            New Experiment
-          </Link>
-          .
-        </div>
-      )}
-
       {/* Quick Start gallery (collapsible, default closed) */}
       {showRunComposition && (topProfiles.length > 0 || recentRuns.length > 0) && (
         <CollapsibleCard
@@ -1308,6 +1287,19 @@ export function SubmitRun({
               />
             </div>
           </div>
+
+          {usesLegacyComposition && (
+            <p className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              Creating multiple runs or profile variations? Use{" "}
+              <Link
+                className="font-medium text-foreground underline underline-offset-4"
+                to="/experiments/new"
+              >
+                New Experiment
+              </Link>
+              .
+            </p>
+          )}
 
           {/* ─── AGENTS.md (optional, discreet) ──────────────────────────── */}
           {!(agentsMdOpen || agentsMd.trim()) ? (
