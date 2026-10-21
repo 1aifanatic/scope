@@ -39,6 +39,7 @@ export const behaviorMetadata = {
   "beh-timeout": { label: "Timeout", category_id: "behavior-category-invocation" },
 } as const;
 
+/** Recursively freezes the validated private copy that implementations receive. */
 function deepFreeze(value: unknown): void {
   if (value && typeof value === "object") {
     Object.freeze(value);

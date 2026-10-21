@@ -7,6 +7,7 @@ import { createCli } from "./cli.js";
 try {
   await createCli().parseAsync(process.argv);
 } catch (error) {
+  // Flatten aggregate lifecycle failures into one stderr diagnostic without contaminating JSON stdout.
   const messages = error instanceof AggregateError
     ? [error.message, ...error.errors.map(cause => cause instanceof Error ? cause.message : String(cause))]
     : [error instanceof Error ? error.message : String(error)];

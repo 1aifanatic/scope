@@ -6,12 +6,14 @@ import { open } from "node:fs/promises";
 const MAX_BYTES = 2 * 1024 * 1024;
 const TRANSIENT = new Set([429, 500, 502, 503, 504]);
 
+/** Carries retry metadata for HTTP responses without exposing the requested URL. */
 class HttpFailure extends Error {
   constructor(readonly status: number, readonly retryAfter: string | null) {
     super(`ATIF download failed: HTTP ${status}`);
   }
 }
 
+/** Performs one complete bounded fetch, including redirects and streamed body reads. */
 async function downloadAttempt(location: string, byteLimit: number, timeoutMs: number): Promise<string> {
   let url = new URL(location);
   if (url.username || url.password) {
@@ -96,6 +98,7 @@ async function downloadAttempt(location: string, byteLimit: number, timeoutMs: n
   }
 }
 
+/** Converts Retry-After into a bounded delay or refuses a wait the CLI cannot honor. */
 function retryDelay(header: string | null, attempt: number): number {
   if (!header) {
     return 100 * 2 ** attempt;
@@ -134,6 +137,7 @@ export async function loadJson(
 
   let text: string;
   if (!/^https?:\/\//i.test(location)) {
+    // Local reads use an explicit-size buffer so file growth cannot bypass the bound.
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(location)) {
       throw new Error("Only local files and HTTP(S) URLs are supported");
     }
@@ -162,6 +166,7 @@ export async function loadJson(
       await file.close();
     }
   } else {
+    // Network acquisition retries only complete transient download failures.
     try {
       new URL(location);
     } catch {

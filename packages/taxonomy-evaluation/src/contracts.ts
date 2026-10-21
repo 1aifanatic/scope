@@ -90,6 +90,8 @@ const executionError = z.object({
   state: z.literal("error"),
   error: z.string().min(1),
 }).strict();
+
+/** Builds the shared assessment-state union around an element-specific occurrence schema. */
 function observationSchema<T extends z.ZodTypeAny>(occurrence: T) {
   return z.union([
     z.object({
@@ -142,17 +144,21 @@ export interface Evaluation {
 /** Returns a private validated copy, preserving ATIF extensions and rejecting broken references/order. */
 export function prepareInput(value: unknown): TaxonomyInput {
   const input = structuredClone(inputSchema.parse(value));
+
+  // Step order is part of the trajectory evidence contract.
   const stepIds = input.atif.steps.map(step => step.step_id);
   if (new Set(stepIds).size !== stepIds.length || stepIds.some((id, index) => index > 0 && id <= stepIds[index - 1])) {
     throw new Error("ATIF step IDs must be unique and preserve strictly increasing trajectory order");
   }
 
+  // Tool-call IDs anchor observations and must be unique across the run.
   const calls = input.atif.steps.flatMap(step => step.tool_calls ?? []);
   const callIds = new Set(calls.map(call => call.tool_call_id));
   if (callIds.size !== calls.length) {
     throw new Error("Duplicate ATIF tool_call_id");
   }
 
+  // Calls may attribute only a source explicitly supplied by evaluation context.
   const sourceIds = new Set(input.context.sources.map(source => source.id));
   if (sourceIds.size !== input.context.sources.length) {
     throw new Error("Duplicate context source id");
@@ -164,6 +170,7 @@ export function prepareInput(value: unknown): TaxonomyInput {
     }
   }
 
+  // Observation payloads cannot point at calls omitted from the trajectory.
   for (const step of input.atif.steps) {
     for (const result of step.observation?.results ?? []) {
       if (result.source_call_id && !callIds.has(result.source_call_id)) {
@@ -178,6 +185,8 @@ export function prepareInput(value: unknown): TaxonomyInput {
 /** Validates result shape, assessment preconditions and evidence attribution; throws on violations. */
 export function validateResult(id: ElementId, value: unknown, input: TaxonomyInput): Observation {
   const result = (id === "beh-timeout" ? timeoutResultSchema : skippedResultSchema).parse(value);
+
+  // Assessment-level states are governed by trusted metadata, not model interpretation.
   if (result.state === "inapplicable" && input.context.applicability?.[id] !== false) {
     throw new Error("Inapplicable requires explicit assessment exclusion, not an irrelevant reference or unmet reference-reading condition");
   }
@@ -189,6 +198,7 @@ export function validateResult(id: ElementId, value: unknown, input: TaxonomyInp
     return result;
   }
 
+  // Positive observations must be traceable to supplied sources and concrete ATIF identities.
   const occurrenceIds = new Set<string>();
   for (const occurrence of result.occurrences) {
     if (occurrence.source && !input.context.sources.some(source => JSON.stringify(source) === JSON.stringify(occurrence.source))) {

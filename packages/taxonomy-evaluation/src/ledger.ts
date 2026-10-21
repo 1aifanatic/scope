@@ -37,6 +37,7 @@ export class CallLedger {
     this.path = resolve(path);
   }
 
+  /** Serializes one read-modify-write operation across processes with a fail-closed lock. */
   private async locked<T>(work: () => Promise<T>): Promise<T> {
     await mkdir(dirname(this.path), { recursive: true });
     const lock = `${this.path}.lock`;
@@ -56,6 +57,7 @@ export class CallLedger {
     }
   }
 
+  /** Appends and fsyncs one validated event before control returns to the caller. */
   private async append(event: LedgerEvent): Promise<void> {
     const file = await open(this.path, "a", 0o600);
     try {
@@ -92,9 +94,12 @@ export class CallLedger {
     });
   }
 
+  /** Parses the complete append-only log and verifies its header and reservation sequence. */
   async events(): Promise<LedgerEvent[]> {
     const text = await readFile(this.path, "utf8");
     const events = text.trim().split("\n").map(line => eventSchema.parse(JSON.parse(line) as unknown));
+
+    // The first event fixes the cap; reservations then form a gap-free monotonic sequence.
     if (events[0]?.type !== "budget" || events.slice(1).some(event => event.type === "budget")) {
       throw new Error("Invalid cumulative ledger header");
     }
@@ -144,6 +149,7 @@ export class CallLedger {
     });
   }
 
+  /** Reports durable usage from reservations; unfinished and failed calls remain used. */
   async summary() {
     const events = await this.events();
     const header = headerSchema.parse(events[0]);

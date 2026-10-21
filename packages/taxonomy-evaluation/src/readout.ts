@@ -159,6 +159,7 @@ function markdownCell(value: string) {
   return value.replaceAll("|", "\\|").replaceAll("\n", " ");
 }
 
+/** Renders the same deterministic counts and evidence drilldowns as a compact Markdown preview. */
 export function readoutMarkdown(report: ReturnType<typeof buildReadout>): string {
   const lines = ["# Taxonome behavior preview", ""];
   for (const group of report.groups) {

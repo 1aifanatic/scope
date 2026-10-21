@@ -11,6 +11,7 @@ import { OBSERVATION_CONTRACT, SKIPPED_INSTRUCTIONS } from "./prompt.js";
 import { createSkippedProgram } from "./prompt.js";
 import { evaluate } from "./engine.js";
 
+/** Creates an observable SDK session/ledger fixture for lifecycle failure tests. */
 function fixture() {
   const session: Pick<CopilotSession, "on" | "sendAndWait" | "abort" | "disconnect" | "sessionId"> = {
     sessionId: "mock",
@@ -52,6 +53,7 @@ describe("Ax custom SDK provider contract (offline)", () => {
     expect(complete).toHaveBeenCalledTimes(1);
   });
   it("enforces authoritative preconditions without making a model assertion or erasing explicit Timeout", async () => {
+    // Partial completeness preflights Skipped Invocation while Timeout still consumes explicit evidence.
     const row = (await loadCases(fileURLToPath(new URL("../fixtures/final-inputs.jsonl", import.meta.url)))).find(c => c.id === "final-partial-mixed")!;
     const executor = { evaluate: vi.fn(async () => ({ state: "completed", observed: false })) };
     const [skipped, timeout] = await evaluate(row.input, row.elements, executor);
@@ -105,6 +107,7 @@ describe("SDK lifecycle failures (offline)", () => {
     expect(deleted).toHaveBeenCalledOnce();
   });
   it("aborts on caller cancellation and timeout, then accounts and cleans up", async () => {
+    // Exercise both external cancellation and the internal request deadline through the same cleanup path.
     for (const cancelled of [true, false]) {
       const { session, ledger, deleted } = fixture();
       vi.mocked(session.sendAndWait).mockImplementation(() => new Promise(() => { }));
@@ -130,6 +133,7 @@ describe("SDK lifecycle failures (offline)", () => {
     expect(session.sendAndWait).not.toHaveBeenCalled();
   });
   it("has no unhandled rejection during slow reservation cancellation/timeout", async () => {
+    // Cancellation can arrive before reservation completes, so the stop promise must already be safely observed.
     for (const cancelled of [true, false]) {
       const { session, ledger, deleted } = fixture();
       ledger.reserve.mockImplementation(async () => {

@@ -30,6 +30,8 @@ export async function executeSdkCall(
   const cleanupErrors: unknown[] = [];
   const startedAt = Date.now();
   const pendingAborts: Promise<void>[] = [];
+
+  // Queue aborts so cleanup can wait for every attempt without hiding abort failures.
   const abortSession = () => {
     pendingAborts.push(session.abort().catch(error => {
       cleanupErrors.push(error);
@@ -37,6 +39,7 @@ export async function executeSdkCall(
   };
 
   const unsubscribe = session.on((event: SessionEvent) => {
+    // Usage and failure events are the observable model-attempt accounting boundary.
     if (event.type === "assistant.usage") {
       attempts++;
       const usage = event.data;
@@ -86,6 +89,7 @@ export async function executeSdkCall(
       throw new Error("Copilot SDK request cancelled before submission");
     }
 
+    // A durable reservation must exist before sendAndWait can reach the model.
     reservationId = await ledger.reserve(model, purpose);
     if (signal?.aborted) {
       throw new Error("Copilot SDK request cancelled before submission");
@@ -94,6 +98,7 @@ export async function executeSdkCall(
       throw stopReason;
     }
 
+    // Cancellation and timeout explicitly abort the server-side session.
     const response = await Promise.race([
       session.sendAndWait({ prompt }, timeoutMs),
       stopped.then(error => {
@@ -113,6 +118,7 @@ export async function executeSdkCall(
     primaryError = error;
     abortSession();
   } finally {
+    // Accounting and both cleanup paths run independently, even after the primary failure.
     clearTimeout(timer);
     removeAbortListener();
     await Promise.all(pendingAborts);

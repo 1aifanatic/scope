@@ -56,6 +56,8 @@ export async function loadCases(path: string): Promise<EvaluationCase[]> {
 
   const families = new Map<string, string>();
   const runs = new Map<string, string>();
+
+  // Family and originating-run grouping prevents near-duplicate leakage across splits.
   for (const row of cases) {
     for (const [map, key] of [[families, row.family], [runs, row.originating_run]] as const) {
       if (map.has(key) && map.get(key) !== row.split) {
@@ -68,6 +70,7 @@ export async function loadCases(path: string): Promise<EvaluationCase[]> {
   return cases;
 }
 
+/** Loads the separate gold assertions; expected outputs never enter runtime inputs. */
 export async function loadGold(path: string): Promise<Gold> {
   return goldSchema.parse(JSON.parse(await readFile(path, "utf8")) as unknown);
 }
@@ -75,6 +78,8 @@ export async function loadGold(path: string): Promise<Gold> {
 /** Returns assertion failures; omitted expectation fields are unconstrained, not absent. */
 export function assertObservation(actual: Observation, expected: Expectation): string[] {
   const errors: string[] = [];
+
+  // State and polarity are independent assertions because only completed results have polarity.
   if (actual.state !== expected.state) {
     errors.push(`state expected ${expected.state}, got ${actual.state}`);
   }
@@ -89,6 +94,7 @@ export function assertObservation(actual: Observation, expected: Expectation): s
     errors.push("Exact JSON mismatch");
   }
 
+  // Occurrence assertions constrain only fields named by gold and consume matches one-for-one.
   if (expected.occurrences) {
     if (actual.state !== "completed" || !actual.observed) {
       errors.push("Missing positive occurrences");
@@ -128,6 +134,8 @@ export function checkCase(
   selection: readonly ElementId[] = row.elements,
 ): string[] {
   const errors: string[] = [];
+
+  // Selection coverage catches missing, duplicate, and unexpected element results before scoring.
   for (const id of selection) {
     const count = evaluations.filter(evaluation => evaluation.element_id === id).length;
     if (count !== 1) {
@@ -135,6 +143,7 @@ export function checkCase(
     }
   }
 
+  // Shape/evidence validation and semantic gold assertions report separate diagnostics.
   for (const evaluation of evaluations) {
     if (!selection.includes(evaluation.element_id)) {
       errors.push(`Unexpected result for ${evaluation.element_id}`);

@@ -73,6 +73,7 @@ export async function openCopilotTransport(
     env: { PATH: process.env.PATH, HOME: sessionDirectory, TMPDIR: process.env.TMPDIR },
   });
 
+  /** Stops the runtime and removes its isolated home, reporting both failures if needed. */
   async function cleanup() {
     const errors: unknown[] = [];
     try {
@@ -108,12 +109,14 @@ export async function openCopilotTransport(
 
   let failed = false;
   return {
+    /** Creates one isolated tool-free session and delegates guarded submission/accounting. */
     async complete(system, user, signal) {
       if (failed) {
         throw new Error("Previous SDK call failed; reconcile the ledger before another live invocation");
       }
 
       const session = await client.createSession({
+        // Empty mode plus explicit denials prevents ambient tools, instructions, skills, and storage.
         model,
         reasoningEffort: "low",
         availableTools: [],
@@ -158,6 +161,7 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
   let warnedAboutSampling = false;
 
   return {
+    // Advertise only capabilities this minimal text-only adapter actually implements.
     getId: () => "taxonome-copilot-sdk",
     getName: () => "GitHub Copilot SDK",
     getModelList: () => undefined,
@@ -177,6 +181,7 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
       },
     }),
     getMetrics: () => ({
+      // Ax expects service-level metrics; authoritative per-call usage remains in the durable SDK ledger.
       latency: {
         chat: {
           mean: latencySamples.length ? latencySamples.reduce((total, sample) => total + sample, 0) / latencySamples.length : 0,
@@ -213,7 +218,9 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
     speak: async () => {
       throw new Error("Speech is not supported");
     },
+    /** Converts one Ax text chat into one SDK completion and normalized Ax usage. */
     async chat(request: Readonly<AxChatRequest>, callOptions?: Readonly<AxAIServiceOptions>): Promise<AxChatResponse> {
+      // Reject unsupported features instead of silently degrading Ax's request.
       if (callOptions?.stream ?? options.stream) {
         throw new Error("Streaming is not supported by the one-call SDK adapter");
       }
@@ -233,6 +240,8 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
       }
       const system: string[] = [];
       const messages: string[] = [];
+
+      // Preserve roles in a text envelope while installing system messages through the SDK boundary.
       for (const message of request.chatPrompt) {
         if (message.role === "system") {
           system.push(message.content);
@@ -246,6 +255,7 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
 
       const startedAt = Date.now();
       try {
+        // Each Ax chat maps to exactly one transport completion; Ax retries are disabled by the program.
         const result = await transport.complete(
           [systemPrefix, ...system].filter(Boolean).join("\n\n"),
           messages.join("\n\n"),
@@ -286,6 +296,7 @@ export function skippedExecutor(ai: AxAIService, artifact?: AxSerializedOptimize
   const program = createSkippedProgram(artifact);
 
   return {
+    /** Evaluates only Skipped Invocation through the restored one-call program. */
     async evaluate(id: ElementId, input: TaxonomyInput) {
       if (id !== "beh-skipped-invocation") {
         throw new Error("Unsupported prompt element");

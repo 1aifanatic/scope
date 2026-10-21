@@ -8,12 +8,15 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CallLedger } from "./ledger.js";
 
 const dirs: string[] = [];
+
+// Ledger tests allocate real lock files; remove each owned directory after the test.
 afterEach(async () => {
   await Promise.all(dirs.map(dir => rm(dir, { recursive: true, force: true })));
   dirs.length = 0;
 });
 describe("durable all-in budget", () => {
   it("stops before call 501 across fresh instances; failures and unfinished reservations count", async () => {
+    // A fresh instance per reservation proves usage cannot reset across processes/commands.
     const dir = await mkdtemp(join(tmpdir(), "taxonome-ledger-test-"));
     dirs.push(dir);
     const path = join(dir, "calls.jsonl");
@@ -32,6 +35,7 @@ describe("durable all-in budget", () => {
     15_000
   );
   it("does not race concurrent processes/instances or permit a missing ledger", async () => {
+    // Two contenders race for one slot; the lock must admit exactly one reservation.
     const dir = await mkdtemp(join(tmpdir(), "taxonome-ledger-test-"));
     dirs.push(dir);
     const a = new CallLedger(join(dir, "calls.jsonl"));

@@ -167,8 +167,8 @@ Built on `mongo-migrate-ts`. Migrations are TypeScript files with `up()` and `do
 
 - Write for humans: descriptive names, small focused functions, simple control flow, minimal abstraction.
 - Separate logical steps with blank lines; avoid dense one-liners and unrelated statements packed together.
-- Comment non-trivial intent, logical phases, assumptions, invariants, and surprising behavior; explain why, not obvious syntax.
-- Document public contracts and complex functions when names and types do not convey their purpose or failure behavior.
+- Give every non-trivial function and logical code block a short comment explaining what it does; add intent, assumptions, invariants, or surprising reasons where useful.
+- Do not narrate trivial or self-evident code. Document public contracts and failure behavior when names and types are insufficient.
 - Follow local conventions and formatters; review readability as well as correctness.
 
 ## Development

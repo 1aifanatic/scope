@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { loadCases } from "./cases.js";
 import { fileURLToPath } from "node:url";
 import { prepareInput, skippedResultSchema, timeoutResultSchema, validateResult } from "./contracts.js";
+
+/** Loads the shared packet through the production case boundary. */
 const cases = () => loadCases(fileURLToPath(new URL("../fixtures/inputs.jsonl", import.meta.url)));
 
 describe("Schema-Declared Observation v1", () => {
@@ -23,6 +25,7 @@ describe("Schema-Declared Observation v1", () => {
       ]) expect(schema.safeParse(bad).success).toBe(false);
     });
   it("preserves ATIF order, identities, metrics, durations and unknown extensions", async () => {
+    // Passthrough fields remain intact, while reversed step order is rejected.
     const row = (await cases()).find(c => c.id === "train-mixed")!;
     row.input.atif.extra = { unknown: [1, 2, 3] };
     const parsed = prepareInput(row.input);
@@ -44,6 +47,7 @@ describe("Schema-Declared Observation v1", () => {
     expect(() => prepareInput(duplicate)).toThrow();
   });
   it("enforces actual typed sources and step/call grounding", async () => {
+    // Start from one valid positive, then mutate one attribution invariant at a time.
     const row = (await cases())[0];
     const source = row.input.context.sources[0];
     const valid = {

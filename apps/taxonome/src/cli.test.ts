@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+
+/** Runs real child processes so stdout/stderr and caller-working-directory contracts are covered. */
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 describe("standalone CLI process contract", () => {
@@ -92,6 +94,7 @@ describe("standalone CLI process contract", () => {
     expect(stderr).toBe("");
   });
   it("runs bounded HTTP ATIF acquisition through the same deterministic CLI path without credentials", async () => {
+    // Serve the committed ATIF over loopback and verify the child receives no inherited auth headers.
     const body = await readFile(new URL("../../../packages/taxonomy-evaluation/fixtures/timeout.atif.json", import.meta.url));
     const server = createServer((req, res) => {
       expect(req.headers.authorization).toBeUndefined();

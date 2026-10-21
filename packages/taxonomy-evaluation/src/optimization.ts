@@ -75,7 +75,6 @@ export async function optimizeSkipped(
   maxMetricCalls = 48,
 ): Promise<OptimizationArtifact> {
   // Authoritative preflights are not prompt decisions the optimizer can improve.
-
   const selected = cases.filter(row =>
     row.elements.includes("beh-skipped-invocation") &&
     row.input.context.completeness === "complete" &&
@@ -89,6 +88,8 @@ export async function optimizeSkipped(
   }
 
   const casesByEvidence = new Map([...train, ...validation].map(row => [promptEvidence(row.input), row]));
+
+  // Split isolation is checked again because optimization is a separate public boundary.
   for (const row of train) {
     if (validation.some(candidate => candidate.family === row.family || candidate.originating_run === row.originating_run)) {
       throw new Error("Train/validation family or originating-run leakage");
@@ -128,6 +129,8 @@ export async function optimizeSkipped(
   };
 
   const program = createSkippedProgram();
+
+  // These settings bound Ax's metric search; the shared ledger remains the all-in request cap.
   const optimizerOptions = {
     maxMetricCalls,
     maxIterations: 2,
@@ -149,6 +152,7 @@ export async function optimizeSkipped(
     program,
     train.map(trainingExample),
     ({ prediction, example: rawExample }) => {
+      // Score only registered fixed-gold rows and retain every diagnostic in the artifact.
       const example = z.object({ evidence: z.string() }).passthrough().parse(rawExample);
       const row = casesByEvidence.get(example.evidence);
       if (!row) {

@@ -5,6 +5,8 @@ import { createServer, type Server } from "node:http";
 import { afterEach, expect, it } from "vitest";
 import { loadJson } from "./input.js";
 const servers: Server[] = [];
+
+// Each test owns a loopback server; force-close connections so timeout cases cannot leak handles.
 afterEach(async () => {
   for (const server of servers) await new Promise<void>((resolve, reject) => {
     server.close(e => e ? reject(e) : resolve());
@@ -12,6 +14,8 @@ afterEach(async () => {
   });
   servers.length = 0;
 });
+
+/** Starts a bounded loopback fixture and returns its HTTP base URL. */
 async function serve(handler: Parameters<typeof createServer>[0]) {
   const server = createServer(handler);
   servers.push(server);
@@ -23,6 +27,7 @@ async function serve(handler: Parameters<typeof createServer>[0]) {
 it("bounds redirects, retries, bytes and time; never sends a token or follows embedded content", async () => {
   let count = 0;
   const base = await serve((req, res) => {
+    // One handler exposes every acquisition branch while asserting credentials never cross the boundary.
     expect(req.headers.authorization).toBeUndefined();
     if (req.url === "/retry" && count++ === 0) {
       res.writeHead(503).end();

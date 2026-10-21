@@ -12,10 +12,15 @@ import { copilotAI, skippedExecutor } from "./copilot.js";
 import { restoreArtifact, contractHash } from "./optimization.js";
 import { buildReadout } from "./readout.js";
 
+/** Resolves committed fixtures/evidence relative to the package root. */
 const file = (path: string) => fileURLToPath(new URL(`../${path}`, import.meta.url));
+
+/** Reads an evidence file without weakening its unknown boundary. */
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(file(path), "utf8")) as unknown;
+
 describe("committed real experiment artifacts (offline verification only)", () => {
   it("restores all selected learned demos, which are valid training-only predictions", async () => {
+    // Validate every serialized demo/seed against the original training packet and fixed gold.
     const artifact = restoreArtifact(await json("evidence/optimized.v2.ax.json"), "gpt-5.6-sol-fast");
     expect(artifact.contract_hash).toBe(contractHash());
     const cases = await loadCases(file("fixtures/inputs.jsonl")), gold = await loadGold(file("fixtures/gold.json"));
@@ -34,6 +39,7 @@ describe("committed real experiment artifacts (offline verification only)", () =
       expect(assertObservation(demo.observation, gold[row.id]["beh-skipped-invocation"]!)).toEqual([]);
       if (index < demos.length) sessionIds.push(input.atif.session_id);
     }
+    // Render one held-out query to prove applyOptimization reattaches every selected learned demo.
     const row = cases.find(c => c.id === "held-cli")!;
     let restoredPrompt = "";
     const executor = skippedExecutor(
@@ -51,6 +57,7 @@ describe("committed real experiment artifacts (offline verification only)", () =
     await expect(json("evidence/optimized.v1.ax.json").then(a => restoreArtifact(a, "gpt-5.6-sol-fast"))).rejects.toThrow("contract mismatch");
   });
   it("keeps the final packet disjoint and unused by the optimizer metric trace", async () => {
+    // Final families/origins must not appear in development data or optimizer scoring.
     const development = await loadCases(file("fixtures/inputs.jsonl")), final = await loadCases(file("fixtures/final-inputs.jsonl"));
     const artifact = restoreArtifact(await json("evidence/optimized.v2.ax.json"), "gpt-5.6-sol-fast");
     expect(final.every(f => development.every(d => f.family !== d.family && f.originating_run !== d.originating_run))).toBe(true);
@@ -59,6 +66,7 @@ describe("committed real experiment artifacts (offline verification only)", () =
     expect(artifact.metric_trace.length).toBeLessThanOrEqual(48);
   });
   it("rebuilds the actual-result preview with distinct-run and occurrence counts", async () => {
+    // The deterministic consumer must reproduce the committed JSON exactly from its committed input.
     const rebuilt = buildReadout(await json("evidence/readout-input.json"));
     expect(rebuilt).toEqual(await json("evidence/readout-preview.json"));
     const timeout = rebuilt.groups[0].behaviors.find(b => b.element_id === "beh-timeout")!;
@@ -67,6 +75,7 @@ describe("committed real experiment artifacts (offline verification only)", () =
     expect(timeout.sources.find(s => s.source?.id === "account")).toMatchObject({ distinct_runs: 2, occurrences: 3 });
   });
   it("verifies the frozen ledger, artifact hashes and case packet fingerprints", async () => {
+    // Content hashes protect historical model evidence while source-only revisions continue separately.
     const manifest = z.object({
       budget: z.object({ cap: z.literal(500), used: z.literal(256), remaining: z.literal(244), finished: z.literal(256) }).passthrough(),
       artifact_sha256: z.record(z.string()),

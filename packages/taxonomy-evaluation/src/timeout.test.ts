@@ -13,13 +13,18 @@ vi.mock("@ax-llm/ax", () => {
   throw new Error("Deterministic execution must not load Ax");
 });
 
+/** Resolves committed case assets relative to this test module. */
 const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
+
+/** Creates the smallest valid Timeout input for focused evidence mutations. */
 async function base(): Promise<TaxonomyInput> {
   return prepareInput({
     atif: JSON.parse(await readFile(fixture("timeout.atif.json"), "utf8")) as unknown,
     context: { completeness: "complete", sources: [] },
   });
 }
+
+/** Runs only the deterministic element and returns its semantic result. */
 async function result(input: unknown) {
   return (await evaluate(input, ["beh-timeout"]))[0].result;
 }
@@ -32,6 +37,8 @@ describe("Timeout through the public API", () => {
       expect(checkCase(row, evaluations, gold, ["beh-timeout"]), row.id).toEqual([]);
     }
   });
+
+  // The table exercises each evidence/policy branch without duplicating test control flow.
   it.each([
     [
       "explicit timeout",
@@ -123,6 +130,7 @@ describe("Timeout through the public API", () => {
     expect((await result(input)).state).toBe("indeterminate");
   });
   it("handles different and repeated sources without collapsing call occurrences", async () => {
+    // Three calls include one repeated source so run frequency and occurrences remain distinct.
     const input = await base();
     input.context.sources = [{ id: "a", label: "A", surface_id: "surface-mcp" }, { id: "b", label: "B", surface_id: "surface-cli" }];
     input.atif.steps[1].tool_calls = ["a", "a", "b"].map((source_id, i) => ({
@@ -152,8 +160,10 @@ describe("Timeout through the public API", () => {
           throw new Error("SDK must never initialize");
         })
       };
-      const a = await evaluate(input, ["beh-timeout"], executor), b = await evaluate(input, ["beh-timeout"], executor);
-      expect(a).toEqual(b);
+      const first = await evaluate(input, ["beh-timeout"], executor);
+      const second = await evaluate(input, ["beh-timeout"], executor);
+
+      expect(first).toEqual(second);
       expect(input).toEqual(before);
       expect(executor.evaluate).not.toHaveBeenCalled();
       expect(Object.isFrozen(input.atif.steps[1].tool_calls![0].arguments)).toBe(false);

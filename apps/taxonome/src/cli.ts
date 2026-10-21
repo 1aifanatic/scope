@@ -49,6 +49,7 @@ async function createRuntime(options: ModelOptions, selected: readonly ElementId
   } | undefined;
   let starting: Promise<NonNullable<typeof active>> | undefined;
 
+  /** Opens or verifies the one shared cumulative ledger before any prompt request. */
   async function openLedger() {
     if (!options.ledger) {
       throw new Error("--ledger is required for all live calls, including eval/optimization/replay");
@@ -60,6 +61,7 @@ async function createRuntime(options: ModelOptions, selected: readonly ElementId
     return ledger;
   }
 
+  /** Lazily creates the isolated transport and restores the optional complete artifact. */
   async function start() {
     const ledger = await openLedger();
     const { openCopilotTransport, copilotAI, skippedExecutor } = await import("taxonomy-evaluation/copilot");
@@ -127,6 +129,8 @@ const emit = (value: unknown) => process.stdout.write(`${JSON.stringify(value, n
 export function createCli(): Command {
   const cli = new Command().name("taxonome").description("Standalone two-element taxonomy evaluation spike").version("0.1.0");
   cli.configureOutput({ writeOut: s => process.stderr.write(s), writeErr: s => process.stderr.write(s) });
+
+  // Run one validated input through the same API used by programmatic callers.
   addModelOptions(cli.command("run <atif>").requiredOption("--context <path>", "Explicit evidence context JSON")
     .option(
       "--elements <ids>",
@@ -134,6 +138,7 @@ export function createCli(): Command {
       "beh-skipped-invocation,beh-timeout"
     ))
     .action(async (atif: string, options: ModelOptions & { context: string; elements: string }) => {
+      // Acquisition and context validation complete before any runtime is opened.
       const input = prepareInput({ atif: await loadJson(atif), context: contextSchema.parse(await loadJson(options.context)) });
       const selected = parseElementIds(options.elements);
       const runtime = await createRuntime(options, selected, "run");
@@ -149,6 +154,7 @@ export function createCli(): Command {
       }
     });
 
+  // Evaluate a split repeatedly while keeping expected assertions outside model inputs.
   addModelOptions(cli.command("eval").requiredOption("--cases <path>", "ATIF/context input JSONL")
     .requiredOption(
       "--gold <path>",
@@ -200,6 +206,7 @@ export function createCli(): Command {
       }[] = [];
 
       try {
+        // Preserve deterministic case/sample order so evidence rows and call accounting are reproducible.
         for (let sample = 0; sample < sampleCount; sample++) {
           for (const row of cases) {
             const selected = override ?? row.elements;
@@ -238,6 +245,7 @@ export function createCli(): Command {
           }
         }
 
+        // Emit one machine-readable report after all rows and cleanup metadata are available.
         const passed = rows.filter(row => !row.errors.length).length;
         emit({
           passed,
@@ -254,6 +262,7 @@ export function createCli(): Command {
       }
     });
 
+  // Optimize only the prompt-backed element, using separate SDK transports for student and teacher calls.
   addModelOptions(cli.command("optimize").requiredOption("--cases <path>", "Disjoint train/validation/heldout JSONL")
     .requiredOption(
       "--gold <path>",
@@ -293,6 +302,7 @@ export function createCli(): Command {
       let output: unknown;
 
       try {
+        // The complete artifact is written atomically only after Ax returns a selected program.
         teacher = await openCopilotTransport(ledger, options.model, "optimize:teacher");
         const artifact = await optimizeSkipped(
           cases,
@@ -319,6 +329,7 @@ export function createCli(): Command {
       emit(output);
     });
 
+  // Convert validated structured results into deterministic JSON and optional Markdown.
   cli.command("readout <results>").option("--markdown <path>", "Write Markdown preview (stdout remains JSON)")
     .action(async (path: string, options: { markdown?: string }) => {
       const report = buildReadout(JSON.parse(await readFile(path, "utf8")) as unknown);
