@@ -9,9 +9,12 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
+import type { ComponentProps, ReactNode } from "react";
+import type { CreateCriterionDialog } from "@/components/CreateCriterionDialog";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -56,10 +59,39 @@ vi.mock("@/components/TaskPromptPicker", () => ({
   TaskPromptPicker: () => null,
 }));
 vi.mock("@/components/CriteriaPicker", () => ({
-  CriteriaPicker: () => null,
+  CriteriaPicker: ({
+    trailingAction,
+    inputId,
+    selected,
+  }: {
+    trailingAction?: ReactNode;
+    inputId?: string;
+    selected: string[];
+  }) => (
+    <div data-testid={inputId}>
+      {selected.join(", ")}
+      {trailingAction}
+    </div>
+  ),
 }));
 vi.mock("@/components/CreateCriterionDialog", () => ({
-  CreateCriterionDialog: () => null,
+  CreateCriterionDialog: ({
+    open,
+    mode,
+    onCreated,
+    defaultGates,
+    lockedGates,
+  }: ComponentProps<typeof CreateCriterionDialog>) =>
+    open ? (
+      <div role="dialog">
+        <span>{mode ?? "criteria"}</span>
+        <span data-testid="default-gates">{defaultGates?.join(",")}</span>
+        <span data-testid="locked-gates">{lockedGates?.join(",")}</span>
+        <button onClick={() => onCreated("new_observation")}>
+          Complete creation
+        </button>
+      </div>
+    ) : null,
 }));
 vi.mock("@/components/SkillPicker", () => ({
   SkillPicker: () => null,
@@ -91,7 +123,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function renderExperimentForm() {
+function renderSubmitRun(mode?: "experiment") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -99,29 +131,66 @@ function renderExperimentForm() {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <SubmitRun mode="experiment" />
+        <SubmitRun mode={mode} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
-function renderRunForm() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
+describe("SubmitRun Observation creation", () => {
+  it("opens the specialized shared wizard and selects the created observation only", async () => {
+    renderSubmitRun();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New Observation" }),
+    );
+    expect(screen.getByText("observation", { exact: true })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Complete creation" }));
+    expect(screen.getByTestId("observations").textContent).toContain(
+      "new_observation",
+    );
+    expect(screen.getByTestId("criteria").textContent).not.toContain(
+      "new_observation",
+    );
   });
 
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <SubmitRun />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-}
+  it("keeps requirements creation generic with locked Select gates", async () => {
+    renderSubmitRun();
+
+    fireEvent.click(
+      within(screen.getByTestId("criteria")).getByRole("button", {
+        name: "New…",
+      }),
+    );
+    expect(screen.getByText("criteria", { exact: true })).toBeTruthy();
+    expect(screen.getByTestId("default-gates").textContent).toBe("select");
+    expect(screen.getByTestId("locked-gates").textContent).toBe("select");
+  });
+
+  it("opens the shared Observation wizard from New Experiment", async () => {
+    renderSubmitRun("experiment");
+
+    fireEvent.change(screen.getByLabelText(/Task/), {
+      target: { value: "Implement the benchmark task" },
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New Observation" }),
+    );
+
+    expect(screen.getByText("observation", { exact: true })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Complete creation" }));
+    expect(screen.getByTestId("observations").textContent).toContain(
+      "new_observation",
+    );
+    expect(screen.getByTestId("criteria").textContent).not.toContain(
+      "new_observation",
+    );
+  });
+});
 
 describe("SubmitRun legacy composition guidance", () => {
   it("keeps neutral guidance beside composition controls", async () => {
-    renderRunForm();
+    renderSubmitRun();
 
     const link = await screen.findByRole("link", { name: "New Experiment" });
     const guidance = link.parentElement;
@@ -142,7 +211,7 @@ describe("SubmitRun legacy composition guidance", () => {
 
 describe("SubmitRun Experiment composition", () => {
   it("keeps the optional description collapsed and retains its value across toggles", async () => {
-    renderExperimentForm();
+    renderSubmitRun("experiment");
 
     const toggle = await screen.findByRole("button", {
       name: "Description (optional)",
@@ -151,8 +220,7 @@ describe("SubmitRun Experiment composition", () => {
     expect(screen.queryByLabelText("Description")).toBeNull();
 
     fireEvent.click(toggle);
-    const description = screen.getByLabelText("Description");
-    fireEvent.change(description, {
+    fireEvent.change(screen.getByLabelText("Description"), {
       target: { value: "Compare authentication approaches" },
     });
     fireEvent.click(toggle);
@@ -169,7 +237,7 @@ describe("SubmitRun Experiment composition", () => {
   });
 
   it("infers an empty Experiment until a scenario is entered", async () => {
-    renderExperimentForm();
+    renderSubmitRun("experiment");
 
     expect(
       await screen.findByRole("button", { name: /Create empty experiment/ }),
@@ -179,7 +247,9 @@ describe("SubmitRun Experiment composition", () => {
     expect(
       screen.queryByRole("switch", { name: "Toggle advanced options" }),
     ).toBeNull();
-    expect(screen.getAllByText(/No scenario selected/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/No scenario selected/).length).toBeGreaterThan(
+      0,
+    );
 
     fireEvent.change(screen.getByLabelText(/Task/), {
       target: { value: "Implement the benchmark task" },
@@ -197,7 +267,7 @@ describe("SubmitRun Experiment composition", () => {
   });
 
   it("submits an explicit empty payload when no scenario is selected", async () => {
-    renderExperimentForm();
+    renderSubmitRun("experiment");
 
     fireEvent.change(screen.getByLabelText("Name *"), {
       target: { value: "Reserved benchmark" },

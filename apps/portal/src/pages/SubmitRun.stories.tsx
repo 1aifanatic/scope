@@ -2,31 +2,44 @@
 // Licensed under the MIT License.
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { http, HttpResponse } from "msw";
+import { setSelectedProjectIdHolder } from "@/lib/project-scope";
 import { SubmitRun } from "./SubmitRun";
 
 const meta = {
   title: "Pages/Submit Run",
   component: SubmitRun,
+  tags: ["ai-generated", "needs-work"],
+  decorators: [
+    (Story) => {
+      setSelectedProjectIdHolder("demo-project");
+      return <Story />;
+    },
+  ],
   parameters: {
     layout: "fullscreen",
     msw: {
       handlers: [
-        http.get("/api/v1/agents", () =>
-          HttpResponse.json([
-            {
-              _id: "coder-acp-copilot",
-              id: "coder-acp-copilot",
-              name: "GitHub Copilot CLI",
-              defaultModel: "gpt-5.6-sol",
-              versions: [],
-              capabilities: {},
-              createdAt: "2026-01-01T00:00:00.000Z",
-            },
-          ]),
+        http.get("*/api/v1/agents", () => HttpResponse.json([])),
+        http.get("*/api/v1/requests", () => HttpResponse.json({ data: [] })),
+        http.get("*/api/v1/*", () => HttpResponse.json([])),
+        http.post("*/api/v1/criteria/generate-prompt", () =>
+          HttpResponse.json({
+            prompt: "Record whether the codebase contains unit tests.",
+            suggestedId: "has_unit_tests",
+            suggestedParents: [],
+            suggestedChildren: [],
+            suggestedSubject: "run",
+          }),
         ),
-        http.get("/api/v1/*", () => HttpResponse.json([])),
+        http.post("*/api/v1/criteria", () =>
+          HttpResponse.json({
+            id: "has_unit_tests",
+            prompt: "Record whether the codebase contains unit tests.",
+            createdAt: "",
+          }),
+        ),
       ],
     },
   },
@@ -50,13 +63,33 @@ export const LegacyCompositionGuidance: Story = {
   },
 };
 
+export const RunObservationCreation: Story = {
+  play: async ({ canvas, canvasElement }) => {
+    await userEvent.click(
+      await canvas.findByRole("button", { name: "New Observation" }),
+    );
+    const page = within(canvasElement.ownerDocument.body);
+    await waitFor(() =>
+      expect(
+        page.getByRole("heading", { name: "New Observation" }),
+      ).toBeVisible(),
+    );
+    await expect(page.queryByLabelText("Criteria kind")).not.toBeInTheDocument();
+    await expect(page.getByText(/Observation ID/)).toBeVisible();
+    await expect(page.getByLabelText("Evaluation subject")).toHaveTextContent(
+      "Whole run",
+    );
+    await expect(
+      page.queryByText(/Gate criteria steer the agent/),
+    ).not.toBeInTheDocument();
+  },
+};
+
 export const ExperimentProgressiveDisclosure: Story = {
   args: {
     mode: "experiment",
   },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-
+  play: async ({ canvas, canvasElement }) => {
     await expect(
       canvas.getByRole("button", { name: /Create empty experiment/ }),
     ).toBeInTheDocument();
@@ -86,9 +119,7 @@ export const ExperimentProgressiveDisclosure: Story = {
       "Implement the benchmark task",
     );
 
-    await expect(
-      await canvas.findByText("Gate pipeline"),
-    ).toBeInTheDocument();
+    await expect(await canvas.findByText("Gate pipeline")).toBeInTheDocument();
     await expect(
       canvas.getByRole("switch", { name: "Toggle advanced options" }),
     ).toBeInTheDocument();
@@ -97,5 +128,20 @@ export const ExperimentProgressiveDisclosure: Story = {
         name: /Create experiment with 5 runs/,
       }),
     ).toBeInTheDocument();
+
+    await userEvent.click(
+      canvas.getByRole("button", { name: "New Observation" }),
+    );
+    const page = within(canvasElement.ownerDocument.body);
+    await waitFor(() =>
+      expect(
+        page.getByRole("heading", { name: "New Observation" }),
+      ).toBeVisible(),
+    );
+    await expect(page.queryByLabelText("Criteria kind")).not.toBeInTheDocument();
+    await expect(page.getByText(/Observation ID/)).toBeVisible();
+    await expect(page.getByLabelText("Evaluation subject")).toHaveTextContent(
+      "Whole run",
+    );
   },
 };
