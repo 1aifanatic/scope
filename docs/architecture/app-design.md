@@ -58,7 +58,10 @@ The Portal handshake uses POST `/me` after callback and GET `/me` after an
 MSAL-cached reload, gating all queries until its API-authoritative UUID/role arrives.
 The singular stored `user`/`admin` role controls platform administration.
 Unique project memberships supply fixed reader/contributor/admin bundles;
-platform administration does not imply project-content access. Protected routes
+the admin bundle includes `members:write` for roster and existing-user membership
+management within that project, with exact enrolled Scope UUID lookup rather
+than global user-directory access. Platform administration does not imply
+project-content access. Protected routes
 fail closed, with a 20-second total authority decision/stream lease budget.
 See [Authentication & RBAC](auth-rbac.md) for current local implementation status,
 durable administrative operations, operator recovery and remaining release gates.

@@ -37,7 +37,7 @@ function userSummary(user: UserDocument): AccessUserSummary {
   };
 }
 
-export function registerAccessRoutes(ctx: RouteContext): void {
+export function registerAccessRoutes(ctx: Pick<RouteContext, "app" | "registry" | "db" | "usersCollection" | "projectStore">): void {
   const auth = () => new Authorization(ctx.db);
   apiRoute(ctx.app, ctx.registry, {
     method: "get", path: "/api/v1/admin/platform-admins", tags: ["Access"], summary: "List platform administrators, including disabled accounts and pending changes",
@@ -133,9 +133,22 @@ export function registerAccessRoutes(ctx: RouteContext): void {
     },
   });
   apiRoute(ctx.app, ctx.registry, {
-    method: "get", path: "/api/v1/projects/:id/members", tags: ["Access"], summary: "List project memberships (platform administration)",
+    method: "get", path: "/api/v1/projects/:id/members/lookup/:userId", tags: ["Access"], summary: "Look up one enrolled Scope UUID for project membership management",
+    params: z.object({ id: z.string().min(1), userId: z.string().uuid() }).strict(),
+    response: AccessUserSummarySchema,
+    handler: async (req, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      const user = await ctx.usersCollection.findOne({ _id: req.params.userId }, { projection: userProjection, timeoutMS: 5_000 });
+      if (!user) throw new AccessError(404, "not_found", "Enrolled user not found. Ask the person to sign in and share their Scope user ID.");
+      if (user.disabledAt) throw new AccessError(409, "user_disabled", "Disabled users cannot receive new project access");
+      res.json(userSummary(user));
+    },
+  });
+  apiRoute(ctx.app, ctx.registry, {
+    method: "get", path: "/api/v1/projects/:id/members", tags: ["Access"], summary: "List project memberships (project or platform administration)",
     response: z.array(ProjectMembershipSummarySchema),
     handler: async (req, res) => {
+      res.setHeader("Cache-Control", "no-store");
       const members = await ctx.db.collection<ProjectMembership>("project_memberships")
         .find({ projectId: req.params.id }, { timeoutMS: 5_000 }).toArray();
       const ids = members.map(member => member.userId);
@@ -164,8 +177,10 @@ export function registerAccessRoutes(ctx: RouteContext): void {
       if (!project || !user) throw new AccessError(404, "not_found", "Project or enrolled user not found");
       if (user.disabledAt) throw new AccessError(409, "user_disabled", "Disabled users cannot receive new project access");
       const id = operationId(req);
+      const actor = await auth().currentUser(req);
       const result = await auth().operations.execute({
-        _id: id, actor: req.user!.id, reason: "Explicit platform-admin membership assignment",
+        _id: id, actor: actor._id, reason: actor.role === "admin"
+          ? "Explicit platform-admin membership assignment" : "Explicit project-admin membership assignment",
         collection: "project_memberships", targetId: `${project._id}:${user._id}`,
         expectedRevision: req.body.revision, change: { role: req.body.role }, unset: ["revokedAt"],
         initial: { projectId: project._id, userId: user._id, createdByUserId: req.user!.id },
@@ -177,8 +192,10 @@ export function registerAccessRoutes(ctx: RouteContext): void {
     method: "delete", path: "/api/v1/projects/:id/members/:userId", tags: ["Access"], summary: "Revoke a project membership",
     body: revisionInput, response: z.unknown(),
     handler: async (req, res) => {
+      const actor = await auth().currentUser(req);
       const result = await auth().operations.execute({
-        _id: operationId(req), actor: req.user!.id, reason: "Explicit platform-admin membership revocation",
+        _id: operationId(req), actor: actor._id, reason: actor.role === "admin"
+          ? "Explicit platform-admin membership revocation" : "Explicit project-admin membership revocation",
         collection: "project_memberships", targetId: `${req.params.id}:${req.params.userId}`,
         expectedRevision: req.body.revision, change: { revokedAt: "$operationTime" }, unset: [],
       });

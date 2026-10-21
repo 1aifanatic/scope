@@ -49,7 +49,7 @@ The following identity, role and freshness contract applies when auth is enabled
 | Enrolled user with no membership | None; own account only | None | None |
 | Reader | Read, including stored reports/artifacts | None | None |
 | Contributor | Read/create/update/delete all project content, regardless of creator | None | None |
-| Project admin | Contributor permissions | Edit name/description | None |
+| Project admin | Contributor permissions | Edit name/description | View/add/change/revoke membership of their own project; no project lifecycle powers |
 | Platform admin without membership | None | Control-plane metadata | Create/delete/restore projects, manage memberships, promote enrolled users to platform admin, disable ordinary users |
 
 Platform admins explicitly add themselves through the same audited membership
@@ -58,7 +58,7 @@ creation grants the verified creator an audited project-admin membership**. This
 supersedes the earlier no-creator-membership decision. Other platform admins can
 discover/administer every project without membership but receive no blanket
 content access. Existing projects/memberships are not backfilled. Ordinary users
-cannot discover other projects or look up users.
+cannot discover other projects or enumerate users.
 Platform admins can search existing enrolled Scope users by display name, email
 or Scope UUID. This minimal platform-only directory does not query the IdP
 directory, pre-provision accounts or send invitations. Exact identity lookup
@@ -66,6 +66,55 @@ remains available for operator/API workflows. This supersedes the initial
 exact-lookup-only administration UI.
 No mandatory project-admin member, ownership transfer, invitation, configurable
 role, wildcard permission, or second user-security authority is introduced.
+
+### New decision: project admins manage their own memberships
+
+The user-authorized extension on 2026-10-21 supersedes the original MVP's
+platform-only membership restriction. A **current, canonically verified project
+admin** receives the fixed project-scoped `members:write` capability. It allows
+viewing the roster, adding existing enrolled users, changing any fixed
+reader/contributor/admin project role, and revoking membership in that project
+only. Readers/contributors cannot list the privileged roster, look up candidates,
+manage membership or promote themselves. A foreign-project membership operation
+returns `404`; an insufficient role within an accessible project returns `403`.
+Platform administrators retain their global membership/control-plane powers.
+
+This grants no platform role, global user directory, account disable/promotion,
+provider Secrets, project create/delete/restore, document ownership or internal
+service access. Project admins may demote/remove themselves, even if no other
+project admin exists; the UI warns that management/access will be lost. Platform
+administrators can repair the project through the existing audited operation.
+No last-project-admin invariant is introduced.
+
+`GET /api/v1/projects/:id/members/lookup/:userId` accepts one exact **enrolled
+Scope UUID**, not a name/email substring or IdP identity. The canonical
+project-admin/platform authorization check runs before the target lookup.
+It returns the existing minimal access-user summary (Scope UUID, display labels,
+platform-role label, enabled state and revision), never IdP subjects/credentials.
+Missing targets return `404`, disabled targets `409`; it neither enrolls nor
+invites anyone. The Portal explains that the person can share the UUID from
+CLI `access me` or their No project access screen. Name/email directory discovery
+would need a separate user decision and remains platform-admin-only.
+
+Assignments and revocations reuse durable `AdminOperations` intent, CAS/revision,
+fingerprint/idempotency, completion markers and reconciliation. Audit evidence
+records the verified Scope actor and distinguishes project-admin from
+platform-admin membership actions. Membership changes never mutate the target's
+platform role or identity. The existing canonical authority deadline and
+capability refresh/revocation bound are unchanged.
+Deploy the matching API/shared capability bundle and Portal together: strict
+capability validation intentionally rejects mixed old/new admin permission
+bundles rather than silently accepting a different authority contract.
+
+Focused local checks cover positive adds, all role changes, revocation,
+foreign-project and reader/contributor denial, malformed inputs, disabled/missing
+targets, stale revisions, self-demotion/removal, durable actor evidence and
+same-key pending recovery. Signed-bearer tests use isolated random Mongo
+databases/Redis namespaces; Portal stories cover exact-ID entry, unavailable
+targets, pending retries and unchanged platform promotion. Component tests cover
+open-editor demotion, account reset and fixed-project navigation. These are
+source-level checks, not new shared-stack/browser or Cosmos acceptance; the
+environment owner performs coordinated integration and browser verification.
 
 ### Global Agents and Models administration
 
@@ -259,13 +308,18 @@ not silently successful. Completion requires an acknowledged, matched update or
 an observed identical completed operation; a zero-match/unacknowledged write
 cannot produce a successful response.
 
-Portal `/access` is the project-access administration entry point.
+Portal `/access` remains the platform-only all-project membership entry point.
+Project admins reach **Manage access** on their own Projects row at
+`/access?projectId=...`; this exact-project view loads only that project and its
+roster, not global control-plane inventory. Global `/access`, `/admin` and other
+platform management routes remain unavailable to them.
 It lists current project members by name/email and role, with **Change role**
-and confirmed **Remove** actions. **Add people** opens a searchable user picker
+and confirmed **Remove** actions. For platform admins, **Add people** opens a searchable user picker
 and a fixed-role selector; existing members and disabled users cannot be added.
+For project admins it requires exact enrolled Scope UUID entry instead.
 Revoked memberships are hidden from the current roster but retain their revisions
 for safe regrant. Disabled accounts and incomplete access changes are identified
-on member rows. Ordinary-user disable remains a separate, confirmed account-wide
+on member rows. Ordinary-user disable remains a separate, platform-admin-only confirmed account-wide
 action. Uncertain changes lock further edits and retain the exact operation key
 for retry; inspection/reconciliation lives under collapsed advanced controls.
 Project creation, settings and deletion remain on **Projects**. Restoring a
@@ -275,7 +329,7 @@ Plain `/access` provides the full control-plane project selector, independent of
 the membership-only Projects page. Choosing an option leaves that selector
 available at `/access`. A deep link `/access?projectId=...` instead locks the view
 to that exact project, replaces the selector with its name, and offers **All
-project access** to return to the global view. Missing/invalid project links
+project access** to platform admins only to return to the global view. Missing/invalid project links
 never fall back to another project; navigation between deep links resets the
 member editor and confirmation state.
 Neither global nor project-specific `/access` views render or request the
@@ -284,6 +338,13 @@ controls. Pending membership changes retain their retry behavior;
 their recovery links carry the exact operation ID to
 `/access?operationId=...`, pre-filling and opening global operation recovery.
 This navigation never automatically inspects or reconciles an operation.
+Project admins instead retain same-key retry and an operation ID to give a
+platform administrator for inspection/reconciliation. They cannot inspect global
+operation evidence or use account-wide actions. A self-removal/demotion that
+loses authority before completion requires platform-admin recovery.
+Capability loss unmounts the roster/editor; account changes reset editor and
+confirmation state. Selected-project changes never silently retarget a fixed
+membership deep link.
 The roster has no separate member-filter box. User labels show the stored display
 name and email/sign-in alias rather than repeated UUIDs; the Scope UUID remains
 available in a hover tooltip and as a search key.
@@ -364,9 +425,10 @@ Portal **Projects** (`/projects`) shows only projects with an explicit membershi
 granting `content:read`, including for platform administrators. It uses the normal
 membership-filtered inventory, never `controlPlane=true`, and excludes deleted or
 non-readable projects defensively. Platform admins use `/access` to discover all
-projects and manage memberships; their own readable project rows link to the
-fixed-project access view. Projects uses a title-only header with an **Access
-administration** button, without an explanatory callout or subtitle.
+projects and manage memberships; both platform admins and project admins have
+**Manage access** links on their own readable project rows. Projects uses a
+title-only header with a platform-admin-only **Access administration** button,
+without an explanatory callout or subtitle.
 Creation remains on Projects and grants the creator
 an audited project-admin membership. The header switcher remains membership-only,
 and creation never synthesizes a membership in its cache or selects it automatically.
@@ -399,12 +461,18 @@ pnpm cli access platform-admins --limit 20 --url http://localhost:3101
 pnpm cli access promote-admin "$USER_ID" --revision "$REVISION" \
   --operation-id "$OPERATION_ID" --url http://localhost:3101
 pnpm cli access projects --url http://localhost:3101
+pnpm cli access find-member "$PROJECT_ID" "$USER_ID" --url http://localhost:3101
 pnpm cli access members "$PROJECT_ID" --url http://localhost:3101
 pnpm cli access set-member "$PROJECT_ID" "$USER_ID" --role reader \
   --revision 0 --operation-id "$OPERATION_ID" --url http://localhost:3101
 pnpm cli access operation "$OPERATION_ID" --url http://localhost:3101
 pnpm cli access reconcile "$OPERATION_ID" --url http://localhost:3101
 ```
+
+`find-member`, `members`, `set-member` and `revoke-member` use the same scoped
+project-admin or global platform-admin API policy and unchanged raw bearer.
+`find-user`, `search-users`, `projects`, platform administration and global
+operation inspection/reconciliation remain platform-only.
 
 Retain the displayed operation ID for an uncertain outcome and fetch current
 revisions before a different change. Pending access-command operations exit 2;

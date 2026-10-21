@@ -16,6 +16,11 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--url",
         ],
       },
+      "find-member": {
+        "options": [
+          "--url",
+        ],
+      },
       "find-user": {
         "options": [
           "--url",

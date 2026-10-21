@@ -12,12 +12,12 @@ export const ApiAuthModeSchema = z.object({ authEnabled: z.boolean() });
 
 export const ProjectRoleSchema = z.enum(["reader", "contributor", "admin"]);
 export type ProjectRole = z.infer<typeof ProjectRoleSchema>;
-export type ProjectPermission = "content:read" | "content:write" | "content:delete" | "settings:write";
+export type ProjectPermission = "content:read" | "content:write" | "content:delete" | "settings:write" | "members:write";
 
 const permissions: Readonly<Record<ProjectRole, readonly ProjectPermission[]>> = {
   reader: ["content:read"],
   contributor: ["content:read", "content:write", "content:delete"],
-  admin: ["content:read", "content:write", "content:delete", "settings:write"],
+  admin: ["content:read", "content:write", "content:delete", "settings:write", "members:write"],
 };
 
 export function projectPermissions(role: ProjectRole): readonly ProjectPermission[] {
@@ -45,7 +45,7 @@ export const AccessCapabilitiesSchema = z.object({
   memberships: z.array(z.object({
     projectId: z.string().min(1),
     role: ProjectRoleSchema,
-    permissions: z.array(z.enum(["content:read", "content:write", "content:delete", "settings:write"])).readonly(),
+    permissions: z.array(z.enum(["content:read", "content:write", "content:delete", "settings:write", "members:write"])).readonly(),
     revision: z.number().int().positive(),
   }).strict().refine(membership => {
     const expected = projectPermissions(membership.role);

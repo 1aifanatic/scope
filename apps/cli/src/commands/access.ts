@@ -47,6 +47,9 @@ export function registerAccessCommands(program: Command): void {
   command("enroll", "Explicitly enroll after a successful IdP login").action(action((options: AccessOptions) => request(options, "/users/me", "POST")));
   command("find-user <userId>", "Exact enrolled Scope UUID lookup (platform admin)")
     .action(action((userId: string, options: AccessOptions) => request(options, `/admin/users?userId=${encodeURIComponent(userId)}`)));
+  command("find-member <projectId> <userId>", "Exact enrolled Scope UUID lookup for adding a member (project or platform admin; no directory search)")
+    .action(action((projectId: string, userId: string, options: AccessOptions) =>
+      request(options, `/projects/${encodeURIComponent(projectId)}/members/lookup/${encodeURIComponent(userId)}`)));
   command("search-users [query]", "Search enrolled platform users by name, email or Scope UUID (platform admin)")
     .option("--cursor <id>", "Continue from the previous response's nextCursor")
     .option("--limit <number>", "Maximum users per page (1-50)", "20")
@@ -72,7 +75,7 @@ export function registerAccessCommands(program: Command): void {
   mutation(command("promote-admin <userId>", "Grant platform-wide administration to an enabled enrolled user (no project membership)"))
     .action(action((userId: string, options: AccessOptions) =>
       request(options, `/admin/users/${encodeURIComponent(userId)}/promote`, "POST", { revision: revision(options) })));
-  command("members <projectId>", "Platform-only membership roster")
+  command("members <projectId>", "Membership roster (project or platform admin)")
     .action(action((projectId: string, options: AccessOptions) => request(options, `/projects/${encodeURIComponent(projectId)}/members`)));
   mutation(command("set-member <projectId> <userId>", "Explicitly assign or change a project membership")
     .requiredOption("--role <role>", "reader, contributor or admin"))

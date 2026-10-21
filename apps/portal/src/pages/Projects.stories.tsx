@@ -38,15 +38,19 @@ const creatorAuth: AuthContextValue = {
       platformAdmin: true, reportsEnabled: false,
       memberships: [{
         projectId: project._id, role: "admin",
-        permissions: ["content:read", "content:write", "content:delete", "settings:write"], revision: 1,
+        permissions: ["content:read", "content:write", "content:delete", "settings:write", "members:write"], revision: 1,
       }],
     },
   },
 };
+const projectAdminAuth: AuthContextValue = {
+  ...creatorAuth, user: { ...creatorAuth.user!, role: "user",
+    capabilities: { ...creatorAuth.user!.capabilities, platformAdmin: false } },
+};
 const meta = {
   component: Projects,
   tags: ["ai-generated", "needs-work"],
-  decorators: [(Story, context) => <AuthContext.Provider value={context.parameters.anonymous ? anonymousAuth : context.parameters.reader ? readerAuth : context.parameters.creator ? creatorAuth : adminAuth}><Story /></AuthContext.Provider>],
+  decorators: [(Story, context) => <AuthContext.Provider value={context.parameters.anonymous ? anonymousAuth : context.parameters.reader ? readerAuth : context.parameters.projectAdmin ? projectAdminAuth : context.parameters.creator ? creatorAuth : adminAuth}><Story /></AuthContext.Provider>],
   parameters: { msw: { handlers: [
     http.get("/api/v1/projects", ({ request }) => HttpResponse.json(
       new URL(request.url).searchParams.get("controlPlane") === "true" ? [project] : [],
@@ -115,6 +119,19 @@ export const CreatorProjectAdmin: Story = {
     await expect(canvas.getAllByRole("button", { name: `Delete ${project.name}` })[0]).toBeEnabled();
     await expect(canvas.getAllByRole("link", { name: "Manage access" })[0]).toHaveAttribute("href", `/access?projectId=${project._id}`);
     await expect(canvas.queryByText("Unjoined project")).not.toBeInTheDocument();
+  },
+};
+
+export const ProjectAdminMembershipEntry: Story = {
+  parameters: { projectAdmin: true, msw: { handlers: [
+    http.get("/api/v1/projects", () => HttpResponse.json([project])),
+  ] } },
+  play: async ({ canvas }) => {
+    await expect((await canvas.findAllByRole("link", { name: "Manage access" }))[0]).toHaveAttribute("href", `/access?projectId=${project._id}`);
+    await expect(canvas.queryByRole("link", { name: "Access administration" })).not.toBeInTheDocument();
+    await expect(canvas.getByRole("button", { name: "New project" })).toBeDisabled();
+    await expect(canvas.getAllByRole("button", { name: `Edit ${project.name}` })[0]).toBeEnabled();
+    await expect(canvas.getAllByRole("button", { name: `Delete ${project.name}` })[0]).toBeDisabled();
   },
 };
 

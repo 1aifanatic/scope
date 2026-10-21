@@ -11,9 +11,9 @@ import { downloadBatchArtifacts } from "./artifact-delivery";
 import { getSelectedProjectId, ProjectRequiredError } from "./project-scope";
 import { MAX_ARCHIVE_UPLOAD_LABEL } from "./codebaseUpload";
 import {
-  AccessCapabilitiesSchema, AccessUserSearchResultSchema, ProjectMembershipSummarySchema,
+  AccessCapabilitiesSchema, AccessUserSearchResultSchema, AccessUserSummarySchema, ProjectMembershipSummarySchema,
   ApiAuthModeSchema, PlatformAdminListSchema,
-  type AccessCapabilities, type AccessUserSearchResult, type PlatformAdminList, type ProjectMembershipSummary,
+  type AccessCapabilities, type AccessUserSearchResult, type AccessUserSummary, type PlatformAdminList, type ProjectMembershipSummary,
 } from "shared/rbac";
 
 const BASE = "/api/v1";
@@ -181,8 +181,11 @@ export const api = {
     request<unknown>(`/admin/platform-admins${qs({ cursor: options.cursor })}`, { signal: options.signal, cache: "no-store" })
       .then(data => PlatformAdminListSchema.parse(data)),
   listProjectMembers: (projectId: string, signal?: AbortSignal): Promise<ProjectMembershipSummary[]> =>
-    request<unknown>(`/projects/${encodeURIComponent(projectId)}/members`, { signal })
+    request<unknown>(`/projects/${encodeURIComponent(projectId)}/members`, { signal, cache: "no-store" })
       .then(data => ProjectMembershipSummarySchema.array().parse(data)),
+  lookupProjectMember: (projectId: string, userId: string, signal?: AbortSignal): Promise<AccessUserSummary> =>
+    request<unknown>(`/projects/${encodeURIComponent(projectId)}/members/lookup/${encodeURIComponent(userId)}`, { signal, cache: "no-store" })
+      .then(data => AccessUserSummarySchema.parse(data)),
   /** Only AuthProvider calls these; enrollment must never be prefetched. */
   getCurrentUser: (opts: { signal?: AbortSignal } = {}): Promise<CurrentUserResponse> =>
     requestCurrentUser("GET", opts),

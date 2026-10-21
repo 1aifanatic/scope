@@ -5,6 +5,9 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { http, HttpResponse } from "msw";
 import { expect, fn, screen, userEvent, waitFor, within } from "storybook/test";
 import { Link, useLocation } from "react-router-dom";
+import { AuthContext, type AuthContextValue } from "@/contexts/AuthContext";
+import { signedInAuth } from "@/contexts/authFixtures";
+import { projectPermissions } from "shared/rbac";
 import type { AccessUserSummary, ProjectMembershipSummary, ProjectRole } from "shared/rbac";
 import { AccessAdministration } from "./AccessAdministration";
 
@@ -14,6 +17,12 @@ const bob: AccessUserSummary = { id: "33333333-3333-4333-8333-333333333333", dis
 const charlie: AccessUserSummary = { id: "44444444-4444-4444-8444-444444444444", displayName: "Charlie Example", email: "charlie@example.test", role: "user", disabled: false, revision: 1 };
 const disabled: AccessUserSummary = { ...charlie, id: "55555555-5555-4555-8555-555555555555", displayName: "Disabled user", disabled: true };
 const project = { _id: projectId, name: "Scope benchmarks", revision: 1, createdAt: "2026-01-01T00:00:00Z" };
+const platformAuth: AuthContextValue = { ...signedInAuth, user: { ...signedInAuth.user!,
+  id: alice.id, capabilities: { platformAdmin: true, reportsEnabled: false, memberships: [] } } };
+const projectAdminAuth: AuthContextValue = { ...signedInAuth, user: { ...signedInAuth.user!, id: alice.id,
+  capabilities: { platformAdmin: false, reportsEnabled: false, memberships: [
+    { projectId, role: "admin", permissions: projectPermissions("admin"), revision: 1 },
+  ] } } };
 function member(user: AccessUserSummary, role: ProjectRole, extra: Partial<ProjectMembershipSummary> = {}): ProjectMembershipSummary {
   return { _id: `${projectId}:${user.id}`, projectId, userId: user.id, role, revision: 1, pending: false, user, ...extra };
 }
@@ -27,6 +36,13 @@ function handlers(initial: ProjectMembershipSummary[] = [member(alice, "admin")]
   let retryId: string | null = null;
   return [
     http.get("/api/v1/projects", () => HttpResponse.json(options.noProjects ? [] : [project])),
+    http.get("/api/v1/projects/:id", () => HttpResponse.json(project)),
+    http.get("/api/v1/projects/:id/members/lookup/:userId", ({ params }) => {
+      const user = users.find(user => user.id === params.userId);
+      return !user ? HttpResponse.json({ error: "Enrolled user not found" }, { status: 404 })
+        : user.disabled ? HttpResponse.json({ error: "Disabled users cannot receive new project access" }, { status: 409 })
+        : HttpResponse.json(user);
+    }),
     http.get("/api/v1/admin/platform-admins", () => {
       options.onAdminList?.();
       return HttpResponse.json({ items: [{ ...alice, pending: false }] });
@@ -69,11 +85,106 @@ function handlers(initial: ProjectMembershipSummary[] = [member(alice, "admin")]
 }
 const meta = {
   component: AccessAdministration,
+  decorators: [(Story, context) => <AuthContext.Provider value={context.parameters.projectAdmin ? projectAdminAuth : platformAuth}><Story /></AuthContext.Provider>],
   tags: ["ai-generated", "needs-work"],
   parameters: { msw: { handlers: handlers() } },
 } satisfies Meta<typeof AccessAdministration>;
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+export const ProjectAdminAddsExactUser: Story = {
+  parameters: { projectAdmin: true, msw: { handlers: [
+    http.get("/api/v1/admin/users/search", () => { throw new Error("Project admin must never query the global directory"); }),
+    http.get("/api/v1/projects", () => { throw new Error("Project admin must never query the control-plane inventory"); }),
+    ...handlers(),
+  ] } },
+  render: () => <><Link to={`/access?projectId=${projectId}`}>Manage this project</Link><AccessAtRoute /></>,
+  play: async ({ canvas }) => {
+    await userEvent.click(canvas.getByRole("link", { name: "Manage this project" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Add people" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    await expect(dialog.getByText(/Name\/email directory search and invitations are not available/)).toBeVisible();
+    await userEvent.type(dialog.getByLabelText("Scope user ID"), bob.id);
+    await userEvent.click(await dialog.findByRole("button", { name: /Bob Example/ }));
+    await userEvent.selectOptions(dialog.getByLabelText("Project role"), "admin");
+    await userEvent.click(dialog.getByRole("button", { name: "Add to project" }));
+    await expect(await canvas.findByText("Bob Example")).toBeVisible();
+    await expect(canvas.getAllByText("Project admin")).toHaveLength(2);
+    await expect(canvas.queryByRole("link", { name: "All project access" })).not.toBeInTheDocument();
+    await expect(canvas.queryByRole("button", { name: /More actions/ })).not.toBeInTheDocument();
+    await expect(canvas.queryByText("Advanced: operation recovery")).not.toBeInTheDocument();
+  },
+};
+
+export const ProjectAdminChangesAndRemovesMember: Story = {
+  parameters: { projectAdmin: true, msw: { handlers: handlers([member(alice, "admin"), member(bob, "reader")]) } },
+  render: () => <><Link to={`/access?projectId=${projectId}`}>Manage this project</Link><AccessAtRoute /></>,
+  play: async ({ canvas }) => {
+    await userEvent.click(canvas.getByRole("link", { name: "Manage this project" }));
+    for (const role of ["contributor", "admin", "reader"]) {
+      await userEvent.click(await canvas.findByRole("button", { name: "Change role for Bob Example" }));
+      const dialog = within(await screen.findByRole("dialog"));
+      await userEvent.selectOptions(dialog.getByLabelText("Project role"), role);
+      await userEvent.click(dialog.getByRole("button", { name: "Save role" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await waitFor(() => expect(canvas.getByRole("button", { name: "Change role for Bob Example" })).toBeEnabled());
+    }
+    await userEvent.click(canvas.getByRole("button", { name: "Remove Bob Example" }));
+    await userEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: /^Remove access/ }));
+    await waitFor(() => expect(canvas.queryByText("Bob Example")).not.toBeInTheDocument());
+  },
+};
+
+export const ProjectAdminSelfDemotionWarning: Story = {
+  parameters: { projectAdmin: true },
+  render: () => <><Link to={`/access?projectId=${projectId}`}>Manage this project</Link><AccessAtRoute /></>,
+  play: async ({ canvas }) => {
+    await userEvent.click(canvas.getByRole("link", { name: "Manage this project" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Change role for Alice Example" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    await userEvent.selectOptions(dialog.getByLabelText("Project role"), "reader");
+    await expect(dialog.getByRole("alert")).toHaveTextContent("You will lose membership-management access");
+    await userEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Remove Alice Example" }));
+    await expect(within(await screen.findByRole("alertdialog")).getByText(/You will lose access/)).toBeVisible();
+  },
+};
+
+export const ProjectAdminExactLookupUnavailable: Story = {
+  parameters: { projectAdmin: true },
+  render: () => <><Link to={`/access?projectId=${projectId}`}>Manage this project</Link><AccessAtRoute /></>,
+  play: async ({ canvas }) => {
+    await userEvent.click(canvas.getByRole("link", { name: "Manage this project" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Add people" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    await userEvent.type(dialog.getByLabelText("Scope user ID"), disabled.id);
+    await expect(await dialog.findByRole("alert")).toHaveTextContent("Disabled users");
+    await expect(dialog.getByRole("button", { name: "Add to project" })).toBeDisabled();
+    await userEvent.clear(dialog.getByLabelText("Scope user ID"));
+    await userEvent.type(dialog.getByLabelText("Scope user ID"), "77777777-7777-4777-8777-777777777777");
+    await waitFor(() => expect(dialog.getByRole("alert")).toHaveTextContent("Enrolled user not found"));
+    await expect(dialog.getByRole("button", { name: "Add to project" })).toBeDisabled();
+  },
+};
+
+export const ProjectAdminPendingRetry: Story = {
+  parameters: { projectAdmin: true, msw: { handlers: handlers([member(alice, "admin"), member(bob, "reader")], { pending: true }) } },
+  render: () => <><Link to={`/access?projectId=${projectId}`}>Manage this project</Link><AccessAtRoute /></>,
+  play: async ({ canvas }) => {
+    await userEvent.click(canvas.getByRole("link", { name: "Manage this project" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Change role for Bob Example" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    await userEvent.selectOptions(dialog.getByLabelText("Project role"), "admin");
+    await userEvent.click(dialog.getByRole("button", { name: "Save role" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent("pending reconciliation");
+    await expect(canvas.getByText(/give a platform administrator operation ID/)).toBeVisible();
+    await expect(canvas.queryByRole("link", { name: "All project access" })).not.toBeInTheDocument();
+    await expect(canvas.getByRole("button", { name: "Add people" })).toBeDisabled();
+    await userEvent.click(canvas.getByRole("button", { name: "Retry change" }));
+    await expect(await canvas.findByRole("status")).toHaveTextContent("completed");
+    await waitFor(() => expect(canvas.queryByRole("button", { name: "Retry change" })).not.toBeInTheDocument());
+  },
+};
 
 async function chooseProject() {
   await userEvent.selectOptions(screen.getByLabelText("Project"), await screen.findByRole("option", { name: /Scope benchmarks/ }));

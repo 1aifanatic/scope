@@ -66,6 +66,28 @@ it("allows platform control-plane onboarding without implicit membership", () =>
   expect(screen.getByRole("link", { name: "Access administration" })).toBeTruthy();
   expect(screen.getByText("Project content")).toBeTruthy();
 });
+it.each(["/access", "/ACCESS", "/acc%65ss"])("allows project admins only their exact project membership deep link at %s", path => {
+  const auth: AuthContextValue = { ...signedInAuth, user: { ...signedInAuth.user!,
+    capabilities: { platformAdmin: false, reportsEnabled: false, memberships: [
+      { projectId: "project-a", role: "admin", permissions: projectPermissions("admin"), revision: 1 },
+    ] } } };
+  for (const suffix of ["", "?projectId=project-b", "?projectId="]) {
+    const view = render(tree(auth, `${path}${suffix}`));
+    expect(screen.queryByText("Project content")).toBeNull();
+    view.unmount();
+  }
+  render(tree(auth, `${path}?projectId=project-a`));
+  expect(screen.getByText("Project content")).toBeTruthy();
+  expect(screen.queryByRole("link", { name: "Access administration" })).toBeNull();
+});
+it.each(["reader", "contributor"] as const)("denies membership deep links to a %s", role => {
+  const auth: AuthContextValue = { ...signedInAuth, user: { ...signedInAuth.user!,
+    capabilities: { platformAdmin: false, reportsEnabled: false, memberships: [
+      { projectId: "project-a", role, permissions: projectPermissions(role), revision: 1 },
+    ] } } };
+  render(tree(auth, "/access?projectId=project-a"));
+  expect(screen.queryByText("Project content")).toBeNull();
+});
 
 const secretsPaths = [
   "/secrets", "/secrets/keys", "/secrets/keys/new", "/secrets/keys/example",

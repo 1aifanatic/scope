@@ -5,7 +5,7 @@ import { performance } from "node:perf_hooks";
 import express from "express";
 import request from "supertest";
 import { MongoClient } from "mongodb";
-import { UserDocumentSchema } from "shared";
+import { UserDocumentSchema, type ProjectMembership } from "shared";
 import { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -65,6 +65,68 @@ describe("Explicit HTTP route classification", () => {
 });
 
 describe("Canonical authority work budget", () => {
+  describe("Project membership administration", () => {
+    function fixture(role: "reader" | "contributor" | "admin", platformAdmin = false) {
+      const authority = new Authorization(new MongoClient("mongodb://127.0.0.1:1").db("unused_unit_fixture"));
+      vi.spyOn(authority, "currentUser").mockResolvedValue(UserDocumentSchema.parse({
+        _id: "actor", role: platformAdmin ? "admin" : "user", idp: "entra", idpTenant: "fixture", idpSubject: "fixture",
+        createdAt: new Date(), updatedAt: new Date(),
+      }));
+      const membership: ProjectMembership = {
+        _id: "a:actor", projectId: "a", userId: "actor", role, revision: 1,
+        createdAt: new Date(), updatedAt: new Date(), createdByUserId: "operator",
+        lastOperationId: "grant", appliedOperationIds: ["grant"],
+      };
+      const memberships = vi.spyOn(authority, "memberships").mockResolvedValue([membership]);
+      const req = Object.assign(Object.create(express.request) as express.Request, {
+        params: { id: "a", userId: "target" }, query: {}, body: {},
+        auth: { token: `header.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 300 })).toString("base64url")}.signature` },
+      });
+      return { authority, memberships, membership, req };
+    }
+    it.each(["get", "put", "delete"])("allows a current project admin to %s only their own membership surface", async method => {
+      const { authority, req } = fixture("admin");
+      const path = `/api/v1/projects/:id/members${method === "get" ? "" : "/:userId"}`;
+      await expect(authority.guard(req, method, path, "projects")).resolves.toBeTypeOf("number");
+      req.params.id = "b";
+      await expect(authority.guard(req, method, path, "projects")).rejects.toMatchObject({ status: 404 });
+    });
+    it.each(["reader", "contributor"] as const)("denies the in-project %s roster, lookup and mutation", async role => {
+      const { authority, req } = fixture(role);
+      for (const [method, suffix] of [["get", ""], ["get", "/lookup/:userId"], ["put", "/:userId"], ["delete", "/:userId"]]) {
+        await expect(authority.guard(req, method, `/api/v1/projects/:id/members${suffix}`, "projects"))
+          .rejects.toMatchObject({ status: 403 });
+      }
+    });
+    it("rereads membership on the next request after demotion or removal", async () => {
+      const { authority, req, membership, memberships } = fixture("admin");
+      const path = "/api/v1/projects/:id/members";
+      await expect(authority.guard(req, "get", path, "projects")).resolves.toBeTypeOf("number");
+      memberships.mockResolvedValue([{ ...membership, role: "reader" }]);
+      await expect(authority.guard(req, "get", path, "projects")).rejects.toMatchObject({ status: 403 });
+      memberships.mockResolvedValue([]);
+      await expect(authority.guard(req, "get", path, "projects")).rejects.toMatchObject({ status: 404 });
+    });
+    it("does not grant project admins directory, inventory, lifecycle or global platform powers", async () => {
+      const { authority, req } = fixture("admin");
+      for (const path of ["/api/v1/admin/users/search", "/api/v1/admin/users", "/api/v1/admin/users/:id/promote", "/api/v1/keys", "/api/v1/accounts"]) {
+        await expect(authority.guard(req, "get", path, "platform")).rejects.toMatchObject({ status: 403 });
+      }
+      req.query.controlPlane = "true";
+      await expect(authority.guard(req, "get", "/api/v1/projects", "projects")).rejects.toMatchObject({ status: 403 });
+      for (const [method, path] of [["post", "/api/v1/projects"], ["delete", "/api/v1/projects/:id"], ["post", "/api/v1/projects/:id/restore"]]) {
+        await expect(authority.guard(req, method, path, "projects")).rejects.toMatchObject({ status: 403 });
+      }
+    });
+    it("retains platform administration without project membership", async () => {
+      const { authority, req, memberships } = fixture("reader", true);
+      memberships.mockResolvedValue([]);
+      for (const method of ["get", "put", "delete"]) {
+        await expect(authority.guard(req, method, "/api/v1/projects/:id/members/:userId", "projects")).resolves.toBeTypeOf("number");
+      }
+      expect(memberships).not.toHaveBeenCalled();
+    });
+  });
   it("passes one original deadline through identity and membership reads", async () => {
     let now = 0;
     vi.spyOn(performance, "now").mockImplementation(() => now);

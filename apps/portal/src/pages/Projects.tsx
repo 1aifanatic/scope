@@ -284,7 +284,7 @@ export function Projects() {
                 <ArrowRight className="h-4 w-4" />
               </Button>
             )}
-            {platformAdmin && <Button size="sm" variant="outline" asChild>
+            {(platformAdmin || user?.capabilities.memberships.some(m => m.projectId === projectId(p) && m.role === "admin" && m.permissions.includes("members:write"))) && <Button size="sm" variant="outline" asChild>
               <Link to={`/access?projectId=${encodeURIComponent(projectId(p))}`}>Manage access</Link>
             </Button>}
             <Button
@@ -367,7 +367,7 @@ export function Projects() {
               <div className="flex flex-col items-center gap-2 py-10 text-center">
                 <FolderKanban className="h-8 w-8 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">
-                  {!authEnabled ? "No projects yet. Create your first project." : platformAdmin ? "No accessible projects. Create one or manage memberships in Access administration." : "No accessible projects. Ask a platform administrator for membership."}
+                  {!authEnabled ? "No projects yet. Create your first project." : platformAdmin ? "No accessible projects. Create one or manage memberships in Access administration." : "No accessible projects. Ask a project or platform administrator for membership."}
                 </p>
                 <Button size="sm" className="gap-1.5" disabled={!canManageProjects} onClick={() => setCreateOpen(true)}>
                   <Plus className="h-4 w-4" />

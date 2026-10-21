@@ -162,11 +162,12 @@ export class Authorization {
       } else if (policy === "metadata") {
         if (user.role !== "admin" && !(await this.memberships(user._id, budgetDeadline)).length) throw new AccessError(403, "membership_required", "An active project membership is required");
       } else if (policy === "projects") {
-        const control = path.includes("/members") || method === "delete" || method === "post" ||
-          (path === "/api/v1/projects" && req.query.controlPlane === "true");
+        const membership = /^\/api\/v1\/projects\/:id\/members(?:\/|$)/.test(path);
+        const control = !membership && (method === "delete" || method === "post" ||
+          (path === "/api/v1/projects" && req.query.controlPlane === "true"));
         if (control && user.role !== "admin") throw new AccessError(403, "insufficient_permission", "Platform administration required");
         if (!control && req.params.id && user.role !== "admin") {
-          await this.requireProject(user._id, req.params.id, method === "get" ? "content:read" : "settings:write", budgetDeadline);
+          await this.requireProject(user._id, req.params.id, membership ? "members:write" : method === "get" ? "content:read" : "settings:write", budgetDeadline);
         }
       } else {
         await this.projectRequest(req, method, path, user._id, budgetDeadline);

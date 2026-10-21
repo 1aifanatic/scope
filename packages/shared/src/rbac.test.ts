@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  PlatformAdminListSchema, PlatformAdminPromotionSchema,
+  AccessCapabilitiesSchema, PlatformAdminListSchema, PlatformAdminPromotionSchema,
   ProjectRoleSchema, projectPermissions, REPORT_GENERATION_ENABLED, resolveAuthEnabledFlag,
 } from "./rbac.js";
 
@@ -20,9 +20,18 @@ describe("Fixed project role bundles", () => {
   it.each([
     ["reader", ["content:read"]],
     ["contributor", ["content:read", "content:write", "content:delete"]],
-    ["admin", ["content:read", "content:write", "content:delete", "settings:write"]],
-  ] as const)("%s has no lifecycle, membership, wildcard or creator-specific permissions", (role, expected) => {
+    ["admin", ["content:read", "content:write", "content:delete", "settings:write", "members:write"]],
+  ] as const)("%s has only its fixed project-scoped permissions", (role, expected) => {
     expect(projectPermissions(role)).toEqual(expected);
+  });
+  it("permits membership management only in the fixed admin bundle", () => {
+    const membership = { projectId: "project-a", role: "admin", permissions: projectPermissions("admin"), revision: 1 };
+    expect(AccessCapabilitiesSchema.parse({ platformAdmin: false, reportsEnabled: false, memberships: [membership] }).platformAdmin).toBe(false);
+    for (const role of ["reader", "contributor"]) {
+      expect(AccessCapabilitiesSchema.safeParse({
+        platformAdmin: false, reportsEnabled: false, memberships: [{ ...membership, role }],
+      }).success).toBe(false);
+    }
   });
 
   describe("Add-only platform administration contracts", () => {

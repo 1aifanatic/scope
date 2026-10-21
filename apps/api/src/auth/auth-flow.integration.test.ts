@@ -8,7 +8,7 @@ import { Redis } from "ioredis";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { EntraIdAuthProvider, ProjectStore, type ProjectDocument, type UserDocument } from "shared";
-import { PlatformAdminListSchema, type AccessUserSearchResult, type ProjectMembershipSummary } from "shared/rbac";
+import { AccessCapabilitiesSchema, PlatformAdminListSchema, type AccessUserSearchResult, type ProjectMembershipSummary } from "shared/rbac";
 import { app, _injectTestDependencies } from "../index.js";
 import { createAllMockDependencies } from "../test-helpers.js";
 import { UserStore } from "./user-store.js";
@@ -418,7 +418,7 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
     expect(await users.countDocuments({ idpSubject: otherSubject })).toBe(1);
   });
 
-  it("restricts paginated literal user search and named membership management to platform admins", async () => {
+  it("keeps paginated user search platform-only while project admins manage exact enrolled members", async () => {
     const db = mongo.db(database);
     _injectTestDependencies({ projectStore: new ProjectStore(db.collection<ProjectDocument>("projects")) });
     const adminSubject = randomUUID(), ordinarySubject = randomUUID();
@@ -470,7 +470,17 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
       .set("Authorization", adminBearer).send({ role: "admin", revision: 0 });
     expect(grant.status).toBe(200);
     expect((await request(app).get("/api/v1/admin/users/search").set("Authorization", ordinaryBearer)).status).toBe(403);
-    expect((await request(app).get(`/api/v1/projects/${projectId}/members`).set("Authorization", ordinaryBearer)).status).toBe(403);
+    expect((await request(app).get(`/api/v1/projects/${projectId}/members`).set("Authorization", ordinaryBearer)).status).toBe(200);
+    const candidate = fixtures[0];
+    expect((await request(app).get(`/api/v1/projects/${projectId}/members/lookup/${candidate._id}`)
+      .set("Authorization", ordinaryBearer)).status).toBe(200);
+    const assignmentId = randomUUID();
+    const assignment = await request(app).put(`/api/v1/projects/${projectId}/members/${candidate._id}`)
+      .set("Authorization", ordinaryBearer).set("Idempotency-Key", assignmentId).send({ role: "contributor", revision: 0 });
+    expect(assignment.status).toBe(200);
+    expect(await db.collection<AdminOperation>("admin_operations").findOne({ _id: assignmentId })).toMatchObject({
+      actor: ordinaryId, state: "completed", reason: "Explicit project-admin membership assignment",
+    });
     const roster = await request(app).get(`/api/v1/projects/${projectId}/members`).set("Authorization", adminBearer);
     expect(roster.status).toBe(200);
     const members: ProjectMembershipSummary[] = roster.body;
@@ -492,5 +502,19 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
     const exact = await request(app).get("/api/v1/admin/users").query({ userId: ordinaryId }).set("Authorization", adminBearer);
     expect(exact.status).toBe(200);
     expect(exact.body[0].id).toBe(ordinaryId);
+    const capabilities = async () => {
+      const me = await request(app).get("/api/v1/users/me").set("Authorization", ordinaryBearer);
+      expect(me.status).toBe(200);
+      return AccessCapabilitiesSchema.parse(me.body.capabilities);
+    };
+    expect((await capabilities()).memberships.find(member => member.projectId === projectId)?.permissions).toContain("members:write");
+    const selfPath = `/api/v1/projects/${projectId}/members/${ordinaryId}`;
+    expect((await request(app).put(selfPath).set("Authorization", ordinaryBearer).send({ role: "reader", revision: 1 })).status).toBe(200);
+    expect((await capabilities()).memberships.find(member => member.projectId === projectId)?.permissions).not.toContain("members:write");
+    expect((await request(app).get(`/api/v1/projects/${projectId}/members`).set("Authorization", ordinaryBearer)).status).toBe(403);
+    expect((await request(app).put(selfPath).set("Authorization", adminBearer).send({ role: "admin", revision: 2 })).status).toBe(200);
+    expect((await request(app).delete(selfPath).set("Authorization", ordinaryBearer).send({ revision: 3 })).status).toBe(200);
+    expect((await capabilities()).memberships.some(member => member.projectId === projectId)).toBe(false);
+    expect((await request(app).get(`/api/v1/projects/${projectId}/members`).set("Authorization", ordinaryBearer)).status).toBe(404);
   });
 });

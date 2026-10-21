@@ -104,6 +104,21 @@ describe("access CLI operations", () => {
     expect(request().headers.has("Idempotency-Key")).toBe(false);
     expect(fetchMock).toHaveBeenCalledOnce();
   });
+  it("looks up only the exact enrolled member UUID within the explicit project", async () => {
+    respond(200, { id: "target" });
+    await run("find-member", "project/a", "target/uuid");
+    expect(new URL(request().url).pathname).toBe("/api/v1/projects/project%2Fa/members/lookup/target%2Fuuid");
+    expect(request().method).toBe("GET");
+    expect(request().headers.get("Authorization")).toBe("Bearer fixture-raw-idp-bearer");
+    expect(request().headers.has("Idempotency-Key")).toBe(false);
+  });
+  it.each([403, 404])("surfaces a denied or foreign project roster (%s) without enrollment or retry", async status => {
+    respond(status, { error: "not_permitted" });
+    await run("members", "foreign-project");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(process.exitCode).toBe(1);
+    expect(output).not.toHaveBeenCalled();
+  });
 
   it("searches the platform-only enrolled-user directory with paging and the raw bearer", async () => {
     respond(200, { items: [], nextCursor: "next-user" });

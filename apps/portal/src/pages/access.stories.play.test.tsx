@@ -14,6 +14,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { mswHandlers } from "../../.storybook/msw-handlers";
 import * as administration from "./AccessAdministration.stories";
 import * as admin from "./Admin.stories";
+import * as projects from "./Projects.stories";
 import * as accessShell from "../components/AccessShell.stories";
 import * as agentBadge from "../components/AgentBadge.stories";
 import * as layout from "../components/Layout.stories";
@@ -46,6 +47,7 @@ const badgeStories = composeStories(agentBadge);
 const layoutStories = composeStories(layout);
 const stories = {
   ...composeStories(administration), ...composeStories(admin), ...composeStories(accessShell),
+  ...Object.fromEntries(Object.entries(composeStories(projects)).map(([name, story]) => [`Projects${name}`, story])),
   AgentBadgeAdmin: badgeStories.Plain, AgentBadgeMember: badgeStories.ProjectMember,
   MemberNavigation: layoutStories.MemberNavigation, AdminNavigation: layoutStories.AdminWithoutMembership,
 };
