@@ -22,6 +22,16 @@ const meta = {
         http.get("*/api/v1/agents", () => HttpResponse.json([])),
         http.get("*/api/v1/requests", () => HttpResponse.json({ data: [] })),
         http.get("*/api/v1/*", () => HttpResponse.json([])),
+        http.post("*/api/v1/criteria/generate-prompt", () => HttpResponse.json({
+          prompt: "Record whether the codebase contains unit tests.",
+          suggestedId: "has_unit_tests",
+          suggestedParents: [],
+          suggestedChildren: [],
+          suggestedSubject: "run",
+        })),
+        http.post("*/api/v1/criteria", () => HttpResponse.json({
+          id: "has_unit_tests", prompt: "Record whether the codebase contains unit tests.", createdAt: "",
+        })),
       ],
     },
   },
