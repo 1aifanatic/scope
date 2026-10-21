@@ -264,8 +264,15 @@ The Portal provides `/experiments`, `/experiments/new`, and
 `/experiments/:id`. The shared creation form retains the established run
 configuration and expansion count and adds Experiment metadata. No selected
 scenario creates an empty Experiment; selecting a scenario reveals the run
-composition controls and creates the expanded run count. The Portal navigates
-to Experiment Detail after creation. The Experiments list uses the shared
+composition controls and creates the expanded run count. Optional description
+editing is collapsed by default and preserves its value when reopened. The
+revealed Observation picker opens the shared authoring wizard in locked
+`mode="observation"` and adds the created ID only to the Experiment
+composition's selected observations. The
+project-scoped creation launcher keeps **New Run** as the primary action and
+expands to expose **New Experiment** on pointer hover or keyboard focus; the
+expanded sidebar and mobile sheet keep both destinations directly available.
+The Portal navigates to Experiment Detail after creation. The Experiments list uses the shared
 full-height, edge-to-edge `ListLayout`, `FilterRail`, `DataTable`, column
 customization, and cursor-aware `Pagination` interaction model used by Runs
 while retaining Experiment-specific status, revision, attempt, and run-count
@@ -325,9 +332,10 @@ Only these overlapping request-creation controls are deprecated:
 
 Clients identify this case as `legacy-request-composition`. Existing expansion,
 response, status, and navigation behavior remain intact. The CLI writes the
-warning only to stderr. The Portal renders an accessible status notice only
-when one of those two conditions is true. New multi-request compositions use
-Experiment creation.
+warning only to stderr. Beside the relevant **New Run** composition controls,
+the Portal gives neutral contextual guidance linking to **New Experiment**
+without presenting the supported legacy path as an error or alert. New
+multi-request compositions use Experiment creation.
 
 ## Deferred capabilities
 
