@@ -16,6 +16,11 @@ import {
   type PromptExecutor,
 } from "taxonomy-evaluation";
 import { checkCase, loadCases, loadGold } from "taxonomy-evaluation/cases";
+import {
+  configureTaxonomeHelp,
+  createTaxonomeStyle,
+  type TaxonomeStyle,
+} from "./style.js";
 
 interface ModelOptions {
   /** Exact Copilot model ID; defaults to the pinned spike model. */
@@ -191,17 +196,29 @@ const emit = (value: unknown) => process.stdout.write(`${JSON.stringify(value, n
  *
  * @returns Commander program for the standalone run/eval/optimize/readout surface.
  */
-export function createCli(): Command {
+export function createCli(style: TaxonomeStyle = createTaxonomeStyle()): Command {
   const cli = new Command().name("taxonome").description("Standalone two-element taxonomy evaluation spike").version("0.1.0");
-  cli.configureOutput({ writeOut: s => process.stderr.write(s), writeErr: s => process.stderr.write(s) });
+  cli.configureOutput({
+    writeOut: text => process.stderr.write(text),
+    writeErr: text => process.stderr.write(text),
+    getOutHasColors: () => style.enabled,
+    getErrHasColors: () => style.enabled,
+  });
+  cli.showHelpAfterError("(use --help for command usage)");
+  cli.action(() => cli.help());
+  configureTaxonomeHelp(cli, style);
 
   // Run one validated input through the same API used by programmatic callers.
-  addModelOptions(cli.command("run <atif>").requiredOption("--context <path>", "Explicit evidence context JSON")
+  const runCommand = addModelOptions(cli.command("run <atif>")
+    .description("Evaluate selected elements for one ATIF trajectory")
+    .requiredOption("--context <path>", "Explicit evidence context JSON")
     .option(
       "--elements <ids>",
       "Comma-separated element IDs",
       "beh-skipped-invocation,beh-timeout"
-    ))
+    ));
+  configureTaxonomeHelp(runCommand, style);
+  runCommand
     .action(async (atif: string, options: RunOptions) => {
       // Acquisition and context validation complete before any runtime is opened.
       const input = prepareInput({ atif: await loadJson(atif), context: contextSchema.parse(await loadJson(options.context)) });
@@ -220,7 +237,9 @@ export function createCli(): Command {
     });
 
   // Evaluate a split repeatedly while keeping expected assertions outside model inputs.
-  addModelOptions(cli.command("eval").requiredOption("--cases <path>", "ATIF/context input JSONL")
+  const evalCommand = addModelOptions(cli.command("eval")
+    .description("Evaluate curated cases against fixed assertions")
+    .requiredOption("--cases <path>", "ATIF/context input JSONL")
     .requiredOption(
       "--gold <path>",
       "Separate expected JSON/assertions"
@@ -238,7 +257,9 @@ export function createCli(): Command {
     .option(
       "--elements <ids>",
       "Override case element selection"
-    ))
+    ));
+  configureTaxonomeHelp(evalCommand, style);
+  evalCommand
     .action(async (options: EvalOptions) => {
       const allCases = await loadCases(options.cases);
       const gold = await loadGold(options.gold);
@@ -306,7 +327,9 @@ export function createCli(): Command {
               context: row.input.context,
               prompt_predictions: promptPredictions,
             });
-            process.stderr.write(`${row.id} sample=${sample}: ${errors.length ? "FAIL" : "PASS"}\n`);
+            const context = `${row.id} sample=${sample}`;
+            const status = errors.length ? style.fail("FAIL") : style.pass("PASS");
+            process.stderr.write(`${style.dim(context)} ${status}\n`);
           }
         }
 
@@ -328,7 +351,9 @@ export function createCli(): Command {
     });
 
   // Optimize only the prompt-backed element, using separate SDK transports for student and teacher calls.
-  addModelOptions(cli.command("optimize").requiredOption("--cases <path>", "Disjoint train/validation/heldout JSONL")
+  const optimizeCommand = addModelOptions(cli.command("optimize")
+    .description("Optimize Skipped Invocation and save a replayable Ax artifact")
+    .requiredOption("--cases <path>", "Disjoint train/validation/heldout JSONL")
     .requiredOption(
       "--gold <path>",
       "Fixed assertions"
@@ -341,7 +366,9 @@ export function createCli(): Command {
       "--max-metric-calls <n>",
       "Finite Ax metric budget, not the all-in ledger cap",
       "48"
-    ))
+    ));
+  configureTaxonomeHelp(optimizeCommand, style);
+  optimizeCommand
     .action(async (options: OptimizeOptions) => {
       if (!options.ledger) {
         throw new Error("--ledger is required for optimization");
@@ -395,7 +422,11 @@ export function createCli(): Command {
     });
 
   // Convert validated structured results into deterministic JSON and optional Markdown.
-  cli.command("readout <results>").option("--markdown <path>", "Write Markdown preview (stdout remains JSON)")
+  const readoutCommand = cli.command("readout <results>")
+    .description("Build deterministic behavior/source counts from result JSON")
+    .option("--markdown <path>", "Write Markdown preview (stdout remains JSON)");
+  configureTaxonomeHelp(readoutCommand, style);
+  readoutCommand
     .action(async (path: string, options: ReadoutOptions) => {
       const report = buildReadout(JSON.parse(await readFile(path, "utf8")) as unknown);
       if (options.markdown) {

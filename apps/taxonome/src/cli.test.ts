@@ -11,6 +11,19 @@ import { describe, expect, it } from "vitest";
 /** Runs real child processes so stdout/stderr and caller-working-directory contracts are covered. */
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL("../../../", import.meta.url));
+const ANSI_PATTERN = /\u001b\[[0-9;]*m/;
+
+/** Returns an environment with all inherited authentication removed. */
+function childEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    COPILOT_GITHUB_TOKEN: "",
+    GH_TOKEN: "",
+    GITHUB_TOKEN: "",
+    ...overrides,
+  };
+}
+
 describe("standalone CLI process contract", () => {
   it("runs minimal-context deterministic ATIF without tokens or Scope services, stdout is JSON only", async () => {
     const { stdout, stderr } = await exec(
@@ -27,7 +40,7 @@ describe("standalone CLI process contract", () => {
         "--elements",
         "beh-timeout",
       ],
-      { cwd: root, env: { ...process.env, COPILOT_GITHUB_TOKEN: "", GH_TOKEN: "", GITHUB_TOKEN: "" } }
+      { cwd: root, env: childEnvironment() }
     );
     const output: unknown = JSON.parse(stdout);
     expect(output).toMatchObject({ results: [{ implementation: "deterministic", result: { state: "completed", observed: true } }] });
@@ -65,7 +78,7 @@ describe("standalone CLI process contract", () => {
         "--elements",
         "beh-skipped-invocation",
       ],
-      { cwd: root, env: { ...process.env, COPILOT_GITHUB_TOKEN: "", GH_TOKEN: "", GITHUB_TOKEN: "" } }
+      { cwd: root, env: childEnvironment() }
     );
     const output: unknown = JSON.parse(stdout);
     expect(output).toMatchObject({
@@ -78,7 +91,7 @@ describe("standalone CLI process contract", () => {
     const { stdout, stderr } = await exec(
       "pnpm",
       [
-        "-s",
+        "--silent",
         "taxonome",
         "run",
         "packages/taxonomy-evaluation/fixtures/timeout.atif.json",
@@ -87,7 +100,7 @@ describe("standalone CLI process contract", () => {
         "--elements",
         "beh-timeout",
       ],
-      { cwd: root, env: { ...process.env, COPILOT_GITHUB_TOKEN: "", GH_TOKEN: "", GITHUB_TOKEN: "" } }
+      { cwd: root, env: childEnvironment() }
     );
     const output: unknown = JSON.parse(stdout);
     expect(output).toMatchObject({ results: [{ result: { observed: true } }] });
@@ -119,7 +132,7 @@ describe("standalone CLI process contract", () => {
           "--elements",
           "beh-timeout",
         ],
-        { cwd: root, env: { ...process.env, COPILOT_GITHUB_TOKEN: "", GH_TOKEN: "", GITHUB_TOKEN: "" } }
+        { cwd: root, env: childEnvironment() }
       );
       const output: unknown = JSON.parse(stdout);
       expect(output).toMatchObject({ results: [{ result: { observed: true } }] });
@@ -130,5 +143,52 @@ describe("standalone CLI process contract", () => {
         server.closeAllConnections();
       });
     }
+  });
+
+  it("keeps redirected help and errors plain while preserving accessible text", async () => {
+    const help = await exec(
+      process.execPath,
+      ["--conditions=source", "--import", "tsx", "apps/taxonome/src/index.ts", "--help"],
+      { cwd: root, env: childEnvironment() },
+    );
+    expect(help.stdout).toBe("");
+    expect(help.stderr).toContain("Usage:");
+    expect(help.stderr).not.toMatch(ANSI_PATTERN);
+
+    const error = exec(
+      process.execPath,
+      ["--conditions=source", "--import", "tsx", "apps/taxonome/src/index.ts", "run", "missing.json", "--context", "missing.json"],
+      { cwd: root, env: childEnvironment({ NO_COLOR: "1", FORCE_COLOR: "1" }) },
+    );
+    await expect(error).rejects.toMatchObject({
+      code: 1,
+      stdout: "",
+      stderr: expect.stringContaining("taxonome:"),
+    });
+    await expect(error).rejects.toMatchObject({
+      stderr: expect.not.stringMatching(ANSI_PATTERN),
+    });
+  });
+
+  it("keeps JSON stdout ANSI-free even when FORCE_COLOR enables diagnostic color", async () => {
+    const { stdout } = await exec(
+      process.execPath,
+      [
+        "--conditions=source",
+        "--import",
+        "tsx",
+        "apps/taxonome/src/index.ts",
+        "run",
+        "packages/taxonomy-evaluation/fixtures/timeout.atif.json",
+        "--context",
+        "packages/taxonomy-evaluation/fixtures/minimal-context.json",
+        "--elements",
+        "beh-timeout",
+      ],
+      { cwd: root, env: childEnvironment({ FORCE_COLOR: "1" }) },
+    );
+
+    expect(stdout).not.toMatch(ANSI_PATTERN);
+    expect(() => JSON.parse(stdout) as unknown).not.toThrow();
   });
 });

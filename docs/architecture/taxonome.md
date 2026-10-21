@@ -20,17 +20,21 @@ From the repository root:
 pnpm install --frozen-lockfile
 pnpm --filter taxonomy-evaluation build
 pnpm --filter taxonome build
-node apps/taxonome/dist/index.js run \
+pnpm --silent taxonome run \
   packages/taxonomy-evaluation/fixtures/timeout.atif.json \
   --context packages/taxonomy-evaluation/fixtures/minimal-context.json \
   --elements beh-timeout
 ```
 
-This deterministic example needs no token. The built CLI is also callable as
-`pnpm -s taxonome ...` during development (preserving caller-relative paths); use the direct `node` entry point
-when the entire process stdout must be JSON (pnpm prints its own banners).
-Diagnostics/help go to stderr; evaluation failures have explicit JSON error
-states and a nonzero exit status.
+This deterministic example needs no token. Use the repository-root
+`pnpm --silent taxonome ...` command for demos, development, and piped output;
+`--silent` suppresses pnpm's script banner so stdout remains one valid JSON
+document. Diagnostics/help go to stderr; evaluation failures have explicit JSON
+error states and a nonzero exit status. Interactive stderr/help uses restrained
+semantic color based on TTY support. Redirected/piped output and CI are plain by
+default; `NO_COLOR` and `FORCE_COLOR=0` disable color, while nonzero
+`FORCE_COLOR` explicitly enables diagnostic/help color. Result JSON/Markdown is
+never styled, and status/error meaning never depends on color alone.
 
 For prompt or mixed execution, set `COPILOT_GITHUB_TOKEN` in the process
 environment. The CLI passes it explicitly as SDK `gitHubToken` and sets
@@ -39,16 +43,16 @@ Never put a token in a command-line flag or file. Use the same ledger file for
 every run, eval, optimization, and replay in an experiment:
 
 ```bash
-node apps/taxonome/dist/index.js eval \
+pnpm --silent taxonome eval \
   --cases packages/taxonomy-evaluation/fixtures/inputs.jsonl \
   --gold packages/taxonomy-evaluation/fixtures/gold.json \
   --split heldout --samples 2 --ledger /absolute/path/calls.jsonl
-node apps/taxonome/dist/index.js optimize \
+pnpm --silent taxonome optimize \
   --cases packages/taxonomy-evaluation/fixtures/inputs.jsonl \
   --gold packages/taxonomy-evaluation/fixtures/gold.json \
   --max-metric-calls 48 --output /absolute/path/optimized.json \
   --ledger /absolute/path/calls.jsonl
-node apps/taxonome/dist/index.js eval \
+pnpm --silent taxonome eval \
   --cases packages/taxonomy-evaluation/fixtures/inputs.jsonl \
   --gold packages/taxonomy-evaluation/fixtures/gold.json \
   --split heldout --samples 2 --artifact /absolute/path/optimized.json \
@@ -305,6 +309,17 @@ implementation file appears in the Taxonome parent-relative diff. The manifest
 records the integration/current-source hashes separately; frozen model evidence
 was not rerun or rewritten.
 
+Local commit `94305d5ac8eb3b9387770d4964b9653fa632f019`
+adds the polished demo-facing CLI without adding a dependency. It reuses the
+Scope CLI's Node `util.styleText` and Commander help-styling pattern, adds
+concise command descriptions, and restricts semantic color to interactive
+stderr/help/progress. `NO_COLOR`, `FORCE_COLOR`, CI, dumb terminals, TTY versus
+pipe behavior, accessible PASS/FAIL/error text, and ANSI-free JSON stdout are
+covered offline. The documented/demo command is now
+`pnpm --silent taxonome ...`, which suppresses pnpm's banner while preserving
+Taxonome diagnostics. The manifest records this source-only revision and zero
+additional model calls separately from the frozen experiment.
+
 | Experiment | Case result | Actual SDK requests | Interpretation |
 |---|---:|---:|---|
 | Original neutral-ID baseline, 18 cases twice | 33/36 | 36 | Two relevance/inapplicability confusions and one false certainty with unknown completeness |
@@ -387,13 +402,13 @@ pnpm --filter taxonomy-evaluation build
 pnpm --filter taxonome build
 pnpm exec vitest run packages/taxonomy-evaluation/src apps/taxonome/src --reporter=default
 pnpm --filter static-prompt-evals exec vitest run --config adapter/vitest.config.ts --reporter=default
-node apps/taxonome/dist/index.js readout \
+pnpm --silent taxonome readout \
   packages/taxonomy-evaluation/evidence/readout-input.json \
   --markdown /tmp/taxonome-preview.md
 ```
 
-Recorded final verification: **61 tests / 10 files** for the standalone slice,
-**32 tests / 6 files** for the existing static-eval TypeScript suite; both
+Recorded current verification: **67 tests / 11 files** for the standalone slice,
+**36 tests / 6 files** for the merged static-eval TypeScript suite; both
 standalone builds/type checks and static-eval type checking passed. The latter
 requires `pnpm --filter 'static-prompt-evals^...' build` first. License-header,
 manifest coverage, and regenerated notice checks passed. The test suite also
