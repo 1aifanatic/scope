@@ -40,8 +40,10 @@ flowchart LR
 `users._id` is a Scope-owned UUID. The unique external identity is
 `(idp, idpTenant, idpSubject)` (`idp`, Entra `tid`, Entra `oid`), never email.
 `UserStore.upsertOnLogin()` is called only by the explicit
-`POST /api/v1/users/me` path for JIT/profile/`lastLoginAt`/eligible
-bootstrap-admin writes. `lastLoginAt` records that upsert, not request activity or
+`POST /api/v1/users/me` path for JIT/profile/`lastLoginAt` writes. New users
+receive `role: "user"`; login never changes role or disabled state. Initial admin
+bootstrap and lockout repair use the operator-only exact-identity utility, not
+environment allowlists or HTTP recovery routes. `lastLoginAt` records that upsert, not request activity or
 proof of an interactive prompt; the disabled check still occurs after the upsert.
 
 After IdP verification, `UserAccessResolver.resolveExisting()` uses a validated

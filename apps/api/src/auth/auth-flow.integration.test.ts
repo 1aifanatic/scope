@@ -77,11 +77,7 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
     cache = new RedisUserAccessCache({
       redisHost: "127.0.0.1", redisPort, redisPassword: "",
     }, { ttlSeconds: 60, namespace: database });
-    store = new UserStore(users, {
-      bootstrapAdmins: new Set([`entra:${tenant}/${subject}`]),
-      bootstrapTenants: new Set([tenant]),
-      operations: new AdminOperations(mongo.db(database)),
-    });
+    store = new UserStore(users);
     resolver = new UserAccessResolver({ userStore: store, cache, enricher: null });
     _injectTestDependencies(createAllMockDependencies());
     _injectTestDependencies({
@@ -131,7 +127,7 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
     await operatorAccess(db, {
       database, confirmDatabase: database, idp: "entra", tenant, subject: adminSubject,
       userId: adminId, revision: 0, role: "admin", disabled: "false", operator: "native-promotion-test",
-      reason: "Isolated platform administrator fixture", operationId: randomUUID(), bootstrapReviewed: true,
+      reason: "Isolated platform administrator fixture", operationId: randomUUID(), apply: true,
     });
     return { adminId, userId, adminBearer, userBearer };
   }
@@ -145,11 +141,21 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
 
     const login = await request(app).post("/api/v1/users/me").set("Authorization", bearer);
     expect(login.status).toBe(200);
-    expect(login.body.role).toBe("admin");
+    expect(login.body.role).toBe("user");
     expect(login.body.id).not.toBe(subject);
-    const stored = await users.findOne({ idpSubject: subject });
+    let stored = await users.findOne({ idpSubject: subject });
     if (!stored) throw new Error("Login did not persist the user");
     expect(login.body.id).toBe(stored._id);
+    await operatorAccess(db, {
+      database, confirmDatabase: database, idp: "entra", tenant, subject, userId: stored._id,
+      role: "admin", disabled: "false", revision: 0, operationId: randomUUID(),
+      operator: "isolated-auth-test", reason: "Explicit enrolled-user bootstrap", bootstrap: true, apply: true,
+    });
+    const refreshed = await request(app).post("/api/v1/users/me").set("Authorization", bearer);
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.body.role).toBe("admin");
+    stored = await users.findOne({ idpSubject: subject });
+    if (!stored) throw new Error("Bootstrapped user disappeared");
     const lastLogin = stored.lastLoginAt?.getTime();
     expect(lastLogin).toBeTypeOf("number");
 
@@ -429,7 +435,7 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
     await operatorAccess(db, {
       database, confirmDatabase: database, idp: "entra", tenant, subject: adminSubject,
       userId: adminId, revision: 0, role: "admin", disabled: "false", operator: "native-access-test",
-      reason: "Isolated administrative directory fixture", operationId: randomUUID(), bootstrapReviewed: true,
+      reason: "Isolated administrative directory fixture", operationId: randomUUID(), apply: true,
     });
     const ordinary = await request(app).post("/api/v1/users/me").set("Authorization", ordinaryBearer);
     expect(ordinary.status).toBe(200);

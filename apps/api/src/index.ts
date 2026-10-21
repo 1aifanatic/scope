@@ -180,11 +180,7 @@ async function initializeClients(): Promise<void> {
   if (authRuntime) {
     authProvider = authRuntime.provider;
     profileEnricher = authRuntime.enricher;
-    userStore = new UserStore(usersCollection, {
-      bootstrapAdmins: authRuntime.bootstrapAdmins,
-      bootstrapTenants: authRuntime.bootstrapTenants,
-      operations: authorization.operations,
-    });
+    userStore = new UserStore(usersCollection);
     userAccessCache = new RedisUserAccessCache({
       redisHost: process.env.REDIS_HOST || "",
       redisPort: parseInt(process.env.REDIS_PORT || "6379", 10),

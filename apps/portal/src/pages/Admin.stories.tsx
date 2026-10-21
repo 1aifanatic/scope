@@ -66,11 +66,6 @@ function handlers(options: {
       admins = [...admins, { ...promoted, pending: false, operationId: id }];
       return HttpResponse.json({ operationId: id, state: "completed", revision: promoted.revision });
     }),
-    http.get("/api/v1/admin/operations/:id", () => HttpResponse.json({ state: "prepared" })),
-    http.post("/api/v1/admin/operations/:id/reconcile", () => {
-      admins = admins.map(user => ({ ...user, pending: false }));
-      return HttpResponse.json({ state: "completed" });
-    }),
   ];
 }
 
@@ -137,7 +132,7 @@ export const PendingPlatformPromotionRetry: Story = {
   play: async ({ canvas }) => {
     const confirmation = await reviewPromotion();
     await userEvent.click(confirmation.getByRole("button", { name: /^Grant platform admin/ }));
-    await expect(await canvas.findByRole("alert")).toHaveTextContent("pending reconciliation");
+    await expect(await canvas.findByRole("alert")).toHaveTextContent("pending operator repair");
     await expect(canvas.getByRole("button", { name: "Add platform admin" })).toBeDisabled();
     await expect(canvas.queryByText("Bob Example")).not.toBeInTheDocument();
     await userEvent.click(canvas.getByRole("button", { name: "Retry change" }));
@@ -182,28 +177,26 @@ export const PaginatedPlatformAdmins: Story = {
   },
 };
 
-export const PendingPlatformAdminRecovery: Story = {
+export const PendingPlatformAdminOperatorGuidance: Story = {
   parameters: { msw: { handlers: handlers({ pendingAdmin: true }) } },
   play: async ({ canvas }) => {
     const section = within(canvas.getByRole("region", { name: "Platform administrators" }));
-    await userEvent.click(await section.findByRole("button", { name: "Change pending" }));
+    await expect(await section.findByText("Change pending")).toBeVisible();
     await expect(section.getByText("Platform admin (inactive)")).toBeVisible();
-    await expect(canvas.getByLabelText("Operation ID")).toHaveValue("pending-platform-promotion");
-    await expect(canvas.getByText("Advanced: operation recovery").closest("details")).toHaveAttribute("open");
-    await userEvent.click(canvas.getByRole("button", { name: "Inspect operation" }));
-    await expect(await canvas.findByRole("status")).toHaveTextContent("prepared");
-    await userEvent.click(canvas.getByRole("button", { name: "Reconcile operation" }));
-    await expect(await canvas.findByRole("status")).toHaveTextContent("completed");
-    await expect(section.queryByText("Platform admin (inactive)")).not.toBeInTheDocument();
+    await expect(section.getByText("pending-platform-promotion")).toBeVisible();
+    await expect(section.getByText(/Contact an operator/)).toBeVisible();
+    await expect(canvas.queryByLabelText("Operation ID")).not.toBeInTheDocument();
+    await expect(canvas.queryByRole("button", { name: /Inspect operation|Reconcile operation/ })).not.toBeInTheDocument();
   },
 };
 
-export const LinkedPlatformOperationRecovery: Story = {
+export const LegacyPlatformRecoveryLinkIgnored: Story = {
   render: () => <><Link to="/admin?operationId=existing-promotion">Open promotion recovery</Link><Admin /></>,
   play: async ({ canvas }) => {
     await userEvent.click(canvas.getByRole("link", { name: "Open promotion recovery" }));
-    await expect(canvas.getByLabelText("Operation ID")).toHaveValue("existing-promotion");
-    await expect(canvas.getByText("Advanced: operation recovery").closest("details")).toHaveAttribute("open");
+    await expect(await canvas.findByRole("heading", { name: "Platform administrators" })).toBeVisible();
+    await expect(canvas.queryByLabelText("Operation ID")).not.toBeInTheDocument();
+    await expect(canvas.queryByText("Advanced: operation recovery")).not.toBeInTheDocument();
   },
 };
 

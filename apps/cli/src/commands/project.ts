@@ -40,7 +40,7 @@ function mutationHeaders(operationId?: string): Record<string, string> {
 async function requireCompleted(response: Response): Promise<void> {
   if (response.status !== 202) return;
   const pending: { operationId?: string } = await response.json();
-  throw new Error(`Operation ${pending.operationId ?? "unknown"} is pending; inspect/reconcile it before retrying. Completion is not confirmed.`);
+  throw new Error(`Operation ${pending.operationId ?? "unknown"} is pending; retry only identical input with the same ID, or give it to an operator for repair. Completion is not confirmed.`);
 }
 
 function projectId(project: ProjectApiDocument): string {

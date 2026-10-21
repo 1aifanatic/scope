@@ -918,7 +918,8 @@ bearer; there is no `/auth/login`, token exchange, Scope JWT, or signing secret.
 `req.user` contains the resolved Scope UUID and database role, not an IdP role.
 
 Only **`POST /api/v1/users/me`** creates missing users or refreshes
-profile, `lastLoginAt`, and bootstrap-admin promotion. The upsert still precedes
+profile and `lastLoginAt`, always inserting new identities as ordinary users.
+Login never changes role or disabled state. The upsert still precedes
 the disabled-user check: an explicit login can update those fields before returning
 `403`. `lastLoginAt` is the explicit upsert timestamp, not general activity or
 trustworthy proof of an interactive sign-in. Every GET `/me` and other
@@ -1076,44 +1077,27 @@ Scopes intended for clients acquiring an API access token
 (e.g. `api://<AUTH_API_CLIENT_ID>/access`). Not consumed by API verification or
 served by a config endpoint; configure the current Portal through `VITE_AUTH_SCOPES`.
 
-### AUTH_BOOTSTRAP_ADMINS
-**Default:** (empty)
-**Type:** comma-separated list of identity keys
+### AUTH_BOOTSTRAP_ADMINS / AUTH_BOOTSTRAP_TENANTS (retired)
 
-Identities to promote to the `admin` role on explicit POST `/users/me`
-enrollment or subsequent login refresh, formatted as
-`${idp}:${idpTenant}/${idpSubject}` (e.g.
-`entra:00000000-0000-0000-0000-000000000000/11111111-1111-1111-1111-111111111111`).
-Promotion requires an exact match for the verified identity and an explicit tenant
-match in `AUTH_BOOTSTRAP_TENANTS`. It is **promote-only**: an existing admin is never
-demoted, and users not listed here are never auto-promoted. Disabled identities
-are not promoted. Promotion requires a durable administrative intent and CAS;
-it grants no project membership or implicit content access. Review this setting
-before operator demotion so a later explicit enrollment cannot undo that intent.
-
-Bootstrap does not depend on `email` or `email_verified`. Ordinary Entra workforce
-and seeded entra-local identities can therefore bootstrap without custom email
-claims when both allowlists match. Token verification remains required; this is
-not a local authentication bypass. Email storage is unchanged: only an explicitly
-verified profile email is persisted.
-
-### AUTH_BOOTSTRAP_TENANTS
-**Default:** (empty)
-**Type:** comma-separated list of tenant IDs
-
-Tenant allowlist that gates admin bootstrap. This setting is required when
-`AUTH_BOOTSTRAP_ADMINS` is non-empty; otherwise the API fails startup. An
-identity is promoted only when its tenant is explicitly listed here.
+Remove both settings from deployment configuration before upgrading an
+authenticated API. A nonempty value now fails startup with an actionable error;
+empty/unset values are accepted. Neither setting can grant or restore admin.
+New users must genuinely sign in first, then an operator promotes an exact
+existing identity using `bootstrap-admin`. There is no first-user-wins,
+startup seeding, email matching or synthetic-principal mode.
 
 ### AUTH_OPERATOR_MONGO_URI
 **Default:** (not set)
 **Type:** MongoDB connection URI
-**Scope:** Operator access recovery and reviewed legacy-membership commands only
+**Scope:** Operator bootstrap/repair and reviewed legacy-membership commands only
 
 Provide through secure operator configuration, never tracked files or shell
 history. The commands additionally require an explicit database and exact
 identity/Scope UUID or reviewed manifest. This does not configure the API's
 normal connection, enable a dev principal, turn auth off or grant content access.
+The operator utility exposes `bootstrap-admin`, `set-user-access`,
+`inspect-operation` and `repair-operation`; mutations default to dry run and
+require `--apply`. Recovery is not exposed in the Portal, REST API or Scope CLI.
 See the [operator runbooks](docs/architecture/auth-rbac.md#durable-changes-and-operator-runbooks).
 
 > **Future — Graph profile enrichment.** `email`/`displayName` are read directly

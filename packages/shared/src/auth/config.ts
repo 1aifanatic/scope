@@ -18,33 +18,8 @@ export interface AuthRuntime {
   provider: AuthProvider;
   /** Profile resolver (claims today; Graph/OBO later). */
   enricher: ProfileEnricher;
-  /**
-   * Bootstrap admin identity keys, each formatted `${idp}:${tenant}/${subject}`
-   * (e.g. `entra:<tid>/<oid>`). Promote-only — never used to demote.
-   */
-  bootstrapAdmins: Set<string>;
-  /** Required tenant allowlist within which bootstrap promotion may apply. */
-  bootstrapTenants: Set<string>;
   /** Fixed lifetime of an active Scope-user cache entry. */
   userCacheTtlSeconds: number;
-}
-
-/** Build the identity key used to match {@link AuthRuntime.bootstrapAdmins}. */
-export function bootstrapAdminKey(
-  idp: string,
-  idpTenant: string,
-  idpSubject: string,
-): string {
-  return `${idp}:${idpTenant}/${idpSubject}`;
-}
-
-function parseCsvSet(raw: string | undefined): Set<string> {
-  return new Set(
-    (raw ?? "")
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0),
-  );
 }
 
 function getRequiredAuthValue(
@@ -74,8 +49,7 @@ function parseUserCacheTtl(raw: string | undefined): number {
  *
  * Required to enable auth: `AUTH_PROVIDER`, `AUTH_AUTHORITY`,
  * `AUTH_API_CLIENT_ID`. Optional: `AUTH_ISSUER_TEMPLATE`, `AUTH_JWKS_URI`,
- * `AUTH_BOOTSTRAP_ADMINS`, `AUTH_BOOTSTRAP_TENANTS`. Bootstrap tenants are
- * required whenever bootstrap admins are configured. `AUTH_USER_CACHE_TTL_SECONDS`
+ * `AUTH_USER_CACHE_TTL_SECONDS`
  * defaults to 300 when unset. IdP settings are unused when auth is disabled.
  *
  * `AUTH_ISSUER_TEMPLATE` / `AUTH_JWKS_URI` override the Entra-cloud defaults so
@@ -87,6 +61,9 @@ export function loadAuthConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): AuthRuntime | null {
   if (!resolveAuthEnabledFlag(env.SCOPE_AUTH_ENABLED)) return null;
+  if (env.AUTH_BOOTSTRAP_ADMINS?.trim() || env.AUTH_BOOTSTRAP_TENANTS?.trim()) {
+    throw new Error("AUTH_BOOTSTRAP_ADMINS/AUTH_BOOTSTRAP_TENANTS are retired. Remove them and use the operator bootstrap-admin script after genuine enrollment.");
+  }
   const userCacheTtlSeconds = parseUserCacheTtl(env.AUTH_USER_CACHE_TTL_SECONDS);
   const missingKeys = REQUIRED_AUTH_ENV_KEYS.filter(
     (key) => !env[key]?.trim(),
@@ -117,20 +94,9 @@ export function loadAuthConfigFromEnv(
     ...(jwksUri ? { jwksUri } : {}),
   });
   const enricher = new ClaimsProfileEnricher();
-  const bootstrapAdmins = parseCsvSet(env.AUTH_BOOTSTRAP_ADMINS);
-  const bootstrapTenants = parseCsvSet(env.AUTH_BOOTSTRAP_TENANTS);
-
-  if (bootstrapAdmins.size > 0 && bootstrapTenants.size === 0) {
-    throw new Error(
-      "AUTH_BOOTSTRAP_TENANTS is required when AUTH_BOOTSTRAP_ADMINS is configured",
-    );
-  }
-
   return {
     provider,
     enricher,
-    bootstrapAdmins,
-    bootstrapTenants,
     userCacheTtlSeconds,
   };
 }

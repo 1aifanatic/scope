@@ -47,6 +47,10 @@ function stable(value: unknown): string {
   return JSON.stringify(value);
 }
 
+export function adminIntentFingerprint(intent: AdminIntent): string {
+  return createHash("sha256").update(stable(intent)).digest("hex");
+}
+
 /**
  * A target retains every applied operation ID: A can be reconciled after B has
  * changed the target, without mistaking B's newer state for A's failed write.
@@ -54,7 +58,7 @@ function stable(value: unknown): string {
 export class AdminOperations {
   constructor(private readonly db: Db) {}
 
-  private async read(id: string): Promise<AdminOperation | null> {
+  async inspect(id: string): Promise<AdminOperation | null> {
     try {
       return await this.db.collection<AdminOperation>("admin_operations").findOne({ _id: id }, { timeoutMS: 5_000 });
     } catch (error) {
@@ -65,8 +69,8 @@ export class AdminOperations {
 
   async execute(intent: AdminIntent): Promise<OperationResult> {
     const operations = this.db.collection<AdminOperation>("admin_operations");
-    const fingerprint = createHash("sha256").update(stable(intent)).digest("hex");
-    let operation = await this.read(intent._id);
+    const fingerprint = adminIntentFingerprint(intent);
+    let operation = await this.inspect(intent._id);
     if (!operation) {
       try {
         const { initial, condition, ...required } = intent;
@@ -77,7 +81,7 @@ export class AdminOperations {
           console.error("Unable to persist security operation intent", intent._id, error);
           throw new AccessError(503, "intent_unavailable", "Security operation intent could not be persisted");
         }
-        operation = await this.read(intent._id);
+        operation = await this.inspect(intent._id);
       }
     }
     if (!operation || operation.fingerprint !== fingerprint) {
@@ -161,7 +165,7 @@ export class AdminOperations {
   }
 
   async reconcile(id: string): Promise<OperationResult> {
-    const operation = await this.read(id);
+    const operation = await this.inspect(id);
     if (!operation) throw new AccessError(404, "not_found", "Operation not found");
     const { fingerprint: _fingerprint, state: _state, createdAt: _createdAt, completedAt: _completedAt, ...intent } = operation;
     return this.execute(intent);

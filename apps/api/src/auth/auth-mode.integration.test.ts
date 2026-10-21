@@ -106,7 +106,7 @@ describe.runIf(Boolean(uri))("Explicit anonymous deployment mode with native Mon
     for (const method of ["get", "post"] as const) {
       expect((await request(app)[method]("/api/v1/users/me")).status).toBe(401);
     }
-    for (const path of ["/admin/users", "/admin/users/search", "/admin/platform-admins", "/admin/operations/fixture", "/projects/fixture/members"]) {
+    for (const path of ["/admin/users", "/admin/users/search", "/admin/platform-admins", "/projects/fixture/members"]) {
       const response = await request(app).get(`/api/v1${path}`);
       expect(response.status).toBe(503);
       expect(response.body.code).toBe("authentication_disabled");

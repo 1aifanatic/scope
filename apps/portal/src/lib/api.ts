@@ -153,7 +153,7 @@ async function request<T>(path: string, init?: RequestInit, opts?: RequestOpts):
   if (res.status === 204) return undefined as T;
   if (res.status === 202) {
     const pending: { operationId?: string } = await res.json();
-    throw new ApiError(`Operation ${pending.operationId ?? "unknown"} is pending reconciliation; inspect it before retrying`, 202, "operation_pending");
+    throw new ApiError(`Operation ${pending.operationId ?? "unknown"} is pending operator repair; retry the identical change or contact an operator`, 202, "operation_pending");
   }
   return res.json();
 }

@@ -208,8 +208,8 @@ export const ProjectAdminPendingRetry: Story = {
     const dialog = within(await screen.findByRole("dialog"));
     await userEvent.selectOptions(dialog.getByLabelText("Project role"), "admin");
     await userEvent.click(dialog.getByRole("button", { name: "Save role" }));
-    await expect(await canvas.findByRole("alert")).toHaveTextContent("pending reconciliation");
-    await expect(canvas.getByText(/give a platform administrator operation ID/)).toBeVisible();
+    await expect(await canvas.findByRole("alert")).toHaveTextContent("pending operator repair");
+    await expect(canvas.getByText(/contact an operator with operation ID/)).toBeVisible();
     await expect(canvas.queryByRole("link", { name: "All project access" })).not.toBeInTheDocument();
     await expect(canvas.getByRole("button", { name: "Add people" })).toBeDisabled();
     await userEvent.click(canvas.getByRole("button", { name: "Retry change" }));
@@ -244,7 +244,7 @@ export const CurrentMembers: Story = {
     await expect(canvas.queryByRole("textbox", { name: "Find a member" })).not.toBeInTheDocument();
     await expect(canvas.queryByText("Charlie Example")).not.toBeInTheDocument();
     await expect(canvas.queryByRole("button", { name: /Create/ })).not.toBeInTheDocument();
-    await expect(canvas.getByText("Advanced: operation recovery").closest("details")).not.toHaveAttribute("open");
+    await expect(canvas.queryByText("Advanced: operation recovery")).not.toBeInTheDocument();
   },
 };
 
@@ -315,7 +315,7 @@ export const PendingChangeRetry: Story = {
   parameters: { msw: { handlers: handlers(undefined, { pending: true }) } },
   play: async ({ canvas }) => {
     await selectBob();
-    await expect(await canvas.findByRole("alert")).toHaveTextContent("pending reconciliation");
+    await expect(await canvas.findByRole("alert")).toHaveTextContent("pending operator repair");
     await expect(canvas.getByRole("button", { name: "Add people" })).toBeDisabled();
     await userEvent.click(canvas.getByRole("button", { name: "Retry change" }));
     await expect(await canvas.findByText("Bob Example")).toBeVisible();
@@ -389,7 +389,7 @@ export const SpecificProject: Story = {
     await userEvent.click(canvas.getByRole("link", { name: "All project access" }));
     await expect(await canvas.findByRole("combobox", { name: "Project" })).toBeVisible();
     await expect(canvas.queryByRole("region", { name: "Platform administrators" })).not.toBeInTheDocument();
-    await expect(canvas.getByText("Advanced: operation recovery")).toBeVisible();
+    await expect(canvas.queryByText("Advanced: operation recovery")).not.toBeInTheDocument();
     await expect(specificProjectAdminRequests).not.toHaveBeenCalled();
     const selector = await canvas.findByRole("combobox", { name: "Project" });
     await userEvent.selectOptions(selector, projectId);
@@ -403,22 +403,22 @@ export const SpecificProject: Story = {
   },
 };
 
-export const SpecificProjectPendingRecovery: Story = {
+export const SpecificProjectPendingOperatorGuidance: Story = {
   parameters: { msw: { handlers: handlers([member(alice, "admin"), member(bob, "reader", { pending: true, operationId: "pending-member-change" })]) } },
   render: () => <><Link to={`/access?projectId=${projectId}`}>Open project access</Link><AccessAtRoute /></>,
   play: async ({ canvas }) => {
     await userEvent.click(canvas.getByRole("link", { name: "Open project access" }));
-    await userEvent.click(await canvas.findByRole("link", { name: "Manage pending change in All project access" }));
-    await expect(canvas.getByLabelText("Operation ID")).toHaveValue("pending-member-change");
-    await expect(canvas.getByText("Advanced: operation recovery").closest("details")).toHaveAttribute("open");
+    await expect(await canvas.findByText("pending-member-change")).toBeVisible();
+    await expect(canvas.getByText(/Contact an operator/)).toBeVisible();
+    await expect(canvas.queryByLabelText("Operation ID")).not.toBeInTheDocument();
+    await expect(canvas.queryByRole("link", { name: "Manage pending change in All project access" })).not.toBeInTheDocument();
+    await userEvent.click(canvas.getByRole("link", { name: "All project access" }));
     await chooseProject();
-    await userEvent.click(canvas.getByRole("button", { name: "Change pending" }));
-    await expect(canvas.getByLabelText("Operation ID")).toHaveValue("pending-member-change");
-    await expect(canvas.getByText("Advanced: operation recovery").closest("details")).toHaveAttribute("open");
+    await expect(canvas.getByText("pending-member-change")).toBeVisible();
   },
 };
 
-export const SpecificProjectUnconfirmedChangeRecovery: Story = {
+export const SpecificProjectUnconfirmedChangeOperatorGuidance: Story = {
   parameters: { msw: { handlers: handlers([member(alice, "admin"), member(bob, "reader")], { pending: true }) } },
   render: () => <><Link to={`/access?projectId=${projectId}`}>Open project access</Link><AccessAtRoute /></>,
   play: async ({ canvas }) => {
@@ -427,18 +427,25 @@ export const SpecificProjectUnconfirmedChangeRecovery: Story = {
     const dialog = within(await screen.findByRole("dialog"));
     await userEvent.selectOptions(dialog.getByLabelText("Project role"), "contributor");
     await userEvent.click(dialog.getByRole("button", { name: "Save role" }));
-    await expect(await canvas.findByRole("alert")).toHaveTextContent("pending reconciliation");
+    await expect(await canvas.findByRole("alert")).toHaveTextContent("pending operator repair");
     await expect(canvas.queryByText("Advanced: operation recovery")).not.toBeInTheDocument();
     const notice = canvas.getByText(/Completion is not confirmed/);
-    const recoveryLink = within(notice).getByRole("link", { name: "All project access" });
-    const href = recoveryLink.getAttribute("href");
-    if (!href) throw new Error("Pending change must link to its global recovery context");
-    const operationId = new URL(href, "http://localhost").searchParams.get("operationId");
-    await expect(operationId).toBeTruthy();
-    await userEvent.click(recoveryLink);
-    await expect(canvas.getByLabelText("Operation ID")).toHaveValue(operationId);
-    await expect(canvas.getByText("Advanced: operation recovery").closest("details")).toHaveAttribute("open");
-    await expect(canvas.getByRole("button", { name: "Inspect operation" })).toBeEnabled();
+    await expect(notice).toHaveTextContent("contact an operator with operation ID");
+    await expect(notice.querySelector("code")?.textContent).toBeTruthy();
+    await expect(within(notice).queryByRole("link")).not.toBeInTheDocument();
+    await expect(canvas.queryByLabelText("Operation ID")).not.toBeInTheDocument();
+  },
+};
+
+export const PendingRemovalSurvivesNavigation: Story = {
+  parameters: { msw: { handlers: handlers([member(alice, "admin"), member(bob, "reader", {
+    pending: true, operationId: "pending-removal", revokedAt: "2026-01-02T00:00:00Z",
+  })]) } },
+  play: async ({ canvas }) => {
+    await chooseProject();
+    await expect(canvas.getByText("Bob Example")).toBeVisible();
+    await expect(canvas.getByText("pending-removal")).toBeVisible();
+    await expect(canvas.getByRole("button", { name: "Remove Bob Example" })).toBeDisabled();
   },
 };
 

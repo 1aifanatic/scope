@@ -7,7 +7,7 @@ import { Loader2, Plus, ShieldCheck } from "lucide-react";
 import type { AccessUserSummary } from "shared/rbac";
 import { api } from "@/lib/api";
 import { AccessUserDialog, Person, userName } from "@/components/AccessUserDialog";
-import { AccessOperationRecovery, AccessOperationStatus, useAccessOperation } from "@/components/AccessOperation";
+import { AccessOperationStatus, PendingAccessChange, useAccessOperation } from "@/components/AccessOperation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,12 +15,12 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-export function PlatformAdministrators({ initialOperationId = "" }: { initialOperationId?: string }) {
+export function PlatformAdministrators() {
   const [adminEditor, setAdminEditor] = useState(false);
   const [promotion, setPromotion] = useState<AccessUserSummary>();
   const [adminCursor, setAdminCursor] = useState<string>();
-  const operation = useAccessOperation(initialOperationId, () => { setAdminEditor(false); setPromotion(undefined); });
-  const { busy, pending, execute, setOperationId, setRecoveryOpen } = operation;
+  const operation = useAccessOperation(() => { setAdminEditor(false); setPromotion(undefined); });
+  const { busy, pending, execute } = operation;
   const locked = busy || Boolean(pending);
   const adminsQuery = useQuery({
     queryKey: ["access-platform-admins", adminCursor],
@@ -47,7 +47,7 @@ export function PlatformAdministrators({ initialOperationId = "" }: { initialOpe
             <Person user={user} fallback={user.id} />
             <div className="flex items-center gap-2">
               {user.disabled && <Badge variant="secondary">Account disabled</Badge>}
-              {user.pending && <Button variant="link" size="sm" onClick={() => { setOperationId(user.operationId ?? ""); setRecoveryOpen(true); }}>Change pending</Button>}
+              {user.pending && <PendingAccessChange operationId={user.operationId} />}
               <Badge variant="outline">{user.disabled || user.pending ? "Platform admin (inactive)" : "Platform admin"}</Badge>
             </div>
           </li>)}
@@ -60,7 +60,6 @@ export function PlatformAdministrators({ initialOperationId = "" }: { initialOpe
         </div>}
       </>}
     </section>
-    <AccessOperationRecovery operation={operation} />
     {adminEditor && <AccessUserDialog platformAdmin onClose={() => setAdminEditor(false)}
       onSave={user => { setAdminEditor(false); setPromotion(user); }} />}
     <AlertDialog open={Boolean(promotion)} onOpenChange={open => { if (!open) setPromotion(undefined); }}>

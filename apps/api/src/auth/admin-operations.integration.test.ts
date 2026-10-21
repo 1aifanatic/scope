@@ -6,7 +6,7 @@ import { MongoClient, type Db, type Document } from "mongodb";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { AdminOperations, type AdminIntent } from "./admin-operations.js";
 import { Authorization } from "./authorization.js";
-import { operatorAccess, OperatorAccessInput } from "./operator-access.js";
+import { operatorAccess, operatorOperation, OperatorAccessInput } from "./operator-access.js";
 import { mapLegacyMemberships, LegacyMembershipManifest } from "./legacy-memberships.js";
 import { UserStore } from "./user-store.js";
 import type { UserDocument } from "shared";
@@ -274,17 +274,21 @@ describe.runIf(Boolean(uri))("Durable administrative operation failure recovery"
       const users = bootstrapDb.collection<UserDocument>("users");
       await users.createIndex({ idp: 1, idpTenant: 1, idpSubject: 1 }, { unique: true, name: "uniq_identity" });
       const identity = { idp: "entra", idpTenant: "fixture-tenant", idpSubject: randomUUID() };
-      const store = new UserStore(users, {
-        bootstrapAdmins: new Set([`${identity.idp}:${identity.idpTenant}/${identity.idpSubject}`]),
-        bootstrapTenants: new Set([identity.idpTenant]),
-        operations: new AdminOperations(bootstrapDb),
-      });
+      const store = new UserStore(users);
       const [first, second] = await Promise.all([
         store.upsertOnLogin(identity, {}), store.upsertOnLogin(identity, {}),
       ]);
       expect(first._id).toBe(second._id);
-      expect(first.role).toBe("admin");
-      expect(second.role).toBe("admin");
+      expect(first.role).toBe("user");
+      expect(second.role).toBe("user");
+      const input = {
+        database: bootstrapDb.databaseName, confirmDatabase: bootstrapDb.databaseName,
+        idp: "entra", tenant: identity.idpTenant, subject: identity.idpSubject, userId: first._id,
+        revision: 0, role: "admin", disabled: "false", operator: "bootstrap-test", reason: "Explicit bootstrap",
+        operationId: randomUUID(), bootstrap: true, apply: true,
+      };
+      await Promise.all([operatorAccess(bootstrapDb, input), operatorAccess(bootstrapDb, input)]);
+      expect(await users.findOne({ _id: first._id })).toMatchObject({ role: "admin", revision: 1 });
       expect(await users.countDocuments()).toBe(1);
       expect(await bootstrapDb.collection("admin_operations").countDocuments({ state: "completed" })).toBe(1);
       expect(await bootstrapDb.collection("project_memberships").countDocuments()).toBe(0);
@@ -294,21 +298,22 @@ describe.runIf(Boolean(uri))("Durable administrative operation failure recovery"
   it("does not let bootstrap overwrite a concurrent targeted operator disable", async () => {
     const users = db.collection<UserDocument>("users");
     const identity = { idp: "entra", idpTenant: "fixture-tenant", idpSubject: randomUUID() };
-    const operations = new AdminOperations(db);
-    const execute = operations.execute.bind(operations);
-    const store = new UserStore(users, {
-      bootstrapAdmins: new Set([`${identity.idp}:${identity.idpTenant}/${identity.idpSubject}`]),
-      bootstrapTenants: new Set([identity.idpTenant]), operations,
-    });
-    vi.spyOn(operations, "execute").mockImplementationOnce(async change => {
+    const store = new UserStore(users);
+    const user = await store.upsertOnLogin(identity, {});
+    const execute = AdminOperations.prototype.execute;
+    vi.spyOn(AdminOperations.prototype, "execute").mockImplementationOnce(async function(this: AdminOperations, change) {
       await operatorAccess(db, {
         database, confirmDatabase: database, ...{ idp: "entra", tenant: identity.idpTenant, subject: identity.idpSubject },
         userId: change.targetId, revision: 0, role: "user", disabled: "true",
-        operator: "fixture-operator", reason: "Concurrent exact-identity disable", operationId: randomUUID(), bootstrapReviewed: true,
+        operator: "fixture-operator", reason: "Concurrent exact-identity disable", operationId: randomUUID(), apply: true,
       });
-      return execute(change);
+      return execute.call(this, change);
     });
-    await expect(store.upsertOnLogin(identity, {})).rejects.toMatchObject({ code: "revision_conflict" });
+    await expect(operatorAccess(db, {
+      database, confirmDatabase: database, idp: "entra", tenant: identity.idpTenant, subject: identity.idpSubject,
+      userId: user._id, revision: 0, role: "admin", disabled: "false", bootstrap: true, apply: true,
+      operator: "fixture-operator", reason: "Bootstrap race", operationId: randomUUID(),
+    })).rejects.toMatchObject({ code: "revision_conflict" });
     const disabled = await users.findOne(identity);
     expect(disabled).toMatchObject({ role: "user", disabledAt: expect.any(Date), revision: 1 });
     expect(await store.upsertOnLogin(identity, {})).toMatchObject({ role: "user", disabledAt: expect.any(Date) });
@@ -323,7 +328,7 @@ describe.runIf(Boolean(uri))("Durable administrative operation failure recovery"
     const input = OperatorAccessInput.parse({
       database, confirmDatabase: database, idp: "entra", tenant: "fixture-tenant", subject,
       userId, revision: 0, role: "admin", disabled: "false",
-      operator: "fixture-operator", reason: "Targeted fixture recovery", operationId: randomUUID(), bootstrapReviewed: true,
+      operator: "fixture-operator", reason: "Targeted fixture recovery", operationId: randomUUID(), apply: true,
     });
     await expect(operatorAccess(db, { ...input, subject: "different" })).rejects.toMatchObject({ code: "identity_mismatch" });
     await expect(operatorAccess(db, { ...input, confirmDatabase: "wrong" })).rejects.toMatchObject({ code: "database_mismatch" });
@@ -332,8 +337,80 @@ describe.runIf(Boolean(uri))("Durable administrative operation failure recovery"
     expect(await operatorAccess(db, input)).toMatchObject({ state: "completed" });
     expect(await operatorAccess(db, input)).toMatchObject({ state: "completed" });
     expect(await read("users", userId)).toMatchObject({ _id: userId, role: "admin", revision: 1, idpSubject: subject });
-    expect(await read("admin_operations", input.operationId)).toMatchObject({ backup: { role: "user" }, state: "completed" });
+    expect(await db.collection("admin_operations").findOne({ _id: input.operationId })).toMatchObject({ backup: { role: "user" }, state: "completed" });
     expect(await read("project_memberships", membership.targetId)).toMatchObject({ role: "reader", revision: 1 });
+  });
+
+  async function enrolledOperatorFixture() {
+    const identity = { idp: "entra", idpTenant: "operator-fixture", idpSubject: randomUUID() };
+    const store = new UserStore(db.collection<UserDocument>("users"));
+    const user = await store.upsertOnLogin(identity, {});
+    return {
+      database, confirmDatabase: database, idp: "entra", tenant: identity.idpTenant, subject: identity.idpSubject,
+      userId: user._id, revision: 0, role: "admin", disabled: "false",
+      operator: "bootstrap-acceptance", reason: "Reviewed bootstrap fixture", operationId: randomUUID(), bootstrap: true,
+    };
+  }
+
+  it("defaults bootstrap to read-only preview, applies once, and does not re-promote after later demotion", async () => {
+    const input = await enrolledOperatorFixture();
+    const before = await read("users", input.userId);
+    const count = await db.collection("admin_operations").countDocuments();
+    expect(await operatorAccess(db, input)).toMatchObject({ state: "dry-run", currentRole: "user", currentRevision: 0 });
+    expect(await read("users", input.userId)).toEqual(before);
+    expect(await db.collection("admin_operations").countDocuments()).toBe(count);
+    expect(await operatorAccess(db, { ...input, apply: true })).toMatchObject({ state: "completed", revision: 1 });
+    expect(await operatorAccess(db, { ...input, apply: true })).toMatchObject({ state: "completed", revision: 1 });
+    await operatorAccess(db, { ...input, bootstrap: false, role: "user", revision: 1, operationId: randomUUID(), apply: true });
+    expect(await operatorAccess(db, { ...input, apply: true })).toMatchObject({ state: "completed", revision: 1 });
+    expect(await read("users", input.userId)).toMatchObject({ role: "user", revision: 2 });
+  });
+
+  it("rejects absent identities, mismatched UUIDs, stale revisions and different-input operation IDs", async () => {
+    const input = await enrolledOperatorFixture();
+    await expect(operatorAccess(db, { ...input, userId: randomUUID(), apply: true })).rejects.toMatchObject({ code: "identity_mismatch" });
+    await expect(operatorAccess(db, { ...input, revision: 8, apply: true })).rejects.toMatchObject({ code: "revision_conflict" });
+    await operatorAccess(db, { ...input, apply: true });
+    await expect(operatorAccess(db, { ...input, reason: "Changed payload", apply: true })).rejects.toMatchObject({ code: "idempotency_conflict" });
+    await expect(operatorAccess(db, { ...input, revision: undefined, apply: true })).rejects.toThrow(/requires --revision/);
+    await expect(operatorAccess(db, { ...input, operationId: undefined, apply: true })).rejects.toThrow(/requires --revision/);
+  });
+
+  it("makes already-active admin bootstrap a no-op but requires explicit account re-enablement", async () => {
+    const input = await enrolledOperatorFixture();
+    await operatorAccess(db, { ...input, apply: true });
+    const before = await read("users", input.userId);
+    expect(await operatorAccess(db, { ...input, revision: 1, operationId: randomUUID(), apply: true })).toMatchObject({ state: "unchanged" });
+    expect(await read("users", input.userId)).toEqual(before);
+    await operatorAccess(db, { ...input, bootstrap: false, disabled: "true", revision: 1, operationId: randomUUID(), apply: true });
+    await expect(operatorAccess(db, { ...input, revision: 2, operationId: randomUUID(), apply: true })).rejects.toMatchObject({ code: "user_disabled" });
+    await operatorAccess(db, { ...input, bootstrap: false, revision: 2, operationId: randomUUID(), apply: true });
+    expect(await read("users", input.userId)).toMatchObject({ role: "admin", revision: 3 });
+    expect(await read("users", input.userId)).not.toHaveProperty("disabledAt");
+  });
+
+  it("allows only operator repair to inspect and finish the original incomplete intent, without exposing backups", async () => {
+    const input = await enrolledOperatorFixture();
+    const original = db.collection.bind(db);
+    const operations = original("admin_operations");
+    vi.spyOn(db, "collection").mockImplementation(name => name === "admin_operations" ? operations : original(name));
+    const update = operations.updateOne.bind(operations);
+    vi.spyOn(operations, "updateOne").mockImplementationOnce(async () => { throw new Error("Injected lost completion"); });
+    expect(await operatorAccess(db, { ...input, apply: true })).toMatchObject({ state: "pending" });
+    const pending = await read("admin_operations", input.operationId);
+    const command = { database, confirmDatabase: database, operator: "repair-operator", reason: "Repair fixture", operationId: input.operationId };
+    expect(await operatorOperation(db, command)).toEqual({
+      state: "inspection", operationId: input.operationId, operationState: "prepared",
+      collection: "users", targetId: input.userId, expectedRevision: 0,
+    });
+    expect(await read("admin_operations", input.operationId)).toEqual(pending);
+    await expect(operatorAccess(db, { ...input, operationId: randomUUID(), revision: 1, apply: true })).rejects.toMatchObject({ code: "operation_pending" });
+    vi.mocked(operations.updateOne).mockImplementation(update);
+    expect(await operatorOperation(db, { ...command, apply: true })).toMatchObject({ state: "completed", revision: 1 });
+    expect(await read("admin_operations", input.operationId)).toMatchObject({ actor: "operator:bootstrap-acceptance", fingerprint: pending?.fingerprint, state: "completed" });
+    expect(await read("users", input.userId)).toMatchObject({ role: "admin", revision: 1 });
+    await expect(operatorOperation(db, { ...command, confirmDatabase: "wrong", apply: true })).rejects.toMatchObject({ code: "database_mismatch" });
+    await expect(operatorOperation(db, { ...command, operationId: "missing" })).rejects.toMatchObject({ code: "not_found" });
   });
 
   it("dry-runs and reruns only explicitly reviewed legacy mappings without implicit defaults", async () => {

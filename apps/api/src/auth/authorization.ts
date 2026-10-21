@@ -60,7 +60,7 @@ export class Authorization {
       console.error("Invalid platform role", user._id);
       throw new AccessError(503, "authority_invalid", "Authorization authority is invalid");
     }
-    if (!await this.operations.isComplete(user.lastOperationId, this.readOptions(deadline).timeoutMS)) throw new AccessError(503, "operation_pending", "Access change is pending reconciliation");
+    if (!await this.operations.isComplete(user.lastOperationId, this.readOptions(deadline).timeoutMS)) throw new AccessError(503, "operation_pending", "Access change is pending operator repair");
     return user;
   }
 

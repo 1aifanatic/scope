@@ -10,15 +10,12 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Settings } from "lucide-react";
 import { toast } from "sonner";
-import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { PlatformAdministrators } from "@/components/PlatformAdministrators";
 
 export function Admin() {
   const queryClient = useQueryClient();
   const { authEnabled, isReady, user } = useAuth();
-  const [params] = useSearchParams();
-  const initialOperationId = params.get("operationId") ?? "";
   const canManageIdentities = authEnabled && isReady && Boolean(user?.capabilities?.platformAdmin);
 
   const { data: flags = [], isLoading } = useQuery({
@@ -46,7 +43,7 @@ export function Admin() {
         <h1 className="text-2xl font-bold">Admin</h1>
       </div>
 
-      {canManageIdentities && <PlatformAdministrators key={initialOperationId} initialOperationId={initialOperationId} />}
+      {canManageIdentities && <PlatformAdministrators />}
 
       {/* Feature Flags card */}
       <Card>

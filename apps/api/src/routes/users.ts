@@ -69,7 +69,7 @@ export function registerUsersRoutes(ctx: RouteContext): void {
     tags: ["Users"],
     summary: "Enroll the authenticated user",
     security: [{ bearerAuth: [] }],
-    description: "JIT-enroll the authenticated user, refresh their profile and lastLoginAt, apply bootstrap-admin rules, and warm the access cache. Use this only after an explicit IdP login; do not prefetch, poll, or automatically retry transient failures.",
+    description: "JIT-enroll the authenticated user with the default user role, refresh their profile and lastLoginAt, and warm the access cache. Login never grants administrative privileges. Use this only after an explicit IdP login; do not prefetch, poll, or automatically retry transient failures.",
     body: z.object({}).strict().optional(),
     response: UserMeResponseSchema,
     successStatus: 200,

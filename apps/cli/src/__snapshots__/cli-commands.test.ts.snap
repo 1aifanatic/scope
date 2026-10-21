@@ -36,11 +36,6 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--url",
         ],
       },
-      "operation": {
-        "options": [
-          "--url",
-        ],
-      },
       "platform-admins": {
         "options": [
           "--cursor",
@@ -57,11 +52,6 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         "options": [
           "--operation-id",
           "--revision",
-          "--url",
-        ],
-      },
-      "reconcile": {
-        "options": [
           "--url",
         ],
       },

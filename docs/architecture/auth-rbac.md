@@ -197,9 +197,9 @@ for proxy failure and TLS requirements.
 The unchanged IdP bearer is verified **before** identity-cache access on every
 authenticated request. `(idp, idpTenant, idpSubject)` identifies an enrolled user;
 `users._id` remains its stable Scope UUID. Any tenant accepted by the configured
-trusted verifier may enroll; bootstrap tenant restrictions limit promotion only.
-Only `POST /api/v1/users/me` enrolls, refreshes profiles/login timestamps or applies
-an exact-identity bootstrap promotion. GET remains read-only and no-store.
+trusted verifier may enroll. Only `POST /api/v1/users/me` enrolls or refreshes
+profiles/login timestamps; new users always receive `role: "user"`. Login never
+changes role or disabled state. GET remains read-only and no-store.
 Disabled identities cannot reenroll to undo a disable.
 
 Redis caches identity resolution, **not authorization grants**. After resolution,
@@ -309,8 +309,10 @@ These faults are not claims of an actual backend outage.
 an access mutation. Target revision/CAS, exact preconditions and retained
 `appliedOperationIds` make uncertain writes and A-then-B reconciliation
 distinguishable. Targets carry their last operation marker; incomplete operations
-do not authorize access. `202`/pending is not completion: inspect and reconcile the
-same operation ID. Reusing an ID with different input returns conflict.
+do not authorize access. `202`/pending is not completion: retry identical input
+with the same ID or give that ID to an operator for inspection/repair.
+Reusing an ID with different input returns conflict. The durable reconciliation
+engine remains, but there are no Portal/API/Scope CLI recovery controls or routes.
 There is no multi-document transaction or dedicated atomic audit-event collection.
 Migration 031 verifies membership uniqueness and rejects a TTL index on retained
 administrative evidence. Rollback retains memberships/evidence rather than
@@ -344,11 +346,12 @@ and confirmed **Remove** actions. **Add people** opens a name/email/Scope-ID
 searchable user picker and a fixed-role selector; existing members and disabled
 users cannot be added. Project admins use the project-authorized search endpoint,
 while platform admins retain their global administration directory endpoint.
-Revoked memberships are hidden from the current roster but retain their revisions
+Completed revoked memberships are hidden from the current roster but retain their revisions
 for safe regrant. Disabled accounts and incomplete access changes are identified
 on member rows. Ordinary-user disable remains a separate, platform-admin-only confirmed account-wide
 action. Uncertain changes lock further edits and retain the exact operation key
-for retry; inspection/reconciliation lives under collapsed advanced controls.
+for retry; pending rows display their operation ID and operator guidance. A
+revoked-but-pending row remains visible so its repair ID survives navigation.
 Project creation, settings and deletion remain on **Projects**. Restoring a
 deleted project is available in Access administration, where platform admins can
 still discover it without content membership.
@@ -360,15 +363,12 @@ project access** to platform admins only to return to the global view. Missing/i
 never fall back to another project; navigation between deep links resets the
 member editor and confirmation state.
 Neither global nor project-specific `/access` views render or request the
-platform-admin roster. Project-specific views also omit advanced recovery
-controls. Pending membership changes retain their retry behavior;
-their recovery links carry the exact operation ID to
-`/access?operationId=...`, pre-filling and opening global operation recovery.
-This navigation never automatically inspects or reconciles an operation.
-Project admins instead retain same-key retry and an operation ID to give a
-platform administrator for inspection/reconciliation. They cannot inspect global
-operation evidence or use account-wide actions. A self-removal/demotion that
-loses authority before completion requires platform-admin recovery.
+platform-admin roster. Both views omit operation recovery controls. Pending
+membership changes retain same-key retry and an operation ID to give an
+operator. Legacy `operationId` query parameters are ignored; there are no recovery
+deep links. Project admins cannot inspect global operation evidence or use
+account-wide actions. A self-removal/demotion that loses authority before
+completion requires operator inspection/repair.
 Capability loss unmounts the roster/editor; account changes reset editor and
 confirmation state. Selected-project changes never silently retarget a fixed
 membership deep link.
@@ -377,11 +377,9 @@ name and email/sign-in alias rather than repeated UUIDs; the Scope UUID remains
 available in a hover tooltip and as a search key.
 
 **Platform administrators** appears at the top of `/admin`, immediately below
-the **Admin** heading and before **Feature Flags**. Its advanced operation
-recovery controls follow the administrator list. `/admin?operationId=...`
-pre-fills and opens those controls without automatically inspecting or
-reconciling anything. Existing `/access?operationId=...` recovery links remain
-supported, including for older promotion operations.
+the **Admin** heading and before **Feature Flags**. It has no operation
+inspection/recovery controls. Legacy `/admin?operationId=...` and
+`/access?operationId=...` links do not trigger inspection, repair or other writes.
 This section is platform-wide and works without a selected project, including
 when there are no projects. It pages through users whose stored role is `admin`,
 with explicit disabled-account and pending-operation labels. Neither disabled
@@ -437,13 +435,13 @@ required by this feature.
 Only an existing platform admin can call it. The target must already exist;
 the final audited CAS requires `role: "user"` and no `disabledAt`, preventing
 a concurrent disable from being overwritten. A different pending target
-security operation must be reconciled first. No arbitrary role, disable flag
+security operation must be completed by identical retry or operator repair first. No arbitrary role, disable flag
 or identity is accepted. Stale revisions, already-admin/disabled targets and
 conflicting idempotency inputs return `409`; missing users return `404`.
 An identical completed replay returns its original result without undoing
 a later operator demotion. Completion returns `200`; `202` means pending,
 not an effective grant. The Portal retains the same operation ID for retry
-and uses the existing inspection/reconciliation controls. Roster, directory
+or displays the ID for operator repair. Roster, directory
 and membership caches refresh after changes; the promoted user's capabilities
 are read canonically on their existing read-only refresh, without reenrollment.
 Auth-off mode keeps both endpoints unavailable.
@@ -468,13 +466,13 @@ revocation.
 New project creation stores the creator-membership operation ID in the durable
 project intent before writing either target. It completes the deterministic
 membership sub-operation before completing the project operation. An interrupted
-step returns the **parent** operation as pending; reconciling that ID resumes both
+step returns the **parent** operation as pending; operator repair of that ID resumes both
 steps. An incomplete project marker withholds content authorization even if the
 membership target has been written. Identical retries never recreate a revoked
 membership or overwrite a newer role. This is recoverable sequencing, not a
 multi-document transaction.
 The creation dialog retains its idempotency key after a pending/failed response;
-retry identical input or inspect/reconcile the displayed operation ID before
+retry identical input or ask an operator to inspect/repair the displayed operation ID before
 starting a different creation.
 
 Equivalent CLI commands use the existing raw IdP `SCOPE_TOKEN` environment variable:
@@ -493,42 +491,85 @@ pnpm cli access search-members "$PROJECT_ID" "Alice" --limit 20 --url http://loc
 pnpm cli access members "$PROJECT_ID" --url http://localhost:3101
 pnpm cli access set-member "$PROJECT_ID" "$USER_ID" --role reader \
   --revision 0 --operation-id "$OPERATION_ID" --url http://localhost:3101
-pnpm cli access operation "$OPERATION_ID" --url http://localhost:3101
-pnpm cli access reconcile "$OPERATION_ID" --url http://localhost:3101
 ```
 
 `find-member`, `search-members`, `members`, `set-member` and `revoke-member` use the same scoped
 project-admin or global platform-admin API policy and unchanged raw bearer.
-`find-user`, `search-users`, `projects`, platform administration and global
-operation inspection/reconciliation remain platform-only.
+`find-user`, `search-users`, `projects` and platform administration remain
+platform-only. Operation inspection and repair are operator-only, outside
+the Scope CLI and REST API.
 
 Retain the displayed operation ID for an uncertain outcome and fetch current
 revisions before a different change. Pending access-command operations exit 2;
-project mutation commands fail with an explicit pending/inspect error. There is no
+project mutation commands fail with explicit pending/operator-repair guidance. There is no
 new CLI interactive login, PAT, service token or token exchange.
 
-Initial administrator seeding, demotion, administrator disable/re-enable and
+Initial administrator bootstrap, demotion, administrator disable/re-enable and
 lockout recovery remain **operator-managed**, using an existing exact identity
 and Scope UUID. Existing platform admins can add admins through the Portal/API/CLI
 workflow above; an operator is still needed when no active admin remains.
-After building the API, run with
-`AUTH_OPERATOR_MONGO_URI` supplied through secure operator configuration:
+First genuinely sign in to enroll the intended account. Review its existing
+Scope UUID and exact `(entra, tenant, subject)` identity using trusted operator
+database access; email/display name never selects a target. After
+`pnpm --filter shared build && pnpm --filter api build`, run with
+`AUTH_OPERATOR_MONGO_URI` supplied through secure operator configuration.
+The script does not create identities or enroll accounts. Preview first:
 
 ```bash
-node apps/api/dist/auth/operator-access.js \
+node apps/api/dist/auth/operator-access.js bootstrap-admin \
   --database "$DATABASE" --confirm-database "$DATABASE" \
   --idp entra --tenant "$TENANT_ID" --subject "$SUBJECT_ID" \
-  --user-id "$USER_ID" --revision "$REVISION" --role admin --disabled false \
-  --operator "$OPERATOR" --reason "$REASON" --operation-id "$OPERATION_ID" \
-  --bootstrap-reviewed
+  --user-id "$USER_ID" --operator "$OPERATOR" --reason "$REASON"
 ```
 
-Review configured bootstrap identities before operator demotion/recovery; leaving
-an exact identity configured for bootstrap can intentionally promote it again at
-its next enrollment. Recovery records intent/completion and a prior-target backup,
-preserves memberships/data and grants no implicit content access. Keep auth and TLS
-verification on; when authority storage is unavailable, repair it rather than
-using an auth-off flag.
+Use the observed revision from the preview, choose a stable operation ID, and
+explicitly apply the same reviewed target:
+
+```bash
+node apps/api/dist/auth/operator-access.js bootstrap-admin \
+  --database "$DATABASE" --confirm-database "$DATABASE" \
+  --idp entra --tenant "$TENANT_ID" --subject "$SUBJECT_ID" \
+  --user-id "$USER_ID" --revision "$REVISION" \
+  --operator "$OPERATOR" --reason "$REASON" \
+  --operation-id "$OPERATION_ID" --apply
+```
+
+`bootstrap-admin` only promotes an existing enabled ordinary user; an already
+active admin is a no-op. It never enables a disabled account. To repair a
+lockout, use the same identity/database/operator flags with `set-user-access`
+and explicit `--role admin|user --disabled true|false`. Preview first, then add
+the observed `--revision`, a new `--operation-id` and `--apply`. It preserves
+memberships/data and grants no implicit project content access. Completed
+operation replay returns its original result, never undoing a later demotion.
+Repeated sign-in never restores a demoted admin or enables a disabled user.
+
+For an uncertain operation, use its **original** operation ID rather than
+inventing a replacement grant:
+
+```bash
+node apps/api/dist/auth/operator-access.js inspect-operation \
+  --database "$DATABASE" --confirm-database "$DATABASE" \
+  --operator "$OPERATOR" --reason "$REASON" --operation-id "$OPERATION_ID"
+node apps/api/dist/auth/operator-access.js repair-operation \
+  --database "$DATABASE" --confirm-database "$DATABASE" \
+  --operator "$OPERATOR" --reason "$REASON" --operation-id "$OPERATION_ID" --apply
+```
+
+Inspection omits target backups and identity credentials. Repair without
+`--apply` only inspects; apply resumes the original durable intent, retains its
+actor/fingerprint/CAS/history and emits a structured operator/reason repair log
+to stderr. A completed repair is repeat-safe and does not overwrite newer
+changes. User mutations require revision and operation ID when applying;
+every command confirms the database and operator/reason. Exit `0` means
+preview/inspection/no-op/completion, `2` means pending (not an effective grant),
+and `1` means failure.
+
+Keep authenticated operator database access and TLS verification on outside
+local emulation. When authority storage is unavailable, restore it rather than
+using an auth-off flag. `AUTH_BOOTSTRAP_ADMINS` and `AUTH_BOOTSTRAP_TENANTS`
+are retired: remove nonempty values before upgrading an authenticated API or
+startup fails. Compose no longer automatically seeds Alice; genuine enrollment
+followed by this operator command is required in a fresh local database.
 
 Legacy projects receive **no automatic grants**. A reviewed JSON manifest includes
 `database`, `reviewedBy`, `reviewedAt`, `reason`, and explicit `entries` containing
@@ -634,7 +675,16 @@ they do not establish worker execution or production Cosmos behavior.
 
 Native Mongo tests exercise intent failures, uncertain writes, newer-target
 reconciliation, uniqueness/regrant, reviewed mapping, exact operator recovery and
-bootstrap races. The affected regression selection passed 2,689 tests across 216
+bootstrap races. Operator bootstrap coverage also checks dry-run/no-op behavior,
+exact target/revision refusal, demotion surviving later login and old replay,
+explicit disabled-account recovery, and operator-only inspection/repair with
+original evidence preserved. The rebuilt local API/Portal were exercised with
+genuine emulator access tokens and a fresh isolated database/cache namespace;
+the original application's authority records and unrelated container identities
+were unchanged after restoration. Genuine browser/MSAL sign-in reached Admin
+without recovery controls, including with a legacy operation query parameter.
+This is native Mongo/local-emulator acceptance, not production Cosmos acceptance.
+The earlier affected regression selection passed 2,689 tests across 216
 files before the creator-policy change, including access Storybook interactions.
 The creator-policy update also exercises durable creator-grant crash/acknowledgement
 recovery, concurrent creation and replay after revocation, plus administrative
@@ -699,8 +749,9 @@ no-token/auth-not-configured anonymous rollout and public endpoints remain suppo
 An authenticated identity that is missing or disabled in Scope is **not** anonymous.
 
 The implemented boundary is narrow: only **`POST /api/v1/users/me`**
-may JIT-create a user, refresh their profile/`lastLoginAt`, or apply bootstrap-admin
-Every GET `/users/me` and other -authenticated routes verify the IdP token,
+may JIT-create an ordinary user or refresh their profile/`lastLoginAt`.
+It never changes role or disabled state.
+Every GET `/users/me` and other authenticated routes verify the IdP token,
 then read an existing active principal through one Redis-backed resolver. Clients
 continue to send the **unchanged IdP access token on every call**; there is no
 `/auth/login`, token exchange, Scope session JWT, or new signing-key configuration.
@@ -881,9 +932,7 @@ AUTH_API_CLIENT_ID=<api-app-id>    # expected audience (pinned)
 AUTH_CLI_CLIENT_ID=<cli-client-id>        # public CLI client id
 AUTH_PORTAL_CLIENT_ID=<portal-client-id>  # public Portal client id
 AUTH_SCOPES=api://<api-app-id>/access_as_user
-# Bootstrap admins are matched on the *verified subject*, NOT a mutable email — see §2 / Q C:
-AUTH_BOOTSTRAP_ADMINS=entra:<tid>/<oid>,entra:<tid>/<oid>   # (idp:tenant/subject) tuples
-AUTH_BOOTSTRAP_TENANTS=<tid-1>,<tid-2>   # tenant allowlist that bootstrap may apply within
+# Bootstrap an already enrolled exact identity with the operator utility, not env allowlists.
 AUTH_USER_CACHE_TTL_SECONDS=300         # positive safe integer; default only when unset
 # Tenant filtering, if needed, is enforced at the App Registration — not here.
 ```
@@ -907,8 +956,9 @@ Authorization lives entirely in **our** database, not in the IdP, so RBAC is por
 across IdPs and survives IdP migration. The IdP only proves *identity*; Scope owns
 *authorization*.
 
-**Current model:** the stored user's singular `role` (default `user`, eligible
-bootstrap promotion to `admin`) is returned as metadata, not enforced as route RBAC.
+**Current model:** the stored user's singular `role` defaults to `user`; first-admin
+promotion uses the operator utility, while an active admin can promote through
+the administrative API. Login never grants privileges.
 The permission types, overrides, and role bundles below are **deferred design**,
 not the current request/response contract.
 
@@ -1015,7 +1065,7 @@ or write `lastLoginAt`.
 
 `lastLoginAt` means **the explicit login upsert time**, not proof of an interactive
 IdP prompt or callback: callers can invoke/retry the endpoint themselves. The existing
-ordering is preserved: **the upsert (including profile/timestamp/promotion writes)
+ordering is preserved: **the upsert (including profile/timestamp writes)
 occurs before the resolver checks `disabledAt`**. A disabled user's login request can
 therefore update those fields before returning `403`; it never admits/caches that user.
 
@@ -1023,18 +1073,17 @@ therefore update those fields before returning `403`; it never admits/caches tha
 `email`/`preferred_username` is mutable and not guaranteed verified, and in multi-tenant
 mode any tenant can sign users in):
 
-- On explicit login, a user is bootstrapped to `admin` **only if** their verified
-  `(idp, idpTenant, idpSubject)`
-  appears in `AUTH_BOOTSTRAP_ADMINS` **and** their `idpTenant` is in
-  `AUTH_BOOTSTRAP_TENANTS`. Email is **never** the match key.
-- Bootstrap does not require `email` or `email_verified`; ordinary Entra workforce
-  and local-emulator access tokens can bootstrap without those claims.
+- Explicit login always inserts an ordinary user. An operator promotes an
+  already enrolled `(idp, idpTenant, idpSubject)` plus exact Scope UUID using the
+  database-confirmed, revision-checked utility. Email is **never** the match key.
+- Bootstrap does not require `email` or `email_verified`; genuine Entra workforce
+  and local-emulator enrollment both work without those claims.
 - `email_verified` (where the IdP asserts it) is required before any email is even stored
   as advisory; an unverified email never influences a grant.
-- **Bootstrap promotes but does not silently demote.** Presence in the list grants admin;
-  *removal* from the list does **not** auto-demote a sitting admin (that requires an
-  explicit administrative change), so a bad ConfigMap edit can't quietly strip admins.
-  Admin mutation endpoints and the durable security audit (§F) remain deferred.
+- **Login never promotes or demotes.** Removing retired configuration does not
+  change existing roles. Demotion/disable/re-enable require an explicit operator
+  change; login cannot undo it. Durable intent/completion records retain the
+  operator, reason and prior-target backup.
 
 Index: database-enforced unique compound `(idp, idpTenant, idpSubject)`, named
 `uniq_identity`. Both backends have a non-unique `email` index for advisory
@@ -1075,7 +1124,7 @@ shared resolver. `id` is the **Scope UUID**, never Entra `oid`.
 
 | Request | Behavior |
 | --- | --- |
-| `POST /api/v1/users/me` | Explicit enrollment/profile/timestamp/bootstrap writes, then access validation and cache warming. Returns `200` with the current-user representation. |
+| `POST /api/v1/users/me` | Explicit ordinary-user enrollment/profile/timestamp writes, then access validation and cache warming. Never changes role/disabled state. Returns `200` with the current-user representation. |
 | `GET /api/v1/users/me` | Read-only existing-user resolution. |
 | Other values, repeated `login`, arrays, objects, or an empty value | `400`; no enrollment. |
 | `HEAD /api/v1/users/me?login=true` | Read-only resolution; Express dispatch to the GET handler must not cause JIT. |
@@ -1689,9 +1738,9 @@ verified separately when those deferred credentials are introduced.
 
 3. ✅ **Explicit-login API authn + access cache** — Verify IdP JWT before cache,
    register `/users/me` before existing-user middleware, and share
-   `UserAccessResolver`. Only POST `/users/me` enrolls/refreshes/bootstraps; every
-   GET is read-only. Promotion uses exact identity + tenant allowlists and remains
-   promote-only; email storage still requires verification. Normal requests use
+   `UserAccessResolver`. Only POST `/users/me` enrolls/refreshes; every
+   GET is read-only. Bootstrap uses the explicit operator utility with an exact
+   existing identity/UUID; email storage still requires verification. Normal requests use
    fixed-TTL Redis, then read-only indexed Mongo fallback. Missing/disabled users
    receive distinct `403`s; `system` receives `401`.
    Preserve anonymous/public rollout. **Deferred**: permissions, service/internal-JWT
@@ -1927,7 +1976,7 @@ Auth & RBAC rollout
 │   │   Current slice: explicit enrollment + active-user resolution; no route RBAC.
 │   ├── API authn middleware (verify token → req.user)       [3]
 │   │     • verify every configured non-public bearer; anonymous rollout retained
-│   │     • POST /users/me ONLY: JIT/profile/lastLoginAt/bootstrap
+│   │     • POST /users/me ONLY: ordinary-user JIT/profile/lastLoginAt
 │   │     • ordinary requests: verify → Redis → indexed Mongo fallback (no writes)
 │   ├── GET /users/me: Scope UUID + singular role; no permission expansion [6, partial]
 │   ├── CLI: apiFetch() delivered; interactive login/SecretStore deferred [7, 8]
@@ -2011,7 +2060,7 @@ It does not replace the Portal callback/order checks or live IdP/JWKS outage tes
 | Scenario | Expected result |
 | --- | --- |
 | Fresh Portal callback | First Scope API call is `POST /api/v1/users/me`; feature flags and all other eager queries wait for success. |
-| First enrollment | Scope UUID/default `user` role; verified profile handling; exact identity + tenant bootstrap independent of email verification; explicit `lastLoginAt` write; active cache warmed. |
+| First enrollment | Scope UUID/default `user` role with no automatic admin; verified profile handling; explicit `lastLoginAt` write; active cache warmed. |
 | Login on active cache hit | Still bypasses the read cache and upserts, returning/warming the latest stored role. |
 | Ordinary/plain `/me` hit | Verify token first; no Mongo operation, profile enrichment, bootstrap promotion, or `lastLoginAt` write; TTL not extended. |
 | Miss/expiry | Exact identity Mongo read, validate/warm; missing user is `403 user_not_enrolled`, never JIT. |
@@ -2037,12 +2086,12 @@ It does not replace the Portal callback/order checks or live IdP/JWKS outage tes
   roles/permissions are managed in Scope. Tenant filtering (if any) is set on the
   registration.
 - Env: `AUTH_PROVIDER=entra`, `AUTH_AUTHORITY`, `AUTH_API_CLIENT_ID`, `AUTH_SCOPES`,
-  `AUTH_BOOTSTRAP_ADMINS=entra:<tid>/<oid>`, `AUTH_BOOTSTRAP_TENANTS=<tid>`,
   `AUTH_USER_CACHE_TTL_SECONDS=300`. Only the **deferred** service-auth scenarios need
   `INTERNAL_API_KEY_REPORTGEN` or internal signing material. No `AUTH_ENABLED`
   synthetic-principal bypass. Clients carry their own IdP configuration (no `/auth/config`).
-- Two test identities: `admin@…` (its `(idp,tenant,subject)` in the bootstrap list) and
-  `user@…` (not).
+- Two genuine test identities: enroll both as ordinary users, then explicitly
+  promote the intended admin through the operator utility using its exact
+  identity/Scope UUID. Leave the second user unprivileged.
 
 ### Deferred RBAC/CLI/internal-auth scenarios
 
@@ -2164,7 +2213,7 @@ credential or cache consistency contract.
 | IdP abstraction boundary | Verify-only vs full OAuth orchestration in API | **Verify-only `AuthProvider`** | API only validates bearer tokens; clients own the interactive flow. Simplest, most portable. |
 | Client config delivery | Hardcode per build vs API-served | **Hardcoded in CLI + Portal** | One IdP for now; a config endpoint is unauthenticated attack surface and an indirection we don't need yet. Revisit if/when multiple IdP targets exist. |
 | Ownership leak on foreign resource | `403` vs `404` | **`404`** | Avoids leaking existence of other users' runs. |
-| New-user default role | `user` vs `admin` | **`user`** (admins via bootstrap/admin API) | Least privilege. |
+| New-user default role | `user` vs `admin` | **`user`** (admins via operator bootstrap/admin API, never login) | Least privilege. |
 | `ownerId` identity | IdP subject (`oid`/`sub`) vs Scope-owned `users._id` | **Scope User ID (`users._id`)** | Survives IdP migration; keeps run docs IdP-agnostic; `req.user.id` is this id. |
 | Ownership & visibility model | Per-user silos vs owner + shareable | **Two visibility levels: `private` (owner-only) and `shared` (globally discoverable + usable, read-only unless owner)**; `ownerId` derived from `req.user.id` on create (**never** from the request body); deep links grant read-only access without ownership | Matches "find/edit what you own; read what's shared with you"; create-time owner derivation removes a spoofing vector. |
 | Future sharing/groups | Generalize `ownerId` now vs reserve fields + single chokepoint | **`ownerId` + `visibility` in v1; reserve `ownerType`/`groupId`/`sharedWith`; scope via one `readScope`/`writeScope` resolver** | Additive later (groups, per-user shares) with no query rewrites or data re-modelling. |
@@ -2172,8 +2221,8 @@ credential or cache consistency contract.
 | Service auth | mTLS, Entra client-credentials, shared key | **Per-service identities** (Question E): each service gets its own credential — `INTERNAL_API_KEY_<NAME>` or a per-service signed JWT — and a **narrow, least-privilege** permission set (**never** blanket `scope/*:admin`). Entra client-credentials **not required**. | No single global key whose leak grants everything; per-service perms + per-service rotation; works in any self-hosted/open-source env. |
 | Downstream user identity | Forward IdP token vs Scope-minted internal token | **Scope-minted internal JWT (`iss=scope-api`, asymmetric, public-key verified); IdP token never leaves the API.** To keep authorization from going stale, the token carries **`sub` only and permissions are re-resolved downstream** (preferred), or — if perms are embedded — `exp ≤ 5min` **and** a `jti` revocation list, **both** required. `disabledAt`/revocation is re-checked on the internal-JWT path, not just the IdP path. | Downstream stays IdP-agnostic; revocation (disable user, demote admin, drop a permission) takes effect within minutes, not at token `exp`. |
 | Internal-JWT staleness | Long-lived perms-in-token vs re-resolve / tight exp + jti | **Re-resolve from `sub` downstream (preferred); else `exp ≤ 5min` + `jti` denylist** | Embedding permissions makes revocation impossible until `exp`; a 5-minute ceiling plus a denylist makes "short exp" concrete and enforceable. |
-| Entra tenancy | Single-tenant vs multi-tenant | **Multi-tenant** (Question D): accept configured tenants, no `tid` pinning in business logic; tenant filtering at the App Registration + `AUTH_BOOTSTRAP_TENANTS` allowlist for promotion | App-registration-level control; code stays tenant-agnostic. Because `oid` is unique only **within** a tenant (and guests carry their home-tenant `oid`), the unique identity index is **`(idp, idpTenant, idpSubject)`** — `tid` is part of the key. |
-| Bootstrap-admin matching | Match on email vs identity tuple | **Match on `(idp, idpTenant, idpSubject)`, restrict to `AUTH_BOOTSTRAP_TENANTS`; promotion is independent of email verification and promote-only (removal from the list does not auto-demote)** | Entra `email`/`preferred_username` is mutable and not guaranteed verified; exact identity + tenant matching prevents promotion by email collision without depending on a nonstandard workforce email-verification claim. Promote-only behavior prevents silent demotion by a ConfigMap edit. |
+| Entra tenancy | Single-tenant vs multi-tenant | **Multi-tenant** (Question D): no `tid` pinning in business logic; sign-in tenant filtering stays at the App Registration | The unique identity index is **`(idp, idpTenant, idpSubject)`**; operator promotion confirms the exact enrolled tenant/subject/UUID. |
+| Bootstrap-admin matching | Login allowlist vs explicit operator command | **Explicit operator bootstrap of an existing exact identity/Scope UUID; default dry run and revision-checked apply** | No mutable email matching, first-user-wins, automatic re-promotion or environment seeding. Login preserves role/disabled state. |
 | Security audit | None vs log-only vs Mongo + metrics | **Append-only `security_audit` in MongoDB + Prometheus counters** (Question F) for login/logout/onboarding, key-regeneration, **token minting**, **service-key cross-user reads**, and **permission overrides** | Durable forensic record + alerting; single `recordSecurityEvent()` helper; a failed audit write **fails the operation closed**; retention TTL is an explicit policy choice; no secrets in audit. |
 | Secret storage | Env-only vs Key Vault + ESO | **Key Vault → External Secrets** for per-service `INTERNAL_API_KEY_<NAME>`/client secret; JWKS fetched (not stored); **CLI tokens via a Scope-owned `SecretStore` backed by `cross-keychain`** (`0600` fallback) | Matches existing `mongo-secrets`/`redis-secrets` pattern; public keys are not secrets; the `SecretStore` wrapper replaces unmaintained `keytar` and isolates the backing library. |
 | CLI login UX | Print URL+code only vs assisted | **Clipboard copy + browser auto-open, manual fallback always shown** | Fast happy path, still works headless/SSH. |
@@ -2259,16 +2308,16 @@ v1 implements `private`/`shared` + deep links and reserves the remaining optiona
 
 ### C. Admin bootstrap — **implemented**
 
-**Decision** *(confirmed)*: `AUTH_BOOTSTRAP_ADMINS` is the **sole** bootstrap mechanism
-for seeding the first admin, but it is matched on the **identity tuple
-`(idp, idpTenant, idpSubject)`** — **not** on email, which is mutable and not guaranteed
-verified. The matched explicit POST `/users/me` request must originate from a
-tenant in `AUTH_BOOTSTRAP_TENANTS`. Neither `email` nor `email_verified` is required
-for promotion; verified-email storage remains a separate, unchanged policy.
-Bootstrap is **promote-only**: removing an entry does
-**not** auto-demote an existing admin (prevents a misconfigured ConfigMap from silently
-revoking access). We do **not** use Entra App Roles. Future admin user-management
-endpoints (`scope/user:admin`) must invalidate the corresponding cache entry.
+**Decision** *(confirmed)*: the operator-only `bootstrap-admin` command replaces
+login-time environment seeding. Genuine enrollment must exist first; the operator
+confirms database, exact `(idp, idpTenant, idpSubject)`, Scope UUID, revision,
+operator/reason and operation ID before applying. Default dry run writes nothing.
+An existing enabled admin is a no-op; bootstrap never re-enables a disabled user.
+Explicit `set-user-access` repairs admin lockouts, and `inspect-operation` /
+`repair-operation` handle uncertain durable writes without public recovery routes.
+Login never promotes, demotes or enables accounts. Both retired bootstrap settings
+must be removed before an authenticated API upgrade. We do **not** use Entra
+App Roles; canonical authorization still rereads role/disabled state.
 
 ### D. Multi-tenant Entra — **decided**
 
@@ -2289,8 +2338,8 @@ Implications:
   globally unique, and guest/B2B users carry their **home-tenant** `oid`. Including `tid`
   in the key is therefore required: two different users in two tenants (or the same guest
   seen through two tenants) must not collide. The unique index is the three-part tuple.
-- No code change is needed to add/remove tenants — it's an App Registration setting (plus
-  the `AUTH_BOOTSTRAP_TENANTS` allowlist for admin promotion).
+- No code change is needed to add/remove sign-in tenants; it is an App Registration
+  setting. Operator bootstrap always confirms the exact existing tenant/subject.
 
 ### E. Service-to-service mechanism — **decided, implementation deferred**
 
@@ -2509,9 +2558,9 @@ the query-param fallback) given the proxy timeouts in
 17. **Bootstrap-admin trusts a mutable email claim** — Entra `email`/`preferred_username`
     is not guaranteed verified and is mutable; in multi-tenant mode an email collision
     could auto-promote the wrong user, and list edits could silently demote/promote.
-    **Resolved**: bootstrap matches on the verified `(idp, idpTenant, idpSubject)`,
-    is restricted to `AUTH_BOOTSTRAP_TENANTS`, and is **promote-only**.
-    Neither email nor its verification flag influences promotion.
+    **Resolved**: bootstrap is an explicit operator command for an already enrolled
+    exact `(idp, idpTenant, idpSubject)` plus Scope UUID, using a reviewed revision
+    and durable intent. Neither login, email nor its verification flag grants admin.
 18. **Multi-tenant identity collision** — `(idp, idpSubject)` is **not** unique because
     `oid` is stable only per tenant and guests carry a home-tenant `oid`. **Resolved**:
     the unique index is **`(idp, idpTenant, idpSubject)`** — `tid` is part of the key.

@@ -3923,6 +3923,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                           "content:write",
                           "content:delete",
                           "settings:write",
+                          "members:write",
                         ],
                         "type": "string",
                       },
@@ -4252,63 +4253,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "summary": "Update account",
         "tags": [
           "Accounts",
-        ],
-      },
-    },
-    "/api/v1/admin/operations/{id}": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {},
-              },
-            },
-            "description": "Success",
-          },
-        },
-        "security": [
-          {
-            "bearerAuth": [],
-          },
-        ],
-        "summary": "Inspect a durable security operation",
-        "tags": [
-          "Access",
-        ],
-      },
-    },
-    "/api/v1/admin/operations/{id}/reconcile": {
-      "post": {
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": false,
-                "properties": {},
-                "type": "object",
-              },
-            },
-          },
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {},
-              },
-            },
-            "description": "Success",
-          },
-        },
-        "security": [
-          {
-            "bearerAuth": [],
-          },
-        ],
-        "summary": "Reconcile an interrupted security operation",
-        "tags": [
-          "Access",
         ],
       },
     },
@@ -4704,7 +4648,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "description": "Success",
           },
           "202": {
-            "description": "Promotion is pending; inspect or reconcile the same operation ID before claiming completion",
+            "description": "Promotion is pending; retry identical input or ask an operator to inspect/repair the same operation ID before claiming completion",
           },
           "404": {
             "description": "Enrolled user not found",
@@ -8487,7 +8431,193 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "bearerAuth": [],
           },
         ],
-        "summary": "List project memberships (platform administration)",
+        "summary": "List project memberships (project or platform administration)",
+        "tags": [
+          "Access",
+        ],
+      },
+    },
+    "/api/v1/projects/{id}/members/lookup/{userId}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "alias": {
+                      "type": "string",
+                    },
+                    "disabled": {
+                      "type": "boolean",
+                    },
+                    "displayName": {
+                      "type": "string",
+                    },
+                    "email": {
+                      "type": "string",
+                    },
+                    "id": {
+                      "type": "string",
+                    },
+                    "revision": {
+                      "minimum": 0,
+                      "type": "integer",
+                    },
+                    "role": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "id",
+                    "role",
+                    "disabled",
+                    "revision",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+          },
+        ],
+        "summary": "Look up one enrolled Scope UUID for project membership management",
+        "tags": [
+          "Access",
+        ],
+      },
+    },
+    "/api/v1/projects/{id}/members/search": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 100,
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "properties": {
+                          "alias": {
+                            "type": "string",
+                          },
+                          "disabled": {
+                            "type": "boolean",
+                          },
+                          "displayName": {
+                            "type": "string",
+                          },
+                          "email": {
+                            "type": "string",
+                          },
+                          "id": {
+                            "type": "string",
+                          },
+                          "revision": {
+                            "minimum": 0,
+                            "type": "integer",
+                          },
+                          "role": {
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "id",
+                          "role",
+                          "disabled",
+                          "revision",
+                        ],
+                        "type": "object",
+                      },
+                      "type": "array",
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "items",
+                  ],
+                  "type": "object",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+          },
+        ],
+        "summary": "Search enrolled users to add to this project (project or platform administration)",
         "tags": [
           "Access",
         ],
@@ -13540,7 +13670,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
       "post": {
-        "description": "JIT-enroll the authenticated user, refresh their profile and lastLoginAt, apply bootstrap-admin rules, and warm the access cache. Use this only after an explicit IdP login; do not prefetch, poll, or automatically retry transient failures.",
+        "description": "JIT-enroll the authenticated user with the default user role, refresh their profile and lastLoginAt, and warm the access cache. Login never grants administrative privileges. Use this only after an explicit IdP login; do not prefetch, poll, or automatically retry transient failures.",
         "requestBody": {
           "content": {
             "application/json": {

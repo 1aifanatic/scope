@@ -9,7 +9,7 @@ import { getDefaultApiUrl } from "../utils/shared.js";
 interface AccessOptions { url: string; operationId?: string; revision?: string; role?: string; cursor?: string; limit?: string }
 
 export function registerAccessCommands(program: Command): void {
-  const access = program.command("access").description("Account, project memberships and administrative operation recovery (raw IdP SCOPE_TOKEN)");
+  const access = program.command("access").description("Account and project membership administration (raw IdP SCOPE_TOKEN)");
   function command(name: string, description: string): Command {
     return access.command(name).description(description).option("-u, --url <url>", "API base URL", getDefaultApiUrl());
   }
@@ -33,7 +33,7 @@ export function registerAccessCommands(program: Command): void {
     if (!response.ok) throw new Error(`HTTP ${response.status}: ${JSON.stringify(data)}`);
     console.log(JSON.stringify(data, null, 2));
     if (response.status === 202) {
-      console.error("Operation pending: inspect/reconcile before retrying. No completion claimed.");
+      console.error("Operation pending: retry only identical input with the same operation ID, or give that ID to an operator for repair. No completion claimed.");
       process.exitCode = 2;
     }
   }
@@ -92,8 +92,4 @@ export function registerAccessCommands(program: Command): void {
       request(options, `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`, "DELETE", { revision: revision(options) })));
   mutation(command("disable-user <userId>", "Disable an ordinary user; administrator disable and demotion remain operator-only"))
     .action(action((userId: string, options: AccessOptions) => request(options, `/admin/users/${encodeURIComponent(userId)}/disable`, "POST", { revision: revision(options) })));
-  command("operation <id>", "Inspect durable operation state")
-    .action(action((id: string, options: AccessOptions) => request(options, `/admin/operations/${encodeURIComponent(id)}`)));
-  command("reconcile <id>", "Reconcile an interrupted durable operation")
-    .action(action((id: string, options: AccessOptions) => request(options, `/admin/operations/${encodeURIComponent(id)}/reconcile`, "POST", {})));
 }

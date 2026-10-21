@@ -10,7 +10,7 @@ import { api } from "@/lib/api";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { AccessUserDialog, Person, roleLabels, userName } from "@/components/AccessUserDialog";
-import { AccessOperationRecovery, AccessOperationStatus, useAccessOperation } from "@/components/AccessOperation";
+import { AccessOperationStatus, PendingAccessChange, useAccessOperation } from "@/components/AccessOperation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -26,18 +26,17 @@ export function AccessAdministration() {
   const [params] = useSearchParams();
   const { user, authEnabled, isReady } = useAuth();
   const fixedProjectId = params.has("projectId") ? params.get("projectId") ?? "" : undefined;
-  const initialOperationId = fixedProjectId === undefined ? params.get("operationId") ?? "" : "";
   const platformAdmin = Boolean(user?.capabilities.platformAdmin);
   const canManage = platformAdmin || Boolean(fixedProjectId && user?.capabilities.memberships.some(
     m => m.projectId === fixedProjectId && m.role === "admin" && m.permissions.includes("members:write"),
   ));
   if (!authEnabled || !isReady || !user || !canManage) return <main className="p-10">Project membership administration is not permitted.</main>;
-  return <AccessAdministrationView key={`${user.id}:${platformAdmin}:${fixedProjectId === undefined ? `all:${initialOperationId}` : `project:${fixedProjectId}`}`}
-    fixedProjectId={fixedProjectId} initialOperationId={initialOperationId} platformAdmin={platformAdmin} selfUserId={user.id} />;
+  return <AccessAdministrationView key={`${user.id}:${platformAdmin}:${fixedProjectId === undefined ? "all" : `project:${fixedProjectId}`}`}
+    fixedProjectId={fixedProjectId} platformAdmin={platformAdmin} selfUserId={user.id} />;
 }
 
-function AccessAdministrationView({ fixedProjectId, initialOperationId, platformAdmin, selfUserId }: {
-  fixedProjectId?: string; initialOperationId: string; platformAdmin: boolean; selfUserId: string;
+function AccessAdministrationView({ fixedProjectId, platformAdmin, selfUserId }: {
+  fixedProjectId?: string; platformAdmin: boolean; selfUserId: string;
 }) {
   const { selectedProjectId } = useProjectContext();
   const [chosenProjectId, setChosenProjectId] = useState(selectedProjectId ?? "");
@@ -45,8 +44,8 @@ function AccessAdministrationView({ fixedProjectId, initialOperationId, platform
   const projectId = fixedProjectId ?? chosenProjectId;
   const [editor, setEditor] = useState<{ user?: AccessUserSummary; role?: ProjectRole }>();
   const [confirmation, setConfirmation] = useState<{ member: ProjectMembershipSummary; disable: boolean }>();
-  const operation = useAccessOperation(initialOperationId, () => { setEditor(undefined); setConfirmation(undefined); });
-  const { setMessage, setError, busy, pending, operationId, setOperationId, setRecoveryOpen, refresh, execute } = operation;
+  const operation = useAccessOperation(() => { setEditor(undefined); setConfirmation(undefined); });
+  const { setMessage, setError, busy, pending, refresh, execute } = operation;
   const projectsQuery = useQuery({
     queryKey: ["access-projects", platformAdmin ? "platform" : selfUserId, platformAdmin ? undefined : projectId],
     queryFn: async () => platformAdmin
@@ -62,7 +61,7 @@ function AccessAdministrationView({ fixedProjectId, initialOperationId, platform
     retry: false,
   });
   const members = membersQuery.data ?? [];
-  const current = members.filter(member => !member.revokedAt);
+  const current = members.filter(member => !member.revokedAt || member.pending);
   const ready = Boolean(selectedProject && !selectedProject.deletedAt && membersQuery.isSuccess && !membersQuery.isFetching && !projectsQuery.isFetching);
   const restoreMutation = useMutation({
     mutationFn: () => api.restoreProject(projectId),
@@ -102,12 +101,11 @@ function AccessAdministrationView({ fixedProjectId, initialOperationId, platform
         This project is unavailable.{scoped && platformAdmin ? " Open All project access to choose another project." : " Choose another project from Your projects."}
       </p>}
     </div>
-    <AccessOperationStatus operation={operation} recoveryLink={scoped && platformAdmin ? `/access?operationId=${encodeURIComponent(pending?.id ?? operationId)}` : undefined} />
-    {!platformAdmin && pending && <p className="text-sm text-muted-foreground">If retry cannot confirm completion, give a platform administrator operation ID <code>{pending.id}</code> for recovery.</p>}
+    <AccessOperationStatus operation={operation} />
     <section className="overflow-hidden rounded-lg border">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 p-4">
         <h2 className="flex items-center gap-2 font-semibold"><Users aria-hidden="true" className="h-4 w-4" />Project members
-          {membersQuery.isSuccess && <Badge variant="secondary">{current.length}</Badge>}
+          {membersQuery.isSuccess && <Badge variant="secondary">{members.filter(member => !member.revokedAt).length}</Badge>}
         </h2>
         <Button size="sm" disabled={!ready || locked} onClick={() => setEditor({})}><Plus aria-hidden="true" className="mr-2 h-4 w-4" />Add people</Button>
       </div>
@@ -126,9 +124,7 @@ function AccessAdministrationView({ fixedProjectId, initialOperationId, platform
                 <Person user={member.user} fallback={member.userId} />
                 <div className="flex flex-wrap items-center gap-2">
                   {member.user?.disabled && <Badge variant="secondary">Account disabled</Badge>}
-                  {member.pending && (!platformAdmin ? <Badge variant="secondary" title={`Ask a platform administrator to reconcile ${member.operationId ?? "this operation"}`}>Change pending</Badge> : scoped
-                    ? <Button variant="link" size="sm" asChild><Link to={member.operationId ? `/access?operationId=${encodeURIComponent(member.operationId)}` : "/access"} aria-label="Manage pending change in All project access">Change pending</Link></Button>
-                    : <Button variant="link" size="sm" onClick={() => { setOperationId(member.operationId ?? ""); setRecoveryOpen(true); }}>Change pending</Button>)}
+                  {member.pending && <PendingAccessChange operationId={member.operationId} />}
                   <Badge variant="outline">{roleLabels[member.role]}</Badge>
                   <Button size="sm" variant="outline" aria-label={`Change role for ${member.user ? userName(member.user) : member.userId}`}
                     disabled={!ready || locked || member.pending || !member.user || member.user.disabled} onClick={() => setEditor({ user: member.user, role: member.role })}>Change role</Button>
@@ -150,7 +146,6 @@ function AccessAdministrationView({ fixedProjectId, initialOperationId, platform
     </section>
     <p className="flex items-start gap-2 text-sm text-muted-foreground"><ShieldCheck aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
       Project admins manage membership of their own project. Only platform admins manage accounts and project lifecycle; platform administration alone does not grant project content access.</p>
-    {!scoped && platformAdmin && <AccessOperationRecovery operation={operation} />}
     {editor && <AccessUserDialog members={members} initialUser={editor.user} initialRole={editor.role} selfUserId={platformAdmin ? undefined : selfUserId}
       searchProjectId={platformAdmin ? undefined : projectId} onClose={() => setEditor(undefined)}
       onSave={(user, role) => {

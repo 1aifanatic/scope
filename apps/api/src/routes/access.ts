@@ -92,7 +92,7 @@ export function registerAccessRoutes(ctx: Pick<RouteContext, "app" | "registry" 
     }),
     successStatus: 200,
     errorResponses: {
-      202: { description: "Promotion is pending; inspect or reconcile the same operation ID before claiming completion" },
+      202: { description: "Promotion is pending; retry identical input or ask an operator to inspect/repair the same operation ID before claiming completion" },
       404: { description: "Enrolled user not found" },
       409: { description: "Revision, role, enabled state or idempotency precondition conflict" },
     },
@@ -102,7 +102,7 @@ export function registerAccessRoutes(ctx: Pick<RouteContext, "app" | "registry" 
       if (!user) throw new AccessError(404, "not_found", "Enrolled user not found");
       const authority = auth();
       if (user.lastOperationId && user.lastOperationId !== id && !await authority.operations.isComplete(user.lastOperationId)) {
-        throw new AccessError(409, "operation_pending", `User access change ${user.lastOperationId} must be reconciled before promotion`);
+        throw new AccessError(409, "operation_pending", `User access change ${user.lastOperationId} requires identical retry or operator repair before promotion`);
       }
       const result = await authority.operations.execute({
         _id: id, actor: req.user!.id, reason: "Explicit platform-admin promotion of an enrolled user",
@@ -228,23 +228,6 @@ export function registerAccessRoutes(ctx: Pick<RouteContext, "app" | "registry" 
         collection: "users", targetId: user._id, expectedRevision: req.body.revision,
         change: { disabledAt: "$operationTime" }, unset: [], condition: { role: "user" },
       });
-      res.status(result.state === "pending" ? 202 : 200).json(result);
-    },
-  });
-  apiRoute(ctx.app, ctx.registry, {
-    method: "get", path: "/api/v1/admin/operations/:id", tags: ["Access"], summary: "Inspect a durable security operation",
-    response: z.unknown(),
-    handler: async (req, res) => {
-      const operation = await ctx.db.collection<AdminOperation>("admin_operations").findOne({ _id: req.params.id }, { timeoutMS: 5_000 });
-      if (!operation) throw new AccessError(404, "not_found", "Operation not found");
-      res.json(operation);
-    },
-  });
-  apiRoute(ctx.app, ctx.registry, {
-    method: "post", path: "/api/v1/admin/operations/:id/reconcile", tags: ["Access"], summary: "Reconcile an interrupted security operation",
-    body: z.object({}).strict(), response: z.unknown(),
-    handler: async (req, res) => {
-      const result = await auth().operations.reconcile(req.params.id);
       res.status(result.state === "pending" ? 202 : 200).json(result);
     },
   });

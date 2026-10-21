@@ -4,20 +4,10 @@
 import { randomUUID } from "node:crypto";
 import { MongoServerError, type Collection, type UpdateFilter } from "mongodb";
 import {
-  bootstrapAdminKey,
   type UserDocument,
   type UserProfile,
   type VerifiedIdentity,
 } from "shared";
-import type { AdminOperations } from "./admin-operations.js";
-
-export interface UserStoreOptions {
-  /** Identity keys (`${idp}:${tenant}/${subject}`) to promote to admin. */
-  bootstrapAdmins?: Set<string>;
-  /** Tenant allowlist gating bootstrap promotion (empty = no promotion). */
-  bootstrapTenants?: Set<string>;
-  operations?: Pick<AdminOperations, "execute">;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -48,20 +38,10 @@ function isIdentityUpsertCollision(error: unknown, identity: VerifiedIdentity): 
  * provisioning): a new user is minted a Scope User ID (UUID) with the default
  * role `"user"`, and an existing user has its profile (`email`, `displayName`,
  * `emailVerified`) and `lastLoginAt` refreshed. Email is persisted only when
- * explicitly verified. Admin bootstrap is **promote-only** and requires an
- * exact identity match and membership in the configured tenant allowlist.
+ * explicitly verified. Login never changes an existing role or disabled state.
  */
 export class UserStore {
-  private readonly bootstrapAdmins: Set<string>;
-  private readonly bootstrapTenants: Set<string>;
-
-  constructor(
-    private readonly collection: Collection<UserDocument>,
-    private readonly options: UserStoreOptions = {},
-  ) {
-    this.bootstrapAdmins = options.bootstrapAdmins ?? new Set();
-    this.bootstrapTenants = options.bootstrapTenants ?? new Set();
-  }
+  constructor(private readonly collection: Collection<UserDocument>) {}
 
   /** JIT-upsert the user for a verified identity and return the stored record. */
   async upsertOnLogin(
@@ -124,27 +104,7 @@ export class UserStore {
     if (!result) {
       throw new Error("Failed to upsert user during login");
     }
-    const user = result as UserDocument;
-
-    if (this.shouldBootstrapAdmin(identity) && user.role !== "admin" && !user.disabledAt) {
-      if (!this.options.operations) {
-        throw new Error("Bootstrap promotion requires durable administrative operations");
-      }
-      const securityUser = user as UserDocument & { revision?: number };
-      const result = await this.options.operations.execute({
-        _id: `bootstrap:${user._id}:${securityUser.revision ?? 0}`,
-        actor: `bootstrap:${bootstrapAdminKey(identity.idp, identity.idpTenant, identity.idpSubject)}`,
-        reason: "Verified configured bootstrap identity",
-        collection: "users", targetId: user._id, expectedRevision: securityUser.revision ?? 0,
-        change: { role: "admin" }, unset: [], condition: { role: "user", disabledAt: { $exists: false } },
-      });
-      if (result.state === "pending") throw new Error(`Bootstrap operation pending: ${result.operationId}`);
-      const promoted = await this.findById(user._id);
-      if (!promoted) throw new Error("Bootstrap user disappeared");
-      return promoted;
-    }
-
-    return user;
+    return result;
   }
 
   /** Read an existing identity without provisioning or refreshing login/profile fields. */
@@ -164,13 +124,4 @@ export class UserStore {
     return (doc as UserDocument | null) ?? null;
   }
 
-  private shouldBootstrapAdmin(identity: VerifiedIdentity): boolean {
-    const key = bootstrapAdminKey(
-      identity.idp,
-      identity.idpTenant,
-      identity.idpSubject,
-    );
-    if (!this.bootstrapAdmins.has(key)) return false;
-    return this.bootstrapTenants.has(identity.idpTenant);
-  }
 }

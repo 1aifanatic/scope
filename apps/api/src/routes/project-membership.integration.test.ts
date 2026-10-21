@@ -207,7 +207,7 @@ describe.runIf(Boolean(uri))("Project-admin membership routes with canonical aut
     expect((await request(app).get(`/api/v1/projects/${projectId}/members`)).status).toBe(200);
   });
 
-  it("retains the project actor and exact intent through pending completion, same-key retry and platform reconciliation", async () => {
+  it("retains the project actor and exact intent through pending completion and same-key retry without HTTP recovery", async () => {
     const id = randomUUID(), enrolled = randomUUID(), now = new Date();
     await db.collection<UserDocument>("users").insertOne({
       _id: enrolled, idp: "entra", idpTenant: "fixture", idpSubject: enrolled, role: "user", createdAt: now, updatedAt: now,
@@ -227,8 +227,9 @@ describe.runIf(Boolean(uri))("Project-admin membership routes with canonical aut
     expect(retry.status).toBe(200);
     expect(retry.body).toMatchObject({ operationId: id, revision: 1, state: "completed" });
     expect((await authority.memberships(enrolled)).map(m => m.role)).toEqual(["admin"]);
-    expect((await request(app).post(`/api/v1/admin/operations/${id}/reconcile`).send({})).status).toBe(403);
-    expect((await request(app).post(`/api/v1/admin/operations/${id}/reconcile`).set("X-Test-Verified-Actor", platformId).send({})).status).toBe(200);
+    expect((await request(app).post(`/api/v1/admin/operations/${id}/reconcile`).send({})).status).toBe(404);
+    expect((await request(app).post(`/api/v1/admin/operations/${id}/reconcile`).set("X-Test-Verified-Actor", platformId).send({})).status).toBe(404);
+    expect((await request(app).get(`/api/v1/admin/operations/${id}`).set("X-Test-Verified-Actor", platformId)).status).toBe(404);
     expect(await evidence.findOne({ _id: id })).toMatchObject({ actor: adminId, state: "completed" });
   });
 });

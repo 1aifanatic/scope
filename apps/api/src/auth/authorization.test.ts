@@ -152,7 +152,7 @@ describe("Canonical authority work budget", () => {
     const authority = () => new Authorization(new MongoClient("mongodb://127.0.0.1:1").db("unused_unit_fixture"), false);
 
     it.each(["/api/v1/admin/users", "/api/v1/admin/platform-admins", "/api/v1/admin/users/:id/promote",
-      "/api/v1/admin/operations/:id", "/api/v1/projects/:id/members", "/api/v1/projects/:id/members/:userId"])(
+      "/api/v1/projects/:id/members", "/api/v1/projects/:id/members/:userId"])(
       "does not open identity or membership administration at %s", async path => {
         await expect(authority().guard(express.request, "get", path, routePolicy("get", path)))
           .rejects.toMatchObject({ code: "authentication_disabled" });

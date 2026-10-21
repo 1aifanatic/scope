@@ -49,6 +49,11 @@ describe("access CLI operations", () => {
     return input;
   }
 
+  it.each(["operation", "reconcile"])("does not expose the retired %s command or issue an HTTP request", async name => {
+    await expect(run(name, "fixture-operation")).rejects.toMatchObject({ code: "commander.unknownCommand" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("forwards the unchanged raw bearer and explicit idempotency key with the expected revision", async () => {
     respond(200, { operationId: "reviewed-assignment", state: "completed", revision: 5 });
     await run("set-member", "project", "user", "--role", "reader", "--revision", "4", "--operation-id", "reviewed-assignment");
