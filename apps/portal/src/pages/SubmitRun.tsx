@@ -5,10 +5,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type RunCreateInput } from "@/lib/api";
-import {
-  LEGACY_REQUEST_COMPOSITION_DEPRECATION,
-  type ExperimentView,
-} from "@/lib/experiments";
+import type { ExperimentView } from "@/lib/experiments";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -227,6 +224,8 @@ export function SubmitRun({
   const [experimentDescription, setExperimentDescription] = useState("");
   const [experimentReportTemplateIds, setExperimentReportTemplateIds] =
     useState<string[]>([]);
+  const [experimentDescriptionOpen, setExperimentDescriptionOpen] =
+    useState(false);
 
   // Optional add-ons
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -937,16 +936,42 @@ export function SubmitRun({
                 placeholder="Copilot versus Claude on authentication"
               />
             </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="experimentDescription">Description</Label>
-              <Textarea
-                id="experimentDescription"
-                value={experimentDescription}
-                onChange={(event) =>
-                  setExperimentDescription(event.target.value)
+            <div className="sm:col-span-2">
+              <button
+                type="button"
+                aria-expanded={experimentDescriptionOpen}
+                aria-controls="experimentDescriptionFields"
+                onClick={() =>
+                  setExperimentDescriptionOpen((open) => !open)
                 }
-                placeholder="What this experiment compares and why"
-              />
+                className="flex w-full items-center gap-2 rounded-md py-1 text-left text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <ChevronDown
+                  className={`h-4 w-4 transition-transform ${
+                    experimentDescriptionOpen ? "rotate-180" : ""
+                  }`}
+                />
+                Description
+                <span className="text-xs font-normal">(optional)</span>
+              </button>
+              {experimentDescriptionOpen && (
+                <div
+                  id="experimentDescriptionFields"
+                  className="mt-2 space-y-2"
+                >
+                  <Label htmlFor="experimentDescription" className="sr-only">
+                    Description
+                  </Label>
+                  <Textarea
+                    id="experimentDescription"
+                    value={experimentDescription}
+                    onChange={(event) =>
+                      setExperimentDescription(event.target.value)
+                    }
+                    placeholder="What this experiment compares and why"
+                  />
+                </div>
+              )}
             </div>
             <div className="space-y-2 sm:col-span-2">
               <Label>Selectable reports</Label>
@@ -989,24 +1014,6 @@ export function SubmitRun({
             </div>
           </CardContent>
         </Card>
-      )}
-
-      {usesLegacyComposition && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
-        >
-          <span className="font-medium">
-            Deprecated composition ({LEGACY_REQUEST_COMPOSITION_DEPRECATION}).
-          </span>{" "}
-          Multi-run and profile-variation expansion remains supported here, but
-          new compositions should be created from{" "}
-          <Link className="underline" to="/experiments/new">
-            New Experiment
-          </Link>
-          .
-        </div>
       )}
 
       {/* Quick Start gallery (collapsible, default closed) */}
@@ -1306,14 +1313,14 @@ export function SubmitRun({
                   onClick={() => setCreateObservationOpen(true)}
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  New…
+                  New Observation
                 </Button>
               )}
             />
             <CreateCriterionDialog
               open={createObservationOpen}
               onOpenChange={setCreateObservationOpen}
-              defaultKind="observation"
+              mode="observation"
               onCreated={(id) => setPickedObservations((prev) => [...prev, id])}
             />
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -1358,6 +1365,19 @@ export function SubmitRun({
               />
             </div>
           </div>
+
+          {usesLegacyComposition && (
+            <p className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              Creating multiple runs or profile variations? Use{" "}
+              <Link
+                className="font-medium text-foreground underline underline-offset-4"
+                to="/experiments/new"
+              >
+                New Experiment
+              </Link>
+              .
+            </p>
+          )}
 
           {/* ─── AGENTS.md (optional, discreet) ──────────────────────────── */}
           {!(agentsMdOpen || agentsMd.trim()) ? (
