@@ -60,6 +60,21 @@ export const ExperimentProgressiveDisclosure: Story = {
     await expect(
       canvas.getByRole("button", { name: /Create empty experiment/ }),
     ).toBeInTheDocument();
+    const descriptionToggle = canvas.getByRole("button", {
+      name: "Description (optional)",
+    });
+    await expect(descriptionToggle).toHaveAttribute("aria-expanded", "false");
+    await expect(canvas.queryByLabelText("Description")).not.toBeInTheDocument();
+    await userEvent.click(descriptionToggle);
+    await userEvent.type(
+      canvas.getByLabelText("Description"),
+      "Compare authentication approaches",
+    );
+    await userEvent.click(descriptionToggle);
+    await userEvent.click(descriptionToggle);
+    await expect(canvas.getByLabelText("Description")).toHaveValue(
+      "Compare authentication approaches",
+    );
     await expect(canvas.queryByLabelText("Tags")).not.toBeInTheDocument();
     await expect(canvas.queryByText("Gate pipeline")).not.toBeInTheDocument();
     await expect(

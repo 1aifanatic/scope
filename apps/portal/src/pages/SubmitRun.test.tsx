@@ -141,6 +141,33 @@ describe("SubmitRun legacy composition guidance", () => {
 });
 
 describe("SubmitRun Experiment composition", () => {
+  it("keeps the optional description collapsed and retains its value across toggles", async () => {
+    renderExperimentForm();
+
+    const toggle = await screen.findByRole("button", {
+      name: "Description (optional)",
+    });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByLabelText("Description")).toBeNull();
+
+    fireEvent.click(toggle);
+    const description = screen.getByLabelText("Description");
+    fireEvent.change(description, {
+      target: { value: "Compare authentication approaches" },
+    });
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByLabelText("Description")).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(
+      (screen.getByLabelText("Description") as HTMLTextAreaElement).value,
+    ).toBe("Compare authentication approaches");
+  });
+
   it("infers an empty Experiment until a scenario is entered", async () => {
     renderExperimentForm();
 

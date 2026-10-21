@@ -222,6 +222,8 @@ export function SubmitRun({
   const [agentsMd, setAgentsMd] = useState<string>("");
   const [experimentName, setExperimentName] = useState("");
   const [experimentDescription, setExperimentDescription] = useState("");
+  const [experimentDescriptionOpen, setExperimentDescriptionOpen] =
+    useState(false);
 
   // Optional add-ons
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -923,16 +925,42 @@ export function SubmitRun({
                 placeholder="Copilot versus Claude on authentication"
               />
             </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="experimentDescription">Description</Label>
-              <Textarea
-                id="experimentDescription"
-                value={experimentDescription}
-                onChange={(event) =>
-                  setExperimentDescription(event.target.value)
+            <div className="sm:col-span-2">
+              <button
+                type="button"
+                aria-expanded={experimentDescriptionOpen}
+                aria-controls="experimentDescriptionFields"
+                onClick={() =>
+                  setExperimentDescriptionOpen((open) => !open)
                 }
-                placeholder="What this experiment compares and why"
-              />
+                className="flex w-full items-center gap-2 rounded-md py-1 text-left text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <ChevronDown
+                  className={`h-4 w-4 transition-transform ${
+                    experimentDescriptionOpen ? "rotate-180" : ""
+                  }`}
+                />
+                Description
+                <span className="text-xs font-normal">(optional)</span>
+              </button>
+              {experimentDescriptionOpen && (
+                <div
+                  id="experimentDescriptionFields"
+                  className="mt-2 space-y-2"
+                >
+                  <Label htmlFor="experimentDescription" className="sr-only">
+                    Description
+                  </Label>
+                  <Textarea
+                    id="experimentDescription"
+                    value={experimentDescription}
+                    onChange={(event) =>
+                      setExperimentDescription(event.target.value)
+                    }
+                    placeholder="What this experiment compares and why"
+                  />
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

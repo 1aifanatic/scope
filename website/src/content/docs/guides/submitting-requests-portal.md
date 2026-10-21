@@ -27,8 +27,10 @@ execution attempt). A retry creates a new run on the same request.
 ## Open the submit form
 
 From the Portal navigation, click **New Run** (the form name in the
-Portal — it submits a request). The form is split into the three
-sections above.
+Portal — it submits a request). In the collapsed desktop sidebar, hovering or
+focusing this primary action expands the launcher to also expose **New
+Experiment**; the expanded sidebar and mobile navigation show both actions
+directly. The form is split into the three sections above.
 
 **New Run** remains the permanent path for one request, whether it
 uses a profile or inline configuration. For named multi-run
@@ -92,9 +94,8 @@ The request is assigned a unique ID and queued; a run is created when
 a worker picks it up.
 
 If you use occurrences greater than one or add profile variations in
-**New Run**, the Portal shows the accessible
-`legacy-request-composition` notice and preserves the existing
-expansion behavior. New compositions should use
+**New Run**, the Portal preserves the existing expansion behavior and shows
+neutral contextual guidance beside those controls. New compositions should use
 [New Experiment](/guides/creating-experiments/).
 
 ## Watch a run
