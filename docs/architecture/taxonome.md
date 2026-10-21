@@ -274,6 +274,14 @@ contains that source-only revision, based on evidence source commit
 `05bd8b7e`. The manifest preserves both source fingerprint sets and records zero
 additional model calls; no model evidence was regenerated.
 
+A later local comment-coverage pass at
+`c27c5a1b3067db44f4f70927b0ef85e42a9f0516` strengthened the repository rule
+and audited every Taxonome runtime, CLI, test, and standalone-adapter
+TypeScript file. Each non-trivial function and logical phase now includes a
+short explanation of what it does, while trivial/self-evident code remains
+unnarrated. The manifest records hashes for all 26 audited files, zero model
+calls, and unchanged prompt/contracts/fixtures/gold/outputs/ledger.
+
 | Experiment | Case result | Actual SDK requests | Interpretation |
 |---|---:|---:|---|
 | Original neutral-ID baseline, 18 cases twice | 33/36 | 36 | Two relevance/inapplicability confusions and one false certainty with unknown completeness |

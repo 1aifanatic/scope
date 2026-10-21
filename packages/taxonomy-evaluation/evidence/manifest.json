@@ -284,7 +284,7 @@
     "readout.atif.json": "d5671045bd8b2a12914a5195742caa26dcf201ddf6e8717970cb27f0d35f5766",
     "timeout.atif.json": "4ab30ba785d9ad390d25d9246907c419ab204700bde35e35adb4d57fa0fcd110"
   },
-  "source_fingerprint_semantics": "final_review_source_hashes identify the source snapshot that produced the frozen model evidence at 7d217d727ac0adaa4cc4121767316fab62d09f3c; readability_revision.current_source_hashes identify the later behavior-preserving source-only refactor.",
+  "source_fingerprint_semantics": "final_review_source_hashes identify the source snapshot that produced the frozen model evidence at 7d217d727ac0adaa4cc4121767316fab62d09f3c; readability_revision records the behavior-preserving refactor; comment_coverage_revision records the later guidance and explanatory-comment audit. Frozen model artifacts/cases/ledger retain their original hashes.",
   "readability_revision": {
     "guidance_commit": "05bd8b7e",
     "evidence_source_commit": "7d217d727ac0adaa4cc4121767316fab62d09f3c",
@@ -317,6 +317,54 @@
       "packages/taxonomy-evaluation/src/timeout.ts": "14ab1e0f29cc9ec23d3d7f019f8c48f38e880604e49c26337ad01a158bfde9db",
       "apps/taxonome/src/cli.ts": "2747eeb4783ee5bf96a37d284c7205a648a29d7d07ea9a5a6d619fc5f525297a",
       "apps/taxonome/src/index.ts": "6e9ff9c91ffb6bbe1b56b6783b2b4f878dcc947ee88b42f4488aa895a62215db"
+    }
+  },
+  "comment_coverage_revision": {
+    "commit": "c27c5a1b3067db44f4f70927b0ef85e42a9f0516",
+    "parent_local_revision": "2e4c4a471a0fd8927cb1138914babc16ec2faaef",
+    "rule": "Every non-trivial function and logical code block has a short explanation of what it does; trivial/self-evident code is exempt.",
+    "audited_scope": "AGENTS.md plus every TypeScript file introduced or modified by the Taxonome PR in the runtime, CLI, tests, and standalone static adapter.",
+    "model_calls": 0,
+    "model_evidence_regenerated": false,
+    "preserved_prompt_text_contracts_fixtures_gold_outputs_and_ledger": true,
+    "validation": [
+      "taxonomy-evaluation build/typecheck",
+      "taxonome build/typecheck",
+      "61 focused offline tests",
+      "static prompt build/typecheck",
+      "32 static prompt tests",
+      "license headers",
+      "NOTICE check",
+      "23 frozen artifact/case hashes",
+      "private and committed 256-call ledger byte equality"
+    ],
+    "audited_file_hashes": {
+      "AGENTS.md": "fc019b48c5c46bb40109e878d66abfcf10948f7c27e6bc5b6c8e5c1ebe5a5824",
+      "apps/taxonome/src/cli.test.ts": "8f1ebe82505a2f72c3f68777611ae68ef86010164059d6ebb2c6437bc5004d96",
+      "apps/taxonome/src/cli.ts": "aa15c36bf869a32a7ac31bee6f99e320c69f741cfe2ee18c0284cf71214cfb5e",
+      "apps/taxonome/src/index.ts": "769fc6214c396319992e84b3ad8cf48fca758b059766bb9ab17c2847d2bb1750",
+      "evaluations/static-prompts/adapter/standalone.ts": "62bad6a19326aea6459599182daab4b26fff4720c842222714da357137f756df",
+      "packages/taxonomy-evaluation/src/cases.test.ts": "51fb53d99c817e3dfe82781d26c8e43649447cc2d3f6aa7c06f9de5889af6c14",
+      "packages/taxonomy-evaluation/src/cases.ts": "19e01478612c41b2683e1f5488973a68bfb8aaa238f704351e2ce2c8ed3a82d4",
+      "packages/taxonomy-evaluation/src/contracts.test.ts": "2ebd8d3f22c43edcf7a95ddc1f6848ee47290c6f52e4cb21e2d72c2a50a57b44",
+      "packages/taxonomy-evaluation/src/contracts.ts": "235cfbc03b721794b293a0c4780bf0956696599ae2705b0a3f869d50c00feaff",
+      "packages/taxonomy-evaluation/src/copilot.test.ts": "7ed6635bd88724a545c86efe72ac0b8c1680b9a8badeaf0aca74b4e553648dcd",
+      "packages/taxonomy-evaluation/src/copilot.ts": "21c798fbf0059724c3adbaa0911a457de3ce241cad9a7f93c8c64ea3611776fd",
+      "packages/taxonomy-evaluation/src/engine.ts": "a0902458a4a16f84c32aefd99e5ec1d5c5a8b23a9b461c9bc0d595f2dcfaddb4",
+      "packages/taxonomy-evaluation/src/evidence.test.ts": "4f387182d7ced6df73b966d6946b66282486791d5aa1bd9cd1861ecf3fe68df3",
+      "packages/taxonomy-evaluation/src/index.ts": "cb0636019f04b6396f2ba28b7087aaa360cf98016f14bf5d2f52b3d087b5586e",
+      "packages/taxonomy-evaluation/src/input.test.ts": "bdaa5779cf117eadfa35a3beec8cbd3859a2f65ae5448a4da87024f454b3c069",
+      "packages/taxonomy-evaluation/src/input.ts": "55546e7e33726fa3c190d50407b54f2fb5624a11cf3cc0ad4b59418e16833f56",
+      "packages/taxonomy-evaluation/src/ledger.test.ts": "838621ce1d329a5012e4332634252d54e444c5fdc661cdcb533b3d5796c51276",
+      "packages/taxonomy-evaluation/src/ledger.ts": "ba2755cfa3074304b2a91049fbffea2eca247029d6140a0be5f34b49369087d7",
+      "packages/taxonomy-evaluation/src/optimization.ts": "b0cb0d89274d3f14066290e5a6c1009c618460caec26f5b98210257298310804",
+      "packages/taxonomy-evaluation/src/prompt.test.ts": "15802b254e64524e12ce61b0afff01c4f36d3c4c717173d1c63e041b13d3f59e",
+      "packages/taxonomy-evaluation/src/prompt.ts": "a8e9f5992dcb4f8b80ac0e5897d3c1a487870855cd1ef7c05d674c15a8e4489f",
+      "packages/taxonomy-evaluation/src/readout.test.ts": "a35276bce3bad9f3814393acaf36704c98975b1634adc92a97a257f413372443",
+      "packages/taxonomy-evaluation/src/readout.ts": "212c39b963e1ff7c119c26cf30aef05c2ea591a951be05a4c44304852720db2b",
+      "packages/taxonomy-evaluation/src/sdk-call.ts": "513205af021bfb909b50fe1b454bd32aa4cb4781d88ce687fd49b8c5f2808bc3",
+      "packages/taxonomy-evaluation/src/timeout.test.ts": "79fc1f20143de57c9e1fe6b956987569805a3cb7ca34f890df7feda0711efcdb",
+      "packages/taxonomy-evaluation/src/timeout.ts": "14ab1e0f29cc9ec23d3d7f019f8c48f38e880604e49c26337ad01a158bfde9db"
     }
   }
 }
