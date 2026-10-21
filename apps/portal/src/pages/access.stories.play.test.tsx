@@ -13,6 +13,7 @@ import { ProjectProvider } from "@/contexts/ProjectContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { mswHandlers } from "../../.storybook/msw-handlers";
 import * as administration from "./AccessAdministration.stories";
+import * as admin from "./Admin.stories";
 import * as accessShell from "../components/AccessShell.stories";
 import * as agentBadge from "../components/AgentBadge.stories";
 import * as layout from "../components/Layout.stories";
@@ -44,7 +45,7 @@ afterEach(() => {
 const badgeStories = composeStories(agentBadge);
 const layoutStories = composeStories(layout);
 const stories = {
-  ...composeStories(administration), ...composeStories(accessShell),
+  ...composeStories(administration), ...composeStories(admin), ...composeStories(accessShell),
   AgentBadgeAdmin: badgeStories.Plain, AgentBadgeMember: badgeStories.ProjectMember,
   MemberNavigation: layoutStories.MemberNavigation, AdminNavigation: layoutStories.AdminWithoutMembership,
 };

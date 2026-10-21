@@ -3,20 +3,16 @@
 
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Ellipsis, Loader2, Plus, Search, ShieldCheck, Users } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Ellipsis, Loader2, Plus, ShieldCheck, Users } from "lucide-react";
 import type { AccessUserSummary, ProjectMembershipSummary, ProjectRole } from "shared/rbac";
-import { ProjectRoleSchema } from "shared/rbac";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useProjectContext } from "@/contexts/ProjectContext";
-import { useDebounce } from "@/hooks/useDebounce";
+import { AccessUserDialog, Person, roleLabels, userName } from "@/components/AccessUserDialog";
+import { AccessOperationRecovery, AccessOperationStatus, useAccessOperation } from "@/components/AccessOperation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -24,135 +20,6 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-const roleLabels: Record<ProjectRole, string> = { reader: "Reader", contributor: "Contributor", admin: "Project admin" };
-const roleDescriptions: Record<ProjectRole, string> = {
-  reader: "View project content, results and stored reports. Cannot make changes.",
-  contributor: "Create, edit and delete project content, and submit runs. Cannot change project settings or members.",
-  admin: "Manage project content and settings. Only platform admins can manage members or delete the project.",
-};
-const userName = (user: AccessUserSummary) => user.displayName || user.email || user.alias || user.id;
-
-function Person({ user, fallback }: { user?: AccessUserSummary; fallback: string }) {
-  const name = user ? userName(user) : fallback;
-  const address = user?.email || user?.alias;
-  return <div className="flex min-w-0 items-center gap-3" title={`Scope ID: ${fallback}`}>
-    <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold">
-      {name.slice(0, 2).toUpperCase()}
-    </span>
-    <div className="min-w-0 text-left">
-      <p className="truncate font-medium">{name}</p>
-      {address && address !== name && <p className="truncate text-xs text-muted-foreground">{address}</p>}
-    </div>
-  </div>;
-}
-
-function AccessUserDialog({ members = [], initialUser, initialRole, platformAdmin = false, onClose, onSave }: {
-  members?: ProjectMembershipSummary[];
-  initialUser?: AccessUserSummary;
-  initialRole?: ProjectRole;
-  platformAdmin?: boolean;
-  onClose: () => void;
-  onSave: (user: AccessUserSummary, role: ProjectRole) => void;
-}) {
-  const [search, setSearch] = useState("");
-  const query = useDebounce(search.trim(), 250);
-  const [cursor, setCursor] = useState<string>();
-  const [selected, setSelected] = useState(initialUser);
-  const [role, setRole] = useState<ProjectRole>(initialRole ?? "reader");
-  const [error, setError] = useState("");
-  const usersQuery = useQuery({
-    queryKey: ["access-users", query, cursor],
-    queryFn: ({ signal }) => api.searchAccessUsers({ q: query, cursor, signal }),
-    enabled: !initialUser,
-    retry: false,
-  });
-  const searching = search.trim() !== query || usersQuery.isFetching;
-  return <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
-    <DialogContent className="max-h-[85vh] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 p-0">
-      <DialogHeader className="p-6 pb-4">
-        <DialogTitle>{platformAdmin ? "Add platform admin" : initialUser ? "Change role" : "Add people"}</DialogTitle>
-        <DialogDescription>{platformAdmin
-          ? "Choose an enabled user who has signed in to Scope. No invitation is sent."
-          : initialUser
-          ? `Update ${userName(initialUser)}'s access to this project.`
-          : "Find an existing Scope user, then choose the access to grant. No invitation is sent."}</DialogDescription>
-      </DialogHeader>
-      <div className="min-h-0 space-y-4 overflow-y-auto px-6 pb-6">
-        {!initialUser && <>
-          <Label htmlFor="access-user-search">Search users</Label>
-          <div className="relative">
-            <Search aria-hidden="true" className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-            <Input id="access-user-search" className="pl-9" placeholder="Search by name, email or Scope ID"
-              value={search} maxLength={100} onChange={event => {
-                setSearch(event.target.value); setCursor(undefined); setSelected(undefined);
-              }} />
-          </div>
-          {usersQuery.isError ? <div role="alert" className="text-sm text-destructive">
-            User search unavailable: {usersQuery.error.message}{" "}
-            <Button variant="link" onClick={() => void usersQuery.refetch()}>Try again</Button>
-          </div> : searching ? <p role="status" className="text-sm text-muted-foreground">Searching users...</p> : <>
-            <ul aria-label="Available users" className="max-h-60 overflow-y-auto rounded-md border">
-              {usersQuery.data?.items.map(user => {
-                const membership = members.find(member => member.userId === user.id);
-                const existing = !platformAdmin && Boolean(membership && !membership.revokedAt);
-                const unavailableRole = platformAdmin && user.role !== "user";
-                const unavailable = user.disabled || existing || Boolean(membership?.pending) || unavailableRole;
-                return <li key={user.id} className="border-b last:border-0">
-                  <button type="button" aria-pressed={selected?.id === user.id} disabled={unavailable}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
-                    onClick={() => setSelected(user)}>
-                    <div className="min-w-0">
-                      <Person user={user} fallback={user.id} />
-                    </div>
-                    {unavailable ? <Badge variant="secondary">{user.disabled ? "Disabled" : unavailableRole
-                      ? user.role === "admin" ? "Already a platform admin" : "Unavailable role"
-                      : membership?.pending ? "Change pending" : "Already a member"}</Badge>
-                      : selected?.id === user.id ? <Check aria-label="Selected" className="h-4 w-4 shrink-0 text-primary" /> : null}
-                  </button>
-                </li>;
-              })}
-              {!usersQuery.data?.items.length && <li className="p-6 text-center text-sm text-muted-foreground">No users found.</li>}
-            </ul>
-            <div className="flex justify-between gap-2">
-              {cursor && <Button size="sm" variant="outline" onClick={() => { setCursor(undefined); setSelected(undefined); }}>Back to first page</Button>}
-              {usersQuery.data?.nextCursor && <Button size="sm" variant="outline" className="ml-auto"
-                onClick={() => { setCursor(usersQuery.data?.nextCursor); setSelected(undefined); }}>More users</Button>}
-            </div>
-          </>}
-        </>}
-        {selected && <div className="rounded-md border bg-muted/30 p-3"><Person user={selected} fallback={selected.id} /></div>}
-        {!platformAdmin && <div className="space-y-2">
-          <Label htmlFor="membership-role">Project role</Label>
-          <select id="membership-role" className="block h-10 w-full rounded-md border bg-background px-3 text-sm" value={role} onChange={event => {
-            const parsed = ProjectRoleSchema.safeParse(event.target.value);
-            if (!parsed.success) { setError("Choose a valid project role."); return; }
-            setRole(parsed.data); setError("");
-          }}>
-            <option value="reader">Reader</option><option value="contributor">Contributor</option><option value="admin">Project admin</option>
-          </select>
-          <p className="text-sm text-muted-foreground">{roleDescriptions[role]}</p>
-          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-        </div>}
-      </div>
-      <DialogFooter className="border-t bg-background p-4">
-        <Button variant="outline" onClick={onClose}>Cancel</Button>
-        <Button disabled={!selected || Boolean(selected.disabled) || Boolean(error) || (!initialUser && (searching || usersQuery.isError)) || (Boolean(initialUser) && role === initialRole)}
-          onClick={() => { if (selected) onSave(selected, role); }}>{platformAdmin ? "Review promotion" : initialUser ? "Save role" : "Add to project"}</Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>;
-}
-
-interface AccessChange {
-  id: string;
-  path: string;
-  method: "PUT" | "DELETE" | "POST";
-  body: { revision: number; role?: ProjectRole };
-  description: string;
-}
-interface OperationResult { operationId: string; state: "completed" | "pending"; revision: number }
-interface InspectedOperation { state: "prepared" | "completed" | "conflict" }
 
 export function AccessAdministration() {
   const [params] = useSearchParams();
@@ -163,22 +30,14 @@ export function AccessAdministration() {
 }
 
 function AccessAdministrationView({ fixedProjectId, initialOperationId }: { fixedProjectId?: string; initialOperationId: string }) {
-  const queryClient = useQueryClient();
   const { selectedProjectId } = useProjectContext();
   const [chosenProjectId, setChosenProjectId] = useState(selectedProjectId ?? "");
   const scoped = fixedProjectId !== undefined;
   const projectId = fixedProjectId ?? chosenProjectId;
   const [editor, setEditor] = useState<{ user?: AccessUserSummary; role?: ProjectRole }>();
-  const [adminEditor, setAdminEditor] = useState(false);
-  const [promotion, setPromotion] = useState<AccessUserSummary>();
-  const [adminCursor, setAdminCursor] = useState<string>();
   const [confirmation, setConfirmation] = useState<{ member: ProjectMembershipSummary; disable: boolean }>();
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [pending, setPending] = useState<AccessChange>();
-  const [operationId, setOperationId] = useState(initialOperationId);
-  const [recoveryOpen, setRecoveryOpen] = useState(Boolean(initialOperationId));
+  const operation = useAccessOperation(initialOperationId, () => { setEditor(undefined); setConfirmation(undefined); });
+  const { setMessage, setError, busy, pending, operationId, setOperationId, setRecoveryOpen, refresh, execute } = operation;
   const projectsQuery = useQuery({
     queryKey: ["access-projects"],
     queryFn: () => api.listProjects({ controlPlane: true, includeDeleted: true }),
@@ -192,12 +51,6 @@ function AccessAdministrationView({ fixedProjectId, initialOperationId }: { fixe
     retry: false,
   });
   const members = membersQuery.data ?? [];
-  const adminsQuery = useQuery({
-    queryKey: ["access-platform-admins", adminCursor],
-    enabled: !scoped,
-    queryFn: ({ signal }) => api.listPlatformAdmins({ cursor: adminCursor, signal }),
-    retry: false,
-  });
   const current = members.filter(member => !member.revokedAt);
   const ready = Boolean(selectedProject && !selectedProject.deletedAt && membersQuery.isSuccess && !membersQuery.isFetching && !projectsQuery.isFetching);
   const restoreMutation = useMutation({
@@ -206,40 +59,6 @@ function AccessAdministrationView({ fixedProjectId, initialOperationId }: { fixe
     onError: cause => { setMessage(""); setError(cause.message); },
   });
   const locked = busy || Boolean(pending) || restoreMutation.isPending;
-  const refresh = () => Promise.all([
-    queryClient.invalidateQueries({ queryKey: ["access-projects"] }),
-    queryClient.invalidateQueries({ queryKey: ["access-members"] }),
-    queryClient.invalidateQueries({ queryKey: ["access-users"] }),
-    queryClient.invalidateQueries({ queryKey: ["access-platform-admins"] }),
-    queryClient.invalidateQueries({ queryKey: ["projects"] }),
-  ]);
-  const execute = async (change: AccessChange) => {
-    setBusy(true); setPending(change); setEditor(undefined); setAdminEditor(false); setPromotion(undefined); setConfirmation(undefined); setError(""); setMessage("");
-    setOperationId(change.id);
-    try {
-      const result = await api.accessRequest<OperationResult>(change.path, change.method, change.body, change.id);
-      if (result.state !== "completed") throw new Error("Access change is pending reconciliation");
-      setPending(undefined); setMessage(`${change.description} completed.`);
-    } catch (cause) {
-      const terminal = cause instanceof ApiError && cause.status >= 400 && cause.status < 500 && ![408, 429].includes(cause.status);
-      if (terminal) setPending(undefined);
-      setError(`${cause instanceof Error ? cause.message : "Access change failed"} (operation ${change.id})`);
-    } finally { await refresh(); setBusy(false); }
-  };
-  const recover = async (reconcile: boolean) => {
-    if (!operationId || busy) return;
-    setBusy(true); setError(""); setMessage("");
-    try {
-      const result = await api.accessRequest<InspectedOperation>(
-        `/admin/operations/${encodeURIComponent(operationId)}${reconcile ? "/reconcile" : ""}`, reconcile ? "POST" : "GET", reconcile ? {} : undefined,
-      );
-      setMessage(`Operation ${operationId}: ${result.state}.`);
-      if (result.state === "completed" || result.state === "conflict") {
-        if (pending?.id === operationId) setPending(undefined);
-      }
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Operation recovery failed"); }
-    finally { await refresh(); setBusy(false); }
-  };
   return <main className="mx-auto max-w-5xl space-y-6 p-6">
     <header className="flex flex-wrap items-start justify-between gap-3">
       <div>
@@ -256,29 +75,23 @@ function AccessAdministrationView({ fixedProjectId, initialOperationId }: { fixe
         <p className="text-sm text-muted-foreground">Project</p>
         <p className="text-lg font-semibold">{selectedProject?.name ?? (projectsQuery.isPending ? "Loading project..." : "Project unavailable")}</p>
       </div> : <>
-      <Label htmlFor="access-project">Project</Label>
-      <select id="access-project" className="block h-10 w-full rounded-md border bg-background px-3 text-sm"
-        disabled={locked || projectsQuery.isPending || projectsQuery.isError} value={projectId} onChange={event => {
-          setChosenProjectId(event.target.value);
-          setMessage(""); setError("");
-        }}>
-        <option value="">Select a project</option>
-        {projectsQuery.data?.map(project => <option key={project._id} value={project._id}>
-          {project.name} ({project._id.slice(0, 8)}){project.deletedAt ? " — deleted" : ""}
-        </option>)}
-      </select>
+        <Label htmlFor="access-project">Project</Label>
+        <select id="access-project" className="block h-10 w-full rounded-md border bg-background px-3 text-sm"
+          disabled={locked || projectsQuery.isPending || projectsQuery.isError} value={projectId} onChange={event => {
+            setChosenProjectId(event.target.value); setMessage(""); setError("");
+          }}>
+          <option value="">Select a project</option>
+          {projectsQuery.data?.map(project => <option key={project._id} value={project._id}>
+            {project.name} ({project._id.slice(0, 8)}){project.deletedAt ? " — deleted" : ""}
+          </option>)}
+        </select>
       </>}
       {projectsQuery.isError && <p role="alert" className="text-sm text-destructive">Project inventory unavailable: {projectsQuery.error.message}</p>}
       {projectsQuery.isSuccess && (scoped || projectId) && !selectedProject && <p role="alert">
         This project is unavailable.{scoped ? " Open All project access to choose another project." : " Choose another project."}
       </p>}
     </div>
-    {error && <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
-    {message && <p role="status" className="rounded-md border bg-muted/30 p-3 text-sm">{message}</p>}
-    {pending && <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 text-sm">
-      <p>Completion is not confirmed. Retry the same change or inspect its operation{scoped && <> on <Link className="underline" to={`/access?operationId=${encodeURIComponent(pending.id)}`}>All project access</Link></>} before making another change.</p>
-      <Button size="sm" variant="outline" disabled={busy} onClick={() => void execute(pending)}>Retry change</Button>
-    </div>}
+    <AccessOperationStatus operation={operation} recoveryLink={scoped ? `/access?operationId=${encodeURIComponent(pending?.id ?? operationId)}` : undefined} />
     <section className="overflow-hidden rounded-lg border">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 p-4">
         <h2 className="flex items-center gap-2 font-semibold"><Users aria-hidden="true" className="h-4 w-4" />Project members
@@ -325,75 +138,7 @@ function AccessAdministrationView({ fixedProjectId, initialOperationId }: { fixe
     </section>
     <p className="flex items-start gap-2 text-sm text-muted-foreground"><ShieldCheck aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
       Only platform admins can manage membership. Platform administration alone does not grant project content access.</p>
-    {!scoped && <>
-    <section aria-labelledby="platform-admins-heading" className="overflow-hidden rounded-lg border">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 p-4">
-        <h2 id="platform-admins-heading" className="flex items-center gap-2 font-semibold"><ShieldCheck aria-hidden="true" className="h-4 w-4" />Platform administrators</h2>
-        <Button size="sm" disabled={locked || !adminsQuery.isSuccess || adminsQuery.isFetching}
-          onClick={() => setAdminEditor(true)}><Plus aria-hidden="true" className="mr-2 h-4 w-4" />Add platform admin</Button>
-      </div>
-      <p className="border-b p-4 text-sm text-muted-foreground">Platform admins manage users, memberships and project lifecycle across the platform.
-        Project content still requires membership. Removal, demotion and account recovery remain operator-only.</p>
-      {adminsQuery.isError ? <div role="alert" className="p-4 text-sm text-destructive">
-        Platform administrator list unavailable: {adminsQuery.error.message}{" "}
-        <Button variant="link" onClick={() => void adminsQuery.refetch()}>Try again</Button>
-      </div> : adminsQuery.isPending ? <p role="status" className="flex items-center gap-2 p-6 text-sm">
-        <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />Loading platform administrators...</p> : <>
-        <ul aria-label="Platform administrators" className="divide-y">
-          {adminsQuery.data.items.map(user => <li key={user.id} className="flex flex-wrap items-center justify-between gap-4 p-4">
-            <Person user={user} fallback={user.id} />
-            <div className="flex items-center gap-2">
-              {user.disabled && <Badge variant="secondary">Account disabled</Badge>}
-              {user.pending && <Button variant="link" size="sm" onClick={() => { setOperationId(user.operationId ?? ""); setRecoveryOpen(true); }}>Change pending</Button>}
-              <Badge variant="outline">{user.disabled || user.pending ? "Platform admin (inactive)" : "Platform admin"}</Badge>
-            </div>
-          </li>)}
-          {!adminsQuery.data.items.length && <li className="p-6 text-center text-sm text-muted-foreground">No platform administrators on this page.</li>}
-        </ul>
-        {(adminCursor || adminsQuery.data.nextCursor) && <div className="flex justify-between gap-2 border-t p-4">
-          {adminCursor && <Button size="sm" variant="outline" disabled={locked || adminsQuery.isFetching} onClick={() => setAdminCursor(undefined)}>Back to first admin page</Button>}
-          {adminsQuery.data.nextCursor && <Button size="sm" variant="outline" className="ml-auto" disabled={locked || adminsQuery.isFetching}
-            onClick={() => setAdminCursor(adminsQuery.data.nextCursor)}>More administrators</Button>}
-        </div>}
-      </>}
-    </section>
-    <details open={recoveryOpen} onToggle={event => setRecoveryOpen(event.currentTarget.open)} className="rounded-md border p-4 text-sm">
-      <summary className="cursor-pointer font-medium">Advanced: operation recovery</summary>
-      <div className="mt-4 space-y-3">
-        <p className="text-muted-foreground">Access changes are audited. Inspect or reconcile an uncertain operation without repeating a different change.</p>
-        <Label htmlFor="operation-id">Operation ID</Label>
-        <Input id="operation-id" value={operationId} disabled={busy} onChange={event => setOperationId(event.target.value)} />
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={busy || !operationId} onClick={() => void recover(false)}>Inspect operation</Button>
-          <Button variant="outline" disabled={busy || !operationId} onClick={() => void recover(true)}>Reconcile operation</Button>
-        </div>
-      </div>
-    </details>
-    {adminEditor && <AccessUserDialog platformAdmin onClose={() => setAdminEditor(false)}
-      onSave={user => { setAdminEditor(false); setPromotion(user); }} />}
-    <AlertDialog open={Boolean(promotion)} onOpenChange={open => { if (!open) setPromotion(undefined); }}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Grant platform administration?</AlertDialogTitle>
-          <AlertDialogDescription>
-            {promotion ? userName(promotion) : "This user"} will be able to manage users, promote other platform admins, manage memberships and create or delete projects across the entire platform.
-            This does not grant project content access. Demotion requires an operator.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction disabled={locked} onClick={() => {
-            if (!promotion || locked) return;
-            setAdminCursor(undefined);
-            void execute({
-              id: crypto.randomUUID(), path: `/admin/users/${encodeURIComponent(promotion.id)}/promote`, method: "POST",
-              body: { revision: promotion.revision }, description: `${userName(promotion)}'s platform-admin promotion`,
-            });
-          }}>Grant platform admin</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-    </>}
+    {!scoped && <AccessOperationRecovery operation={operation} />}
     {editor && <AccessUserDialog members={members} initialUser={editor.user} initialRole={editor.role} onClose={() => setEditor(undefined)}
       onSave={(user, role) => {
         const membership = members.find(member => member.userId === user.id);

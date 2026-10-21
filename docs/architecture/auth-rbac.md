@@ -259,7 +259,7 @@ not silently successful. Completion requires an acknowledged, matched update or
 an observed identical completed operation; a zero-match/unacknowledged write
 cannot produce a successful response.
 
-Portal `/access` is the platform administration entry point.
+Portal `/access` is the project-access administration entry point.
 It lists current project members by name/email and role, with **Change role**
 and confirmed **Remove** actions. **Add people** opens a searchable user picker
 and a fixed-role selector; existing members and disabled users cannot be added.
@@ -278,9 +278,9 @@ to that exact project, replaces the selector with its name, and offers **All
 project access** to return to the global view. Missing/invalid project links
 never fall back to another project; navigation between deep links resets the
 member editor and confirmation state.
-Project-specific views show project membership controls only: they do not render
-the platform-admin section or advanced recovery controls, or request the
-platform-admin roster. Pending membership changes retain their retry behavior;
+Neither global nor project-specific `/access` views render or request the
+platform-admin roster. Project-specific views also omit advanced recovery
+controls. Pending membership changes retain their retry behavior;
 their recovery links carry the exact operation ID to
 `/access?operationId=...`, pre-filling and opening global operation recovery.
 This navigation never automatically inspects or reconciles an operation.
@@ -288,12 +288,20 @@ The roster has no separate member-filter box. User labels show the stored displa
 name and email/sign-in alias rather than repeated UUIDs; the Scope UUID remains
 available in a hover tooltip and as a search key.
 
-**Platform administrators** appears below project membership and above
-**Advanced: operation recovery**, on the global `/access` view only.
+**Platform administrators** appears at the top of `/admin`, immediately below
+the **Admin** heading and before **Feature Flags**. Its advanced operation
+recovery controls follow the administrator list. `/admin?operationId=...`
+pre-fills and opens those controls without automatically inspecting or
+reconciling anything. Existing `/access?operationId=...` recovery links remain
+supported, including for older promotion operations.
 This section is platform-wide and works without a selected project, including
 when there are no projects. It pages through users whose stored role is `admin`,
 with explicit disabled-account and pending-operation labels. Neither disabled
 accounts nor incomplete security operations grant authority.
+It mounts only after authentication is ready and the server-resolved
+platform-admin capability is present. In explicit authentication-disabled mode,
+`/admin` retains Feature Flags but hides the identity section and makes no
+administrator-list or user-search requests.
 
 **Add platform admin** searches existing enrolled users, excluding disabled
 accounts, existing admins and unknown roles. Users must sign in once before they

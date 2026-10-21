@@ -5,7 +5,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { http, HttpResponse } from "msw";
 import { expect, fn, screen, userEvent, waitFor, within } from "storybook/test";
 import { Link, useLocation } from "react-router-dom";
-import type { AccessUserSummary, PlatformAdminSummary, ProjectMembershipSummary, ProjectRole } from "shared/rbac";
+import type { AccessUserSummary, ProjectMembershipSummary, ProjectRole } from "shared/rbac";
 import { AccessAdministration } from "./AccessAdministration";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
@@ -19,42 +19,17 @@ function member(user: AccessUserSummary, role: ProjectRole, extra: Partial<Proje
 }
 function handlers(initial: ProjectMembershipSummary[] = [member(alice, "admin")], options: {
   unavailable?: boolean; searchError?: boolean; pending?: boolean; pageSize?: number;
-  noProjects?: boolean; adminUnavailable?: boolean; adminPending?: boolean; promotionConflict?: boolean; adminPageSize?: number;
+  noProjects?: boolean;
   onAdminList?: () => void;
 } = {}) {
   let members = [...initial];
-  let users = [alice, bob, charlie, disabled];
-  let admins: PlatformAdminSummary[] = [{ ...alice, role: "admin", pending: false },
-    ...(options.adminPageSize ? [{ ...charlie, role: "admin" as const, pending: false, disabled: true }] : [])];
-  users = users.map(user => admins.find(admin => admin.id === user.id) ?? user);
+  const users = [alice, bob, charlie, disabled];
   let retryId: string | null = null;
-  let promotionId: string | null = null;
   return [
     http.get("/api/v1/projects", () => HttpResponse.json(options.noProjects ? [] : [project])),
-    http.get("/api/v1/admin/platform-admins", ({ request }) => {
+    http.get("/api/v1/admin/platform-admins", () => {
       options.onAdminList?.();
-      if (options.adminUnavailable) return HttpResponse.json({ error: "Authority unavailable" }, { status: 503 });
-      const cursor = new URL(request.url).searchParams.get("cursor");
-      const start = cursor ? admins.findIndex(user => user.id === cursor) + 1 : 0;
-      const page = admins.slice(start, start + (options.adminPageSize ?? 20));
-      return HttpResponse.json({ items: page, ...(start + page.length < admins.length ? { nextCursor: page[page.length - 1].id } : {}) });
-    }),
-    http.post<{ id: string }, { revision: number }>("/api/v1/admin/users/:id/promote", async ({ request, params }) => {
-      const body: { revision: number } = await request.json();
-      const id = request.headers.get("Idempotency-Key");
-      const user = users.find(user => user.id === params.id);
-      if (!id || (promotionId && promotionId !== id)) return HttpResponse.json({ error: "Retry changed the operation key" }, { status: 409 });
-      if (!user || user.disabled || user.role !== "user" || body.revision !== user.revision || options.promotionConflict) {
-        return HttpResponse.json({ error: "Target revision or preconditions changed" }, { status: 409 });
-      }
-      if (options.adminPending && !promotionId) {
-        promotionId = id;
-        return HttpResponse.json({ operationId: id, state: "pending", revision: body.revision + 1 }, { status: 202 });
-      }
-      const promoted = { ...user, role: "admin" as const, revision: user.revision + 1 };
-      users = users.map(row => row.id === user.id ? promoted : row);
-      admins = [...admins, { ...promoted, pending: false, operationId: id }];
-      return HttpResponse.json({ operationId: id, state: "completed", revision: promoted.revision });
+      return HttpResponse.json({ items: [{ ...alice, pending: false }] });
     }),
     http.get("/api/v1/projects/:id/members", () => options.unavailable
       ? HttpResponse.json({ error: "Authority unavailable" }, { status: 503 })
@@ -269,9 +244,10 @@ export const SpecificProject: Story = {
     await expect(canvas.getByText("Contributor")).toBeVisible();
     await expect(specificProjectAdminRequests).not.toHaveBeenCalled();
     await userEvent.click(canvas.getByRole("link", { name: "All project access" }));
-    await expect(await within(await canvas.findByRole("region", { name: "Platform administrators" })).findByText("Alice Example")).toBeVisible();
+    await expect(await canvas.findByRole("combobox", { name: "Project" })).toBeVisible();
+    await expect(canvas.queryByRole("region", { name: "Platform administrators" })).not.toBeInTheDocument();
     await expect(canvas.getByText("Advanced: operation recovery")).toBeVisible();
-    await expect(specificProjectAdminRequests).toHaveBeenCalledTimes(1);
+    await expect(specificProjectAdminRequests).not.toHaveBeenCalled();
     const selector = await canvas.findByRole("combobox", { name: "Project" });
     await userEvent.selectOptions(selector, projectId);
     await expect(await within(await canvas.findByRole("list", { name: "Project members" })).findByText("Alice Example")).toBeVisible();
@@ -280,7 +256,7 @@ export const SpecificProject: Story = {
     await expect(await canvas.findByText(project.name)).toBeVisible();
     await expect(canvas.queryByRole("region", { name: "Platform administrators" })).not.toBeInTheDocument();
     await expect(canvas.queryByText("Advanced: operation recovery")).not.toBeInTheDocument();
-    await expect(specificProjectAdminRequests).toHaveBeenCalledTimes(1);
+    await expect(specificProjectAdminRequests).not.toHaveBeenCalled();
   },
 };
 
@@ -382,111 +358,15 @@ export const RestoreDeletedProject: Story = {
   },
 };
 
-async function reviewPromotion() {
-  await userEvent.click(await screen.findByRole("button", { name: "Add platform admin" }));
-  const dialog = within(await screen.findByRole("dialog"));
-  await expect(await dialog.findByRole("button", { name: /Alice Example/ })).toBeDisabled();
-  await expect(dialog.getByRole("button", { name: /Disabled user/ })).toBeDisabled();
-  await expect(dialog.queryByLabelText("Project role")).not.toBeInTheDocument();
-  await userEvent.type(dialog.getByLabelText("Search users"), "bob");
-  await userEvent.click(await dialog.findByRole("button", { name: /Bob Example/ }));
-  await userEvent.click(dialog.getByRole("button", { name: "Review promotion" }));
-  const confirmation = within(await screen.findByRole("alertdialog"));
-  await expect(confirmation.getByText(/across the entire platform/)).toBeVisible();
-  return confirmation;
-}
-
-export const PlatformAdminsWithoutProjects: Story = {
-  parameters: { msw: { handlers: handlers([], { noProjects: true }) } },
+const globalAdminRequests = fn();
+export const ProjectAccessOnly: Story = {
+  parameters: { msw: { handlers: handlers([], { noProjects: true, onAdminList: globalAdminRequests }) } },
+  render: () => { globalAdminRequests.mockClear(); return <AccessAdministration />; },
   play: async ({ canvas }) => {
-    const section = within(canvas.getByRole("region", { name: "Platform administrators" }));
-    await expect(await section.findByText("Alice Example")).toBeVisible();
-    await expect(section.getByRole("button", { name: "Add platform admin" })).toBeEnabled();
-    await expect(canvas.getByRole("button", { name: "Add people" })).toBeDisabled();
-    const heading = canvas.getByRole("heading", { name: "Platform administrators" });
-    await expect(canvas.getByRole("heading", { name: "Project members" }).compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    await expect(heading.compareDocumentPosition(canvas.getByText("Advanced: operation recovery")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  },
-};
-
-export const AddPlatformAdmin: Story = {
-  parameters: { msw: { handlers: handlers([], { noProjects: true }) } },
-  play: async ({ canvas }) => {
-    const section = within(canvas.getByRole("region", { name: "Platform administrators" }));
-    const confirmation = await reviewPromotion();
-    await expect(section.queryByText("Bob Example")).not.toBeInTheDocument();
-    await userEvent.click(confirmation.getByRole("button", { name: "Cancel" }));
-    await expect(section.queryByText("Bob Example")).not.toBeInTheDocument();
-    const confirmed = await reviewPromotion();
-    await userEvent.click(confirmed.getByRole("button", { name: /^Grant platform admin/ }));
-    await expect(await canvas.findByRole("status")).toHaveTextContent("platform-admin promotion completed");
-    await expect(await section.findByText("Bob Example")).toBeVisible();
-    await expect(section.queryByRole("button", { name: /Remove|Demote/ })).not.toBeInTheDocument();
-  },
-};
-
-export const PendingPlatformPromotionRetry: Story = {
-  parameters: { msw: { handlers: handlers([], { adminPending: true }) } },
-  play: async ({ canvas }) => {
-    const confirmation = await reviewPromotion();
-    await userEvent.click(confirmation.getByRole("button", { name: /^Grant platform admin/ }));
-    await expect(await canvas.findByRole("alert")).toHaveTextContent("pending reconciliation");
-    await expect(canvas.getByRole("button", { name: "Add platform admin" })).toBeDisabled();
-    await expect(canvas.queryByText("Bob Example")).not.toBeInTheDocument();
-    await userEvent.click(canvas.getByRole("button", { name: "Retry change" }));
-    await expect(await canvas.findByText("Bob Example")).toBeVisible();
-    await expect(canvas.getByRole("status")).toHaveTextContent("completed");
-  },
-};
-
-export const PlatformPromotionConflict: Story = {
-  parameters: { msw: { handlers: handlers([], { promotionConflict: true }) } },
-  play: async ({ canvas }) => {
-    const confirmation = await reviewPromotion();
-    await userEvent.click(confirmation.getByRole("button", { name: /^Grant platform admin/ }));
-    await expect(await canvas.findByRole("alert")).toHaveTextContent("Target revision or preconditions changed");
-    await expect(canvas.queryByRole("button", { name: "Retry change" })).not.toBeInTheDocument();
-    await expect(canvas.queryByText("Bob Example")).not.toBeInTheDocument();
-    await waitFor(() => expect(canvas.getByRole("button", { name: "Add platform admin" })).toBeEnabled());
-  },
-};
-
-export const PlatformAdminAuthorityUnavailable: Story = {
-  parameters: { msw: { handlers: handlers([], { adminUnavailable: true }) } },
-  play: async ({ canvas }) => {
-    const section = within(canvas.getByRole("region", { name: "Platform administrators" }));
-    await expect(await section.findByRole("alert")).toHaveTextContent("Platform administrator list unavailable");
-    await expect(section.getByRole("button", { name: "Add platform admin" })).toBeDisabled();
-    await expect(section.queryByText("No platform administrators on this page.")).not.toBeInTheDocument();
-  },
-};
-
-export const PaginatedPlatformAdmins: Story = {
-  parameters: { msw: { handlers: handlers([], { adminPageSize: 1 }) } },
-  play: async ({ canvas }) => {
-    const section = within(canvas.getByRole("region", { name: "Platform administrators" }));
-    await expect(await section.findByText("Alice Example")).toBeVisible();
-    await userEvent.click(section.getByRole("button", { name: "More administrators" }));
-    await expect(await section.findByText("Charlie Example")).toBeVisible();
-    await expect(section.getByText("Account disabled")).toBeVisible();
-    await expect(section.getByText("Platform admin (inactive)")).toBeVisible();
-    await userEvent.click(section.getByRole("button", { name: "Back to first admin page" }));
-    await expect(await section.findByText("Alice Example")).toBeVisible();
-  },
-};
-
-export const PendingPlatformAdminRecovery: Story = {
-  parameters: { msw: { handlers: [
-    http.get("/api/v1/admin/platform-admins", () => HttpResponse.json({
-      items: [{ ...alice, pending: true, operationId: "pending-platform-promotion" }],
-    })),
-    ...handlers(),
-  ] } },
-  play: async ({ canvas }) => {
-    const section = within(canvas.getByRole("region", { name: "Platform administrators" }));
-    await userEvent.click(await section.findByRole("button", { name: "Change pending" }));
-    await expect(section.getByText("Platform admin (inactive)")).toBeVisible();
-    await expect(canvas.getByLabelText("Operation ID")).toHaveValue("pending-platform-promotion");
-    await expect(canvas.getByText("Advanced: operation recovery").closest("details")).toHaveAttribute("open");
+    await waitFor(() => expect(canvas.getByRole("combobox", { name: "Project" })).toBeEnabled());
+    await expect(canvas.getByRole("heading", { name: "Project members" })).toBeVisible();
+    await expect(canvas.queryByRole("region", { name: "Platform administrators" })).not.toBeInTheDocument();
+    await expect(canvas.queryByRole("button", { name: "Add platform admin" })).not.toBeInTheDocument();
+    await expect(globalAdminRequests).not.toHaveBeenCalled();
   },
 };
