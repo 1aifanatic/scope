@@ -36,10 +36,16 @@ describe("committed real experiment artifacts (offline verification only)", () =
     }
     const row = cases.find(c => c.id === "held-cli")!;
     let restoredPrompt = "";
-    const executor = skippedExecutor(copilotAI({
-      complete: async (_system, user) => { restoredPrompt = user; return { content: 'Observation: {"state":"completed","observed":false}' }; },
-      close: async () => {},
-    }), artifact.optimized);
+    const executor = skippedExecutor(
+      copilotAI({
+        complete: async (_system, user) => {
+          restoredPrompt = user;
+          return { content: 'Observation: {"state":"completed","observed":false}' };
+        },
+        close: async () => { },
+      }),
+      artifact.optimized
+    );
     await executor.evaluate("beh-skipped-invocation", row.input);
     for (const id of sessionIds) expect(restoredPrompt).toContain(id);
     await expect(json("evidence/optimized.v1.ax.json").then(a => restoreArtifact(a, "gpt-5.6-sol-fast"))).rejects.toThrow("contract mismatch");
@@ -56,7 +62,8 @@ describe("committed real experiment artifacts (offline verification only)", () =
     const rebuilt = buildReadout(await json("evidence/readout-input.json"));
     expect(rebuilt).toEqual(await json("evidence/readout-preview.json"));
     const timeout = rebuilt.groups[0].behaviors.find(b => b.element_id === "beh-timeout")!;
-    expect(timeout.distinct_runs).toBe(2); expect(timeout.occurrences).toBe(4);
+    expect(timeout.distinct_runs).toBe(2);
+    expect(timeout.occurrences).toBe(4);
     expect(timeout.sources.find(s => s.source?.id === "account")).toMatchObject({ distinct_runs: 2, occurrences: 3 });
   });
   it("verifies the frozen ledger, artifact hashes and case packet fingerprints", async () => {
@@ -76,6 +83,7 @@ describe("committed real experiment artifacts (offline verification only)", () =
     const events: unknown[] = (await readFile(file("evidence/call-ledger.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line) as unknown);
     const reservations = events.filter(e => typeof e === "object" && e !== null && "type" in e && e.type === "reserved");
     const finished = events.filter(e => typeof e === "object" && e !== null && "type" in e && e.type === "finished");
-    expect(reservations).toHaveLength(256); expect(finished).toHaveLength(256);
+    expect(reservations).toHaveLength(256);
+    expect(finished).toHaveLength(256);
   });
 });

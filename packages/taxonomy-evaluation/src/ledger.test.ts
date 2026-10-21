@@ -8,10 +8,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CallLedger } from "./ledger.js";
 
 const dirs: string[] = [];
-afterEach(async () => { await Promise.all(dirs.map(dir => rm(dir, { recursive: true, force: true }))); dirs.length = 0; });
+afterEach(async () => {
+  await Promise.all(dirs.map(dir => rm(dir, { recursive: true, force: true })));
+  dirs.length = 0;
+});
 describe("durable all-in budget", () => {
   it("stops before call 501 across fresh instances; failures and unfinished reservations count", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "taxonome-ledger-test-")); dirs.push(dir);
+    const dir = await mkdtemp(join(tmpdir(), "taxonome-ledger-test-"));
+    dirs.push(dir);
     const path = join(dir, "calls.jsonl");
     const first = new CallLedger(path);
     await first.initialize();
@@ -24,9 +28,12 @@ describe("durable all-in budget", () => {
     await expect(restarted.reserve("mock", "retry/replay")).rejects.toThrow("500/500");
     await expect(restarted.initialize(499)).rejects.toThrow("cannot be reset");
     expect((await restarted.summary()).used).toBe(500);
-  }, 15_000);
+  },
+    15_000
+  );
   it("does not race concurrent processes/instances or permit a missing ledger", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "taxonome-ledger-test-")); dirs.push(dir);
+    const dir = await mkdtemp(join(tmpdir(), "taxonome-ledger-test-"));
+    dirs.push(dir);
     const a = new CallLedger(join(dir, "calls.jsonl"));
     await expect(a.reserve("mock", "missing")).rejects.toThrow();
     await a.initialize(1);

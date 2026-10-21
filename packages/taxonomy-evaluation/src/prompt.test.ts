@@ -11,19 +11,28 @@ describe("static prompt family composition and curated contract (offline, not mo
   it("registers the real SDK-only family and invokes the production program unchanged", async () => {
     const cases = await loadCases(fixture("inputs.jsonl")), gold = await loadGold(fixture("gold.json"));
     const row = cases.find(c => c.id === "train-none")!;
-    expect(listStandaloneTargets()).toContainEqual({ adapterId: "taxonome-skipped-invocation/default", family: "taxonome-skipped-invocation", variant: "default", transport: "copilot-sdk" });
+    expect(listStandaloneTargets()).toContainEqual({
+      adapterId: "taxonome-skipped-invocation/default",
+      family: "taxonome-skipped-invocation",
+      variant: "default",
+      transport: "copilot-sdk"
+    });
     let calls = 0;
-    const output = await standaloneTargets["taxonome-skipped-invocation/default"].run(row.input, {
-      complete: async (system, user) => {
-        calls++;
-        expect(system.startsWith(OBSERVATION_CONTRACT)).toBe(true);
-        expect(system).toContain(SKIPPED_INSTRUCTIONS);
-        expect(user).toContain(JSON.stringify(row.input.atif).slice(1, -1));
-        expect(user).not.toContain("expected");
-        return { content: 'Observation: {"state":"completed","observed":false}' };
+    const output = await standaloneTargets["taxonome-skipped-invocation/default"].run(
+      row.input,
+      {
+        complete: async (system, user) => {
+          calls++;
+          expect(system.startsWith(OBSERVATION_CONTRACT)).toBe(true);
+          expect(system).toContain(SKIPPED_INSTRUCTIONS);
+          expect(user).toContain(JSON.stringify(row.input.atif).slice(1, -1));
+          expect(user).not.toContain("expected");
+          return { content: 'Observation: {"state":"completed","observed":false}' };
+        },
+        close: async () => { },
       },
-      close: async () => {},
-    }, "mock");
+      "mock"
+    );
     expect(calls).toBe(1);
     expect(assertObservation(output, gold[row.id]["beh-skipped-invocation"]!)).toEqual([]);
     const trainingFamilies = new Set(cases.filter(c => c.split === "train").map(c => c.family));
@@ -36,13 +45,25 @@ describe("static prompt family composition and curated contract (offline, not mo
     const original = structuredClone(input);
     input.atif.session_id = "z-identifier";
     if (input.context.run_id) input.context.run_id = "r-identifier";
-    const output = await standaloneTargets["taxonome-skipped-invocation/default"].run(input, {
-      complete: async (_system, user) => {
-        expect(user).toContain("z-identifier"); expect(user).not.toContain(original.atif.session_id);
-        expect(user).toContain(original.atif.steps[1].message);
-        return { content: `Observation: ${JSON.stringify({ state: "completed", observed: true, occurrences: [{ source: input.context.sources[0], extension_point: "storage-skill", discovery_turn: 2 }] })}` };
-      }, close: async () => {},
-    }, "mock");
+    const output = await standaloneTargets["taxonome-skipped-invocation/default"].run(
+      input,
+      {
+        complete: async (_system, user) => {
+          expect(user).toContain("z-identifier");
+          expect(user).not.toContain(original.atif.session_id);
+          expect(user).toContain(original.atif.steps[1].message);
+          return {
+            content: `Observation: ${JSON.stringify({
+              state: "completed",
+              observed: true,
+              occurrences: [{ source: input.context.sources[0], extension_point: "storage-skill", discovery_turn: 2 }]
+            })}`
+          };
+        },
+        close: async () => { },
+      },
+      "mock"
+    );
     expect(output).toMatchObject({ state: "completed", observed: true });
   });
 });

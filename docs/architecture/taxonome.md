@@ -74,8 +74,7 @@ typed `AxGen` subclass enforces these limits even when Ax BootstrapFewShot
 supplies its own retry override. A custom Ax prompt template preserves the
 immutable schema/trust wrapper for student and bootstrap-teacher execution;
 GEPA reflection uses its own typed program, without observation formatting.
-SDK
-error hooks request abort/no retries; model-failure events trigger abort.
+SDK error hooks request abort/no retries; model-failure events trigger abort.
 Unexpected multiple model-attempt events are charged and stop that transport;
 reconcile them before another experiment. SDK internals do not expose a
 pre-attempt hook or guarantees about infrastructure retries; retain the event
@@ -263,6 +262,15 @@ All raw evidence is in
 [`packages/taxonomy-evaluation/evidence/`](../../packages/taxonomy-evaluation/evidence/).
 `manifest.json` records hashes, settings, per-phase usage, and the full
 cumulative ledger. Model evals are distinct from the offline tests.
+
+After the experiment was frozen, the implementation received a
+behavior-preserving readability pass under the repository's code-readability
+guidance. It renamed local variables, separated logical phases, documented
+public and non-obvious contracts, and simplified control flow without changing
+prompt text, schemas, fixtures, gold facts, recorded outputs, or the 256-call
+ledger. The manifest preserves the evidence-generating source fingerprints and
+records the later readability source revision separately; no model evidence
+was regenerated for that source-only change.
 
 | Experiment | Case result | Actual SDK requests | Interpretation |
 |---|---:|---:|---|

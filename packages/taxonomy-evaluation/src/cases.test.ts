@@ -17,8 +17,16 @@ it("fails missing, duplicate and unexpected element results; explicit subsets ar
   expect(checkCase(row, evaluations, gold, ["beh-skipped-invocation"])).not.toEqual([]);
 });
 it("optional expectation fields are unconstrained, not assertions of absence", () => {
-  expect(assertObservation({
-    state: "completed", observed: true,
-    occurrences: [{ source: { id: "s", label: "Source", surface_id: "surface-mcp" }, related_turns: [2], tool_call_id: "c" }],
-  }, { state: "completed", observed: true, occurrences: [{ tool_call_id: "c" }] })).toEqual([]);
+  expect(assertObservation(
+    {
+      state: "completed",
+      observed: true,
+      occurrences: [{
+        source: { id: "s", label: "Source", surface_id: "surface-mcp" },
+        related_turns: [2],
+        tool_call_id: "c"
+      }],
+    },
+    { state: "completed", observed: true, occurrences: [{ tool_call_id: "c" }] }
+  )).toEqual([]);
 });
