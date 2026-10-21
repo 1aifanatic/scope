@@ -20,6 +20,8 @@ You submit a **request**. A request bundles:
 2. A **criteria set** — how to judge the result.
 3. A **profile** (or inline runtime configuration) — which agent,
    model, and tools to use.
+4. An optional **codebase** — the versioned project snapshot to seed
+   into the agent's workspace.
 
 When Scope picks up your request, it creates a **run** (one
 execution attempt). A retry creates a new run on the same request.
@@ -27,8 +29,10 @@ execution attempt). A retry creates a new run on the same request.
 ## Open the submit form
 
 From the Portal navigation, click **New Run** (the form name in the
-Portal — it submits a request). The form is split into the three
-sections above.
+Portal — it submits a request). In the collapsed desktop sidebar, hovering or
+focusing this primary action expands the launcher to also expose **New
+Experiment**; the expanded sidebar and mobile navigation show both actions
+directly. The form is split into the three sections above.
 
 **New Run** remains the permanent path for one request, whether it
 uses a profile or inline configuration. For named multi-run
@@ -85,16 +89,24 @@ If you don't pick a profile, set the fields manually:
 After you've configured a request inline, you can save the setup as a
 profile to capture it for re-use.
 
-## 4. Submit
+## 4. Add a codebase (optional)
+
+Select **Add codebase** when the agent should start from an existing
+project. Pick a bare Git codebase to resolve its default branch at
+submission time, or select a specific revision to pin the starting
+workspace.
+
+See [Managing codebases](/guides/managing-codebases/).
+
+## 5. Submit
 
 Click **Submit**. The Portal navigates to the request detail page.
 The request is assigned a unique ID and queued; a run is created when
 a worker picks it up.
 
 If you use occurrences greater than one or add profile variations in
-**New Run**, the Portal shows the accessible
-`legacy-request-composition` notice and preserves the existing
-expansion behavior. New compositions should use
+**New Run**, the Portal preserves the existing expansion behavior and shows
+neutral contextual guidance beside those controls. New compositions should use
 [New Experiment](/guides/creating-experiments/).
 
 ## Watch a run
@@ -126,8 +138,9 @@ This is useful for sampling variability of an agent on the same prompt.
 ## Tips
 
 - **Reproducibility** — always pick a profile when running for the
-  record. Inline configurations work for exploration but make later
-  comparisons harder.
+  record and pin a codebase revision when the task uses an existing
+  project. Inline configurations and moving Git branches work for
+  exploration but make later comparisons harder.
 - **Reuse task prompts and criteria.** They're the building blocks the
   rest of Scope (prompt features, reports, MDP analyses) is keyed
   on.
@@ -139,5 +152,7 @@ This is useful for sampling variability of an agent on the same prompt.
 - Automate this workflow with the [REST API](/guides/submitting-requests-api/)
   or the [CLI](/guides/submitting-requests-cli/).
 - Save your favorite setup as a [profile](/guides/defining-profiles/).
+- Seed an existing project with a
+  [codebase](/guides/managing-codebases/).
 - Create and inspect a named
   [Experiment](/guides/creating-experiments/).
