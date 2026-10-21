@@ -40,7 +40,7 @@ production typed Ax program and validator. Its separate ATIF/gold packet,
 fixed deterministic metric, bounded optimization, and actual SDK replay are
 documented in [taxonome.md](taxonome.md). It intentionally does not use the
 Azure quality runner or add another model transport. Run its live evals with
-`node apps/taxonome/dist/index.js eval --cases ... --gold ... --ledger ...`;
+`pnpm --silent taxonome eval --cases ... --gold ... --ledger ...`;
 the offline composition check is
 `pnpm exec vitest run packages/taxonomy-evaluation/src/prompt.test.ts --reporter=default`.
 

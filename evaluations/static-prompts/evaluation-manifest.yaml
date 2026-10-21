@@ -29,5 +29,5 @@ standaloneFamilies:
     adapter: adapter/standalone.ts
     cases: ../../packages/taxonomy-evaluation/fixtures/inputs.jsonl
     assertions: ../../packages/taxonomy-evaluation/fixtures/gold.json
-    command: node apps/taxonome/dist/index.js eval
+    command: pnpm --silent taxonome eval
     rubric: exact state/polarity, occurrence cardinality, grounded source/turn/call identities, schema validity
