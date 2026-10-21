@@ -6,10 +6,11 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
-import { listTargets } from "../adapter/registry.js";
+import { listTargets, listStandaloneTargets } from "../adapter/registry.js";
 
 interface EvaluationManifest {
   qualityFamilies: Array<{ id: string; variants: string[] }>;
+  standaloneFamilies?: Array<{ id: string; variants: string[] }>;
 }
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -42,6 +43,9 @@ export async function validateCoverage(
   );
   const adapterQuality = listTargets().map((target) => target.adapterId);
   assertSame("quality adapter", manifestQuality, adapterQuality);
+  assertSame("standalone adapter",
+    (manifest.standaloneFamilies ?? []).flatMap(f => f.variants.map(v => `${f.id}/${v}`)),
+    listStandaloneTargets().map(t => t.adapterId));
 
   return {
     qualityTargets: adapterQuality.length,

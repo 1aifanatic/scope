@@ -1,0 +1,32 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import { loadCases, loadGold, assertObservation } from "./cases.js";
+import { standaloneTargets, listStandaloneTargets } from "../../../evaluations/static-prompts/adapter/standalone.js";
+import { OBSERVATION_CONTRACT, SKIPPED_INSTRUCTIONS } from "./prompt.js";
+const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
+describe("static prompt family composition and curated contract (offline, not model evidence)", () => {
+  it("registers the real SDK-only family and invokes the production program unchanged", async () => {
+    const cases = await loadCases(fixture("inputs.jsonl")), gold = await loadGold(fixture("gold.json"));
+    const row = cases.find(c => c.id === "train-none")!;
+    expect(listStandaloneTargets()).toContainEqual({ adapterId: "taxonome-skipped-invocation/default", family: "taxonome-skipped-invocation", variant: "default", transport: "copilot-sdk" });
+    let calls = 0;
+    const output = await standaloneTargets["taxonome-skipped-invocation/default"].run(row.input, {
+      complete: async (system, user) => {
+        calls++;
+        expect(system.startsWith(OBSERVATION_CONTRACT)).toBe(true);
+        expect(system).toContain(SKIPPED_INSTRUCTIONS);
+        expect(user).toContain(JSON.stringify(row.input.atif).slice(1, -1));
+        expect(user).not.toContain("expected");
+        return { content: 'Observation: {"state":"completed","observed":false}' };
+      },
+      close: async () => {},
+    }, "mock");
+    expect(calls).toBe(1);
+    expect(assertObservation(output, gold[row.id]["beh-skipped-invocation"]!)).toEqual([]);
+    const trainingFamilies = new Set(cases.filter(c => c.split === "train").map(c => c.family));
+    expect(cases.filter(c => c.split === "heldout").some(c => trainingFamilies.has(c.family))).toBe(false);
+  });
+});

@@ -1,0 +1,19 @@
+{
+  "name": "taxonomy-evaluation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": { "source": "./src/index.ts", "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./copilot": { "source": "./src/copilot.ts", "types": "./dist/copilot.d.ts", "import": "./dist/copilot.js" },
+    "./optimization": { "source": "./src/optimization.ts", "types": "./dist/optimization.d.ts", "import": "./dist/optimization.js" },
+    "./cases": { "source": "./src/cases.ts", "types": "./dist/cases.d.ts", "import": "./dist/cases.js" }
+  },
+  "scripts": { "build": "tsc", "lint": "tsc --noEmit", "test": "vitest run src --reporter=default" },
+  "dependencies": {
+    "@ax-llm/ax": "25.3.2",
+    "@github/copilot-sdk": "1.0.1",
+    "zod": "3.25.76"
+  },
+  "devDependencies": { "@types/node": "^22.7.0", "typescript": "^5.6.2" }
+}
