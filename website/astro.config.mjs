@@ -4,6 +4,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import mermaid from 'astro-mermaid';
 import starlightOpenAPI, { openAPISidebarGroups } from 'starlight-openapi';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -66,6 +67,10 @@ export default defineConfig({
 		remarkPlugins: [remarkGfm, [remarkBasePath, { base }], remarkHttpSnippets],
 	},
 	integrations: [
+		mermaid({
+			autoTheme: true,
+			enableLog: false,
+		}),
 		starlight({
 			title: 'Scope',
 			logo: {
@@ -75,6 +80,7 @@ export default defineConfig({
 			},
 			customCss: ['./src/styles/landing.css'],
 			components: {
+				Head: './src/components/Head.astro',
 				SiteTitle: './src/components/SiteTitle.astro',
 				Header: './src/components/Header.astro',
 				PageTitle: './src/components/PageTitle.astro',
@@ -128,6 +134,7 @@ export default defineConfig({
 							collapsed: true,
 							items: [
 								{ label: 'Task prompts', slug: 'guides/managing-task-prompts' },
+								{ label: 'Codebases', slug: 'guides/managing-codebases' },
 								{ label: 'Evaluation criteria', slug: 'guides/defining-criteria' },
 								{ label: 'Agent profiles', slug: 'guides/defining-profiles' },
 								{ label: 'Prompt features', slug: 'guides/prompt-features' },
@@ -153,6 +160,18 @@ export default defineConfig({
 								{ label: 'Manage provider credentials', slug: 'guides/managing-credentials' },
 							],
 						},
+					],
+				},
+				{
+					label: 'Kubernetes self-hosting',
+					collapsed: true,
+					items: [
+						{ label: 'Overview', slug: 'self-hosting/overview' },
+						{ label: 'Provision Azure infrastructure', slug: 'self-hosting/provision-aks' },
+						{ label: 'Deploy with Helm', slug: 'self-hosting/deploy-helm' },
+						{ label: 'Autoscaling with KEDA', slug: 'self-hosting/scaling' },
+						{ label: 'Configuration', slug: 'self-hosting/configuration' },
+						{ label: 'Operations', slug: 'self-hosting/operations' },
 					],
 				},
 				{
