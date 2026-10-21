@@ -152,7 +152,7 @@ function AccessAdministrationView({ fixedProjectId, initialOperationId, platform
       Project admins manage membership of their own project. Only platform admins manage accounts and project lifecycle; platform administration alone does not grant project content access.</p>
     {!scoped && platformAdmin && <AccessOperationRecovery operation={operation} />}
     {editor && <AccessUserDialog members={members} initialUser={editor.user} initialRole={editor.role} selfUserId={platformAdmin ? undefined : selfUserId}
-      lookupProjectId={platformAdmin ? undefined : projectId} onClose={() => setEditor(undefined)}
+      searchProjectId={platformAdmin ? undefined : projectId} onClose={() => setEditor(undefined)}
       onSave={(user, role) => {
         const membership = members.find(member => member.userId === user.id);
         void execute({

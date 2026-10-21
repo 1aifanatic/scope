@@ -418,7 +418,7 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
     expect(await users.countDocuments({ idpSubject: otherSubject })).toBe(1);
   });
 
-  it("keeps paginated user search platform-only while project admins manage exact enrolled members", async () => {
+  it("keeps global search platform-only while verified project admins search enrolled membership candidates", async () => {
     const db = mongo.db(database);
     _injectTestDependencies({ projectStore: new ProjectStore(db.collection<ProjectDocument>("projects")) });
     const adminSubject = randomUUID(), ordinarySubject = randomUUID();
@@ -471,6 +471,24 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
     expect(grant.status).toBe(200);
     expect((await request(app).get("/api/v1/admin/users/search").set("Authorization", ordinaryBearer)).status).toBe(403);
     expect((await request(app).get(`/api/v1/projects/${projectId}/members`).set("Authorization", ordinaryBearer)).status).toBe(200);
+    const searchPath = `/api/v1/projects/${projectId}/members/search`;
+    expect((await request(app).get(searchPath)).status).toBe(401);
+    expect((await request(app).get(searchPath).set("Authorization", "Bearer invalid")).status).toBe(401);
+    const scopedFirst = await request(app).get(searchPath)
+      .query({ q: prefix.toUpperCase(), limit: 2 }).set("Authorization", ordinaryBearer);
+    expect(scopedFirst.status).toBe(200);
+    expect(scopedFirst.headers["cache-control"]).toBe("no-store");
+    const scopedFirstPage: AccessUserSearchResult = scopedFirst.body;
+    const scopedSecond = await request(app).get(searchPath)
+      .query({ q: prefix, limit: 2, cursor: scopedFirstPage.nextCursor }).set("Authorization", ordinaryBearer);
+    expect(scopedSecond.status).toBe(200);
+    const scopedSecondPage: AccessUserSearchResult = scopedSecond.body;
+    expect(new Set([...scopedFirstPage.items, ...scopedSecondPage.items].map(user => user.id)))
+      .toEqual(new Set(fixtures.map(user => user._id)));
+    const foreign = await request(app).post("/api/v1/projects").set("Authorization", adminBearer).send({ name: "Foreign directory fixture" });
+    expect(foreign.status).toBe(201);
+    expect((await request(app).get(`/api/v1/projects/${foreign.body.id}/members/search`)
+      .set("Authorization", ordinaryBearer)).status).toBe(404);
     const candidate = fixtures[0];
     expect((await request(app).get(`/api/v1/projects/${projectId}/members/lookup/${candidate._id}`)
       .set("Authorization", ordinaryBearer)).status).toBe(200);
@@ -478,6 +496,7 @@ describe.runIf(Boolean(mongoUri && redisPort))("IdP -> explicit login -> Redis/M
     const assignment = await request(app).put(`/api/v1/projects/${projectId}/members/${candidate._id}`)
       .set("Authorization", ordinaryBearer).set("Idempotency-Key", assignmentId).send({ role: "contributor", revision: 0 });
     expect(assignment.status).toBe(200);
+    expect((await request(app).get(searchPath).set("Authorization", `Bearer ${await token(candidate.idpSubject)}`)).status).toBe(403);
     expect(await db.collection<AdminOperation>("admin_operations").findOne({ _id: assignmentId })).toMatchObject({
       actor: ordinaryId, state: "completed", reason: "Explicit project-admin membership assignment",
     });

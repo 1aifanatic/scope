@@ -28,6 +28,11 @@ const membershipInput = z.object({
   revision: z.number().int().nonnegative(),
 }).strict();
 const revisionInput = z.object({ revision: z.number().int().nonnegative() }).strict();
+const userSearchQuery = z.object({
+  q: z.string().trim().max(100).default(""),
+  cursor: z.string().min(1).max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+}).strict();
 const userProjection = { _id: 1, displayName: 1, email: 1, alias: 1, role: 1, disabledAt: 1, revision: 1 };
 
 function userSummary(user: UserDocument): AccessUserSummary {
@@ -39,6 +44,20 @@ function userSummary(user: UserDocument): AccessUserSummary {
 
 export function registerAccessRoutes(ctx: Pick<RouteContext, "app" | "registry" | "db" | "usersCollection" | "projectStore">): void {
   const auth = () => new Authorization(ctx.db);
+  const searchUsers = async ({ q, cursor, limit }: z.infer<typeof userSearchQuery>) => {
+    const literal = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const filter: Filter<UserDocument> = {
+      ...(cursor ? { _id: { $gt: cursor } } : {}),
+      ...(literal ? { $or: ["displayName", "email", "alias", "_id"].map(field => ({ [field]: { $regex: literal, $options: "i" } })) } : {}),
+    };
+    const users = await ctx.usersCollection.find(filter, { projection: userProjection, timeoutMS: 5_000 })
+      .sort({ _id: 1 }).limit(limit + 1).toArray();
+    const page = users.slice(0, limit);
+    return {
+      items: page.map(userSummary),
+      ...(users.length > limit ? { nextCursor: page[page.length - 1]._id } : {}),
+    };
+  };
   apiRoute(ctx.app, ctx.registry, {
     method: "get", path: "/api/v1/admin/platform-admins", tags: ["Access"], summary: "List platform administrators, including disabled accounts and pending changes",
     query: z.object({
@@ -97,26 +116,21 @@ export function registerAccessRoutes(ctx: Pick<RouteContext, "app" | "registry" 
   });
   apiRoute(ctx.app, ctx.registry, {
     method: "get", path: "/api/v1/admin/users/search", tags: ["Access"], summary: "Search enrolled platform users (platform administration)",
-    query: z.object({
-      q: z.string().trim().max(100).default(""),
-      cursor: z.string().min(1).max(200).optional(),
-      limit: z.coerce.number().int().min(1).max(50).default(20),
-    }).strict(),
+    query: userSearchQuery,
     response: AccessUserSearchResultSchema,
     handler: async (req, res) => {
-      const { q, cursor, limit } = req.query;
-      const literal = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const filter: Filter<UserDocument> = {
-        ...(cursor ? { _id: { $gt: cursor } } : {}),
-        ...(literal ? { $or: ["displayName", "email", "alias", "_id"].map(field => ({ [field]: { $regex: literal, $options: "i" } })) } : {}),
-      };
-      const users = await ctx.usersCollection.find(filter, { projection: userProjection, timeoutMS: 5_000 })
-        .sort({ _id: 1 }).limit(limit + 1).toArray();
-      const page = users.slice(0, limit);
-      res.json({
-        items: page.map(userSummary),
-        ...(users.length > limit ? { nextCursor: page[page.length - 1]._id } : {}),
-      });
+      res.setHeader("Cache-Control", "no-store");
+      res.json(await searchUsers(req.query));
+    },
+  });
+  apiRoute(ctx.app, ctx.registry, {
+    method: "get", path: "/api/v1/projects/:id/members/search", tags: ["Access"], summary: "Search enrolled users to add to this project (project or platform administration)",
+    params: z.object({ id: z.string().min(1) }).strict(),
+    query: userSearchQuery,
+    response: AccessUserSearchResultSchema,
+    handler: async (req, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      res.json(await searchUsers(req.query));
     },
   });
   apiRoute(ctx.app, ctx.registry, {

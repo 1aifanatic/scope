@@ -36,12 +36,12 @@ export function Person({ user, fallback }: { user?: AccessUserSummary; fallback:
   </div>;
 }
 
-export function AccessUserDialog({ members = [], initialUser, initialRole, platformAdmin = false, lookupProjectId, selfUserId, onClose, onSave }: {
+export function AccessUserDialog({ members = [], initialUser, initialRole, platformAdmin = false, searchProjectId, selfUserId, onClose, onSave }: {
   members?: ProjectMembershipSummary[];
   initialUser?: AccessUserSummary;
   initialRole?: ProjectRole;
   platformAdmin?: boolean;
-  lookupProjectId?: string;
+  searchProjectId?: string;
   selfUserId?: string;
   onClose: () => void;
   onSave: (user: AccessUserSummary, role: ProjectRole) => void;
@@ -52,14 +52,13 @@ export function AccessUserDialog({ members = [], initialUser, initialRole, platf
   const [selected, setSelected] = useState(initialUser);
   const [role, setRole] = useState<ProjectRole>(initialRole ?? "reader");
   const [error, setError] = useState("");
-  const exactLookup = lookupProjectId !== undefined && !platformAdmin;
-  const validId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(query);
+  const scopedSearch = searchProjectId !== undefined && !platformAdmin;
   const usersQuery = useQuery({
-    queryKey: ["access-users", exactLookup ? lookupProjectId : "platform", query, cursor],
-    queryFn: async ({ signal }): Promise<AccessUserSearchResult> => exactLookup
-      ? { items: [await api.lookupProjectMember(lookupProjectId, query, signal)] }
+    queryKey: ["access-users", scopedSearch ? searchProjectId : "platform", query, cursor],
+    queryFn: async ({ signal }): Promise<AccessUserSearchResult> => scopedSearch
+      ? api.searchProjectMembers(searchProjectId, { q: query, cursor, signal })
       : api.searchAccessUsers({ q: query, cursor, signal }),
-    enabled: !initialUser && (!exactLookup || validId),
+    enabled: !initialUser,
     retry: false,
   });
   const searching = search.trim() !== query || usersQuery.isFetching;
@@ -71,21 +70,19 @@ export function AccessUserDialog({ members = [], initialUser, initialRole, platf
           ? "Choose an enabled user who has signed in to Scope. No invitation is sent."
           : initialUser
           ? `Update ${userName(initialUser)}'s access to this project.`
-          : exactLookup
-          ? "Enter the exact Scope user ID shared by someone who has already signed in. They can find it with CLI access me or on the No project access screen. Name/email directory search and invitations are not available."
           : "Find an existing Scope user, then choose the access to grant. No invitation is sent."}</DialogDescription>
       </DialogHeader>
       <div className="min-h-0 space-y-4 overflow-y-auto px-6 pb-6">
         {!initialUser && <>
-          <Label htmlFor="access-user-search">{exactLookup ? "Scope user ID" : "Search users"}</Label>
+          <Label htmlFor="access-user-search">Search users</Label>
           <div className="relative">
             <Search aria-hidden="true" className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-            <Input id="access-user-search" className="pl-9" placeholder={exactLookup ? "Exact enrolled Scope UUID" : "Search by name, email or Scope ID"}
+            <Input id="access-user-search" className="pl-9" placeholder="Search by name, email or Scope ID"
               value={search} maxLength={100} onChange={event => {
                 setSearch(event.target.value); setCursor(undefined); setSelected(undefined);
               }} />
           </div>
-          {exactLookup && !validId ? <p className="text-sm text-muted-foreground">Enter a complete Scope UUID to look up this person.</p> : usersQuery.isError ? <div role="alert" className="text-sm text-destructive">
+          {usersQuery.isError ? <div role="alert" className="text-sm text-destructive">
             User search unavailable: {usersQuery.error.message}{" "}
             <Button variant="link" onClick={() => void usersQuery.refetch()}>Try again</Button>
           </div> : searching ? <p role="status" className="text-sm text-muted-foreground">Searching users...</p> : <>

@@ -111,6 +111,7 @@ describe.runIf(Boolean(uri))("Project-admin membership routes with canonical aut
   it("returns 404 for foreign projects and 403 for readers/contributors before roster or target discovery", async () => {
     for (const [path, method] of [
       [`/api/v1/projects/${otherProject}/members`, "get"],
+      [`/api/v1/projects/${otherProject}/members/search?q=Enrolled`, "get"],
       [`/api/v1/projects/${otherProject}/members/lookup/${targetId}`, "get"],
       [memberPath(targetId, otherProject), "put"], [memberPath(targetId, otherProject), "delete"],
     ] as const) {
@@ -121,6 +122,7 @@ describe.runIf(Boolean(uri))("Project-admin membership routes with canonical aut
       expect((await grant(targetId, role, revision++)).state).toBe("completed");
       for (const [path, method] of [
         [`/api/v1/projects/${projectId}/members`, "get"],
+        [`/api/v1/projects/${projectId}/members/search?q=Enrolled`, "get"],
         [`/api/v1/projects/${projectId}/members/lookup/${randomUUID()}`, "get"],
         [memberPath(), "put"], [memberPath(), "delete"],
       ] as const) {
@@ -130,6 +132,51 @@ describe.runIf(Boolean(uri))("Project-admin membership routes with canonical aut
     for (const path of ["/api/v1/admin/users/search", "/api/v1/admin/users", "/api/v1/admin/platform-admins"]) {
       expect((await request(app).get(path)).status).toBe(403);
     }
+  });
+
+  it("searches minimal enrolled-user summaries by name, email, alias and Scope UUID with bounded literal pagination", async () => {
+    const prefix = `Member search ${randomUUID()}`;
+    const now = new Date();
+    const candidates: UserDocument[] = ["Alice", "Bob.*[", "Disabled"].map((name, index) => ({
+      _id: randomUUID(), idp: "entra", idpTenant: "fixture", idpSubject: randomUUID(), role: "user",
+      displayName: `${prefix} ${name}`, email: `${index}-${prefix}@example.test`, alias: `${prefix}-${index}`,
+      ...(index === 2 ? { disabledAt: now } : {}), createdAt: now, updatedAt: now,
+    }));
+    await db.collection<UserDocument>("users").insertMany(candidates);
+    const path = `/api/v1/projects/${projectId}/members/search`;
+    const first = await request(app).get(path).query({ q: prefix.toUpperCase(), limit: 2 });
+    expect(first.status).toBe(200);
+    expect(first.headers["cache-control"]).toBe("no-store");
+    expect(first.body.items).toHaveLength(2);
+    expect(first.body.nextCursor).toBeTruthy();
+    const second = await request(app).get(path).query({ q: prefix, limit: 2, cursor: first.body.nextCursor });
+    expect(second.status).toBe(200);
+    expect(second.body.items).toHaveLength(1);
+    expect(second.body.nextCursor).toBeUndefined();
+    const items: { id: string; disabled: boolean }[] = [...first.body.items, ...second.body.items];
+    expect(new Set(items.map(user => user.id))).toEqual(new Set(candidates.map(user => user._id)));
+    expect(items.find(user => user.id === candidates[2]._id)?.disabled).toBe(true);
+    for (const item of items) {
+      expect(Object.keys(item).sort()).toEqual(["alias", "disabled", "displayName", "email", "id", "revision", "role"]);
+    }
+    for (const q of [candidates[0].email, candidates[0].alias, candidates[0]._id]) {
+      const result = await request(app).get(path).query({ q });
+      expect(result.status).toBe(200);
+      expect(result.body.items.map((user: { id: string }) => user.id)).toEqual([candidates[0]._id]);
+    }
+    const literal = await request(app).get(path).query({ q: `${prefix} Bob.*[` });
+    expect(literal.status).toBe(200);
+    expect(literal.body.items.map((user: { id: string }) => user.id)).toEqual([candidates[1]._id]);
+    const missing = await request(app).get(path).query({ q: randomUUID() });
+    expect(missing.status).toBe(200);
+    expect(missing.body).toEqual({ items: [] });
+    for (const query of [{ limit: 0 }, { limit: 51 }, { q: "x".repeat(101) }, { cursor: "" }, { role: "admin" }]) {
+      expect((await request(app).get(path).query(query)).status).toBe(400);
+    }
+    expect((await request(app).get(path).set("X-Test-Verified-Actor", platformId)).status).toBe(200);
+    expect((await request(app).get(`/api/v1/projects/${otherProject}/members/search`).query({ q: "x".repeat(101) })).status).toBe(404);
+    expect((await request(app).put(memberPath(adminId)).send({ role: "reader", revision: 1 })).status).toBe(200);
+    expect((await request(app).get(path)).status).toBe(403);
   });
 
   it("rejects tampered fields, unenrolled/disabled targets and stale revisions without a grant", async () => {

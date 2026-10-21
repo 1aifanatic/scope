@@ -43,23 +43,29 @@ export function registerAccessCommands(program: Command): void {
       catch (error) { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; }
     };
   }
+  function search(options: AccessOptions, path: string, query?: string): Promise<void> {
+    const limit = Number(options.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new Error("Limit must be an integer from 1 to 50");
+    const params = new URLSearchParams({ q: query ?? "", limit: String(limit) });
+    if (options.cursor) params.set("cursor", options.cursor);
+    return request(options, `${path}?${params}`);
+  }
   command("me", "Read own account and current capabilities").action(action((options: AccessOptions) => request(options, "/users/me")));
   command("enroll", "Explicitly enroll after a successful IdP login").action(action((options: AccessOptions) => request(options, "/users/me", "POST")));
   command("find-user <userId>", "Exact enrolled Scope UUID lookup (platform admin)")
     .action(action((userId: string, options: AccessOptions) => request(options, `/admin/users?userId=${encodeURIComponent(userId)}`)));
-  command("find-member <projectId> <userId>", "Exact enrolled Scope UUID lookup for adding a member (project or platform admin; no directory search)")
+  command("find-member <projectId> <userId>", "Exact enrolled Scope UUID lookup for adding a member (project or platform admin)")
     .action(action((projectId: string, userId: string, options: AccessOptions) =>
       request(options, `/projects/${encodeURIComponent(projectId)}/members/lookup/${encodeURIComponent(userId)}`)));
   command("search-users [query]", "Search enrolled platform users by name, email or Scope UUID (platform admin)")
     .option("--cursor <id>", "Continue from the previous response's nextCursor")
     .option("--limit <number>", "Maximum users per page (1-50)", "20")
-    .action(action((query: string | undefined, options: AccessOptions) => {
-      const limit = Number(options.limit);
-      if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new Error("Limit must be an integer from 1 to 50");
-      const params = new URLSearchParams({ q: query ?? "", limit: String(limit) });
-      if (options.cursor) params.set("cursor", options.cursor);
-      return request(options, `/admin/users/search?${params}`);
-    }));
+    .action(action((query: string | undefined, options: AccessOptions) => search(options, "/admin/users/search", query)));
+  command("search-members <projectId> [query]", "Find enrolled users by name, email or Scope UUID to add to a project (project or platform admin)")
+    .option("--cursor <id>", "Continue from the previous response's nextCursor")
+    .option("--limit <number>", "Maximum users per page (1-50)", "20")
+    .action(action((projectId: string, query: string | undefined, options: AccessOptions) =>
+      search(options, `/projects/${encodeURIComponent(projectId)}/members/search`, query)));
   command("projects", "Platform-only project control-plane inventory")
     .action(action((options: AccessOptions) => request(options, "/projects?controlPlane=true&includeDeleted=true")));
   command("platform-admins", "List platform administrators, including disabled accounts and pending changes")

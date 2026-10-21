@@ -186,6 +186,9 @@ export const api = {
   lookupProjectMember: (projectId: string, userId: string, signal?: AbortSignal): Promise<AccessUserSummary> =>
     request<unknown>(`/projects/${encodeURIComponent(projectId)}/members/lookup/${encodeURIComponent(userId)}`, { signal, cache: "no-store" })
       .then(data => AccessUserSummarySchema.parse(data)),
+  searchProjectMembers: (projectId: string, options: { q?: string; cursor?: string; signal?: AbortSignal } = {}): Promise<AccessUserSearchResult> =>
+    request<unknown>(`/projects/${encodeURIComponent(projectId)}/members/search${qs({ q: options.q, cursor: options.cursor })}`, { signal: options.signal, cache: "no-store" })
+      .then(data => AccessUserSearchResultSchema.parse(data)),
   /** Only AuthProvider calls these; enrollment must never be prefetched. */
   getCurrentUser: (opts: { signal?: AbortSignal } = {}): Promise<CurrentUserResponse> =>
     requestCurrentUser("GET", opts),

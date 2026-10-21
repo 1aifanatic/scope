@@ -34,6 +34,18 @@ function handlers(initial: ProjectMembershipSummary[] = [member(alice, "admin")]
   let members = [...initial];
   const users = [alice, bob, charlie, disabled];
   let retryId: string | null = null;
+  const searchUsers = ({ request }: { request: Request }) => {
+    if (options.searchError) return HttpResponse.json({ error: "Directory unavailable" }, { status: 503 });
+    const url = new URL(request.url);
+    const query = url.searchParams.get("q")?.toLowerCase() ?? "";
+    const matches = users.filter(user =>
+      `${user.displayName} ${user.email} ${user.id}`.toLowerCase().includes(query),
+    );
+    const cursor = url.searchParams.get("cursor");
+    const start = cursor ? matches.findIndex(user => user.id === cursor) + 1 : 0;
+    const page = matches.slice(start, start + (options.pageSize ?? matches.length));
+    return HttpResponse.json({ items: page, ...(start + page.length < matches.length ? { nextCursor: page[page.length - 1].id } : {}) });
+  };
   return [
     http.get("/api/v1/projects", () => HttpResponse.json(options.noProjects ? [] : [project])),
     http.get("/api/v1/projects/:id", () => HttpResponse.json(project)),
@@ -43,6 +55,7 @@ function handlers(initial: ProjectMembershipSummary[] = [member(alice, "admin")]
         : user.disabled ? HttpResponse.json({ error: "Disabled users cannot receive new project access" }, { status: 409 })
         : HttpResponse.json(user);
     }),
+    http.get("/api/v1/projects/:id/members/search", searchUsers),
     http.get("/api/v1/admin/platform-admins", () => {
       options.onAdminList?.();
       return HttpResponse.json({ items: [{ ...alice, pending: false }] });
@@ -50,18 +63,7 @@ function handlers(initial: ProjectMembershipSummary[] = [member(alice, "admin")]
     http.get("/api/v1/projects/:id/members", () => options.unavailable
       ? HttpResponse.json({ error: "Authority unavailable" }, { status: 503 })
       : HttpResponse.json(members)),
-    http.get("/api/v1/admin/users/search", ({ request }) => {
-      if (options.searchError) return HttpResponse.json({ error: "Directory unavailable" }, { status: 503 });
-      const url = new URL(request.url);
-      const query = url.searchParams.get("q")?.toLowerCase() ?? "";
-      const matches = users.filter(user =>
-        `${user.displayName} ${user.email} ${user.id}`.toLowerCase().includes(query),
-      );
-      const cursor = url.searchParams.get("cursor");
-      const start = cursor ? matches.findIndex(user => user.id === cursor) + 1 : 0;
-      const page = matches.slice(start, start + (options.pageSize ?? matches.length));
-      return HttpResponse.json({ items: page, ...(start + page.length < matches.length ? { nextCursor: page[page.length - 1].id } : {}) });
-    }),
+    http.get("/api/v1/admin/users/search", searchUsers),
     http.put<{ id: string; userId: string }, { role: ProjectRole; revision: number }>("/api/v1/projects/:id/members/:userId", async ({ request, params }) => {
       const body: { role: ProjectRole; revision: number } = await request.json();
       const current = members.find(row => row.userId === params.userId);
@@ -92,7 +94,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const ProjectAdminAddsExactUser: Story = {
+export const ProjectAdminAddsByName: Story = {
   parameters: { projectAdmin: true, msw: { handlers: [
     http.get("/api/v1/admin/users/search", () => { throw new Error("Project admin must never query the global directory"); }),
     http.get("/api/v1/projects", () => { throw new Error("Project admin must never query the control-plane inventory"); }),
@@ -103,8 +105,8 @@ export const ProjectAdminAddsExactUser: Story = {
     await userEvent.click(canvas.getByRole("link", { name: "Manage this project" }));
     await userEvent.click(await canvas.findByRole("button", { name: "Add people" }));
     const dialog = within(await screen.findByRole("dialog"));
-    await expect(dialog.getByText(/Name\/email directory search and invitations are not available/)).toBeVisible();
-    await userEvent.type(dialog.getByLabelText("Scope user ID"), bob.id);
+    await expect(dialog.getByText(/Find an existing Scope user/)).toBeVisible();
+    await userEvent.type(dialog.getByLabelText("Search users"), "bob");
     await userEvent.click(await dialog.findByRole("button", { name: /Bob Example/ }));
     await userEvent.selectOptions(dialog.getByLabelText("Project role"), "admin");
     await userEvent.click(dialog.getByRole("button", { name: "Add to project" }));
@@ -150,20 +152,50 @@ export const ProjectAdminSelfDemotionWarning: Story = {
   },
 };
 
-export const ProjectAdminExactLookupUnavailable: Story = {
+export const ProjectAdminSearchDisabledAndMissing: Story = {
   parameters: { projectAdmin: true },
   render: () => <><Link to={`/access?projectId=${projectId}`}>Manage this project</Link><AccessAtRoute /></>,
   play: async ({ canvas }) => {
     await userEvent.click(canvas.getByRole("link", { name: "Manage this project" }));
     await userEvent.click(await canvas.findByRole("button", { name: "Add people" }));
     const dialog = within(await screen.findByRole("dialog"));
-    await userEvent.type(dialog.getByLabelText("Scope user ID"), disabled.id);
-    await expect(await dialog.findByRole("alert")).toHaveTextContent("Disabled users");
+    await userEvent.type(dialog.getByLabelText("Search users"), "disabled");
+    await expect(await dialog.findByRole("button", { name: /Disabled user/ })).toBeDisabled();
     await expect(dialog.getByRole("button", { name: "Add to project" })).toBeDisabled();
-    await userEvent.clear(dialog.getByLabelText("Scope user ID"));
-    await userEvent.type(dialog.getByLabelText("Scope user ID"), "77777777-7777-4777-8777-777777777777");
-    await waitFor(() => expect(dialog.getByRole("alert")).toHaveTextContent("Enrolled user not found"));
+    await userEvent.clear(dialog.getByLabelText("Search users"));
+    await userEvent.type(dialog.getByLabelText("Search users"), "nobody-enrolled");
+    await expect(await dialog.findByText("No users found.")).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Add to project" })).toBeDisabled();
+  },
+};
+
+export const ProjectAdminSearchEmailAndPagination: Story = {
+  parameters: { projectAdmin: true, msw: { handlers: handlers(undefined, { pageSize: 1 }) } },
+  render: () => <><Link to={`/access?projectId=${projectId}`}>Manage this project</Link><AccessAtRoute /></>,
+  play: async ({ canvas }) => {
+    await userEvent.click(canvas.getByRole("link", { name: "Manage this project" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Add people" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    await userEvent.click(await dialog.findByRole("button", { name: "More users" }));
+    await userEvent.click(await dialog.findByRole("button", { name: /Bob Example/ }));
+    await userEvent.click(dialog.getByRole("button", { name: "Back to first page" }));
+    await expect(dialog.getByRole("button", { name: "Add to project" })).toBeDisabled();
+    await userEvent.type(dialog.getByLabelText("Search users"), "bob@example.test");
+    await userEvent.click(await dialog.findByRole("button", { name: /Bob Example/ }));
+    await expect(dialog.getByRole("button", { name: "Add to project" })).toBeEnabled();
+  },
+};
+
+export const ProjectAdminSearchUnavailable: Story = {
+  parameters: { projectAdmin: true, msw: { handlers: handlers(undefined, { searchError: true }) } },
+  render: () => <><Link to={`/access?projectId=${projectId}`}>Manage this project</Link><AccessAtRoute /></>,
+  play: async ({ canvas }) => {
+    await userEvent.click(canvas.getByRole("link", { name: "Manage this project" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Add people" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    await expect(await dialog.findByRole("alert")).toHaveTextContent("Directory unavailable");
+    await expect(dialog.getByRole("button", { name: "Add to project" })).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: "Try again" })).toBeEnabled();
   },
 };
 

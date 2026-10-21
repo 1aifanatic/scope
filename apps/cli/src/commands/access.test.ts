@@ -132,8 +132,31 @@ describe("access CLI operations", () => {
     expect(request().headers.get("Authorization")).toBe("Bearer fixture-raw-idp-bearer");
   });
 
+  it("searches enrolled membership candidates through an explicit project with paging and the raw bearer", async () => {
+    respond(200, { items: [], nextCursor: "next-user" });
+    await run("search-members", "project/a", "Alice + Example", "--limit", "5", "--cursor", "previous-user");
+    const url = new URL(request().url);
+    expect(url.pathname).toBe("/api/v1/projects/project%2Fa/members/search");
+    expect(url.searchParams.get("q")).toBe("Alice + Example");
+    expect(url.searchParams.get("limit")).toBe("5");
+    expect(url.searchParams.get("cursor")).toBe("previous-user");
+    expect(request().method).toBe("GET");
+    expect(request().headers.get("Authorization")).toBe("Bearer fixture-raw-idp-bearer");
+    expect(request().headers.has("Idempotency-Key")).toBe(false);
+  });
+
+  it.each([403, 404])("reports a denied project member search (%s) without using the admin directory", async status => {
+    respond(status, { error: "not_permitted" });
+    await run("search-members", "project", "alice");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(new URL(request().url).pathname).toBe("/api/v1/projects/project/members/search");
+    expect(process.exitCode).toBe(1);
+    expect(output).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid directory page size before sending a request", async () => {
     await run("search-users", "--limit", "51");
+    await run("search-members", "project", "--limit", "0");
     expect(fetchMock).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });

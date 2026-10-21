@@ -33,6 +33,7 @@ function auth(role: ProjectRole = "admin", id = userId): AuthContextValue {
 function fixture() {
   vi.spyOn(api, "getProject").mockResolvedValue({ _id: projectId, name: "Project A", createdAt: "2026-01-01T00:00:00Z" });
   vi.spyOn(api, "listProjectMembers").mockResolvedValue(members);
+  const scopedDirectory = vi.spyOn(api, "searchProjectMembers").mockResolvedValue({ items: [] });
   const directory = vi.spyOn(api, "searchAccessUsers");
   const inventory = vi.spyOn(api, "listProjects");
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -48,7 +49,7 @@ function fixture() {
       </MemoryRouter>
     </ProjectProvider></AuthContext.Provider></QueryClientProvider>;
   }
-  return { tree, directory, inventory };
+  return { tree, directory, scopedDirectory, inventory };
 }
 
 it("closes an open editor immediately when project-admin authority is removed", async () => {
@@ -64,12 +65,13 @@ it("closes an open editor immediately when project-admin authority is removed", 
 });
 
 it("resets editor state on account changes and never requests global inventory or directory", async () => {
-  const { tree, directory, inventory } = fixture();
+  const { tree, directory, scopedDirectory, inventory } = fixture();
   const view = render(tree(auth()));
   await waitFor(() => expect(screen.getByRole("button", { name: "Add people" }).hasAttribute("disabled")).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "Add people" }));
   const dialog = within(await screen.findByRole("dialog"));
-  fireEvent.change(dialog.getByLabelText("Scope user ID"), { target: { value: "unsubmitted-old-account-text" } });
+  fireEvent.change(dialog.getByLabelText("Search users"), { target: { value: "unsubmitted-old-account-text" } });
+  expect(scopedDirectory).toHaveBeenCalledWith(projectId, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   view.rerender(tree(auth("admin", "new-account")));
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(directory).not.toHaveBeenCalled();

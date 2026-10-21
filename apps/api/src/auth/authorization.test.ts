@@ -91,9 +91,9 @@ describe("Canonical authority work budget", () => {
       req.params.id = "b";
       await expect(authority.guard(req, method, path, "projects")).rejects.toMatchObject({ status: 404 });
     });
-    it.each(["reader", "contributor"] as const)("denies the in-project %s roster, lookup and mutation", async role => {
+    it.each(["reader", "contributor"] as const)("denies the in-project %s roster, search, lookup and mutation", async role => {
       const { authority, req } = fixture(role);
-      for (const [method, suffix] of [["get", ""], ["get", "/lookup/:userId"], ["put", "/:userId"], ["delete", "/:userId"]]) {
+      for (const [method, suffix] of [["get", ""], ["get", "/search"], ["get", "/lookup/:userId"], ["put", "/:userId"], ["delete", "/:userId"]]) {
         await expect(authority.guard(req, method, `/api/v1/projects/:id/members${suffix}`, "projects"))
           .rejects.toMatchObject({ status: 403 });
       }

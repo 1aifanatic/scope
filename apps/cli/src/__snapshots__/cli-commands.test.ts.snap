@@ -72,6 +72,13 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--url",
         ],
       },
+      "search-members": {
+        "options": [
+          "--cursor",
+          "--limit",
+          "--url",
+        ],
+      },
       "search-users": {
         "options": [
           "--cursor",
