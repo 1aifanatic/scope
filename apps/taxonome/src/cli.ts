@@ -18,16 +18,67 @@ import {
 import { checkCase, loadCases, loadGold } from "taxonomy-evaluation/cases";
 
 interface ModelOptions {
+  /** Exact Copilot model ID; defaults to the pinned spike model. */
   model: string;
+  /** External shared call-ledger path; required only when prompt execution occurs. */
   ledger?: string;
+  /** Optional complete Ax artifact path used by run/eval replay, not optimization. */
   artifact?: string;
 }
 
+interface RunOptions extends ModelOptions {
+  /** Path to explicit evaluation context JSON. */
+  context: string;
+  /** Comma-separated element selection; defaults to both spike elements. */
+  elements: string;
+}
+
+interface EvalOptions extends ModelOptions {
+  /** Path to curated ATIF/context JSONL rows. */
+  cases: string;
+  /** Path to separate reviewed gold assertions. */
+  gold: string;
+  /** Dataset split or `all`; defaults to `heldout`. */
+  split: string;
+  /** Repetition count from 1 through 10, encoded by Commander as text. */
+  samples: string;
+  /** Optional comma-separated override for every selected case. */
+  elements?: string;
+}
+
+interface OptimizeOptions extends ModelOptions {
+  /** Path to disjoint train/validation/heldout JSONL rows. */
+  cases: string;
+  /** Path to fixed reviewed assertions used by the metric. */
+  gold: string;
+  /** New artifact destination; existing files are never overwritten. */
+  output: string;
+  /** Ax metric-evaluation cap from 1 through 100; default 48. */
+  maxMetricCalls: string;
+}
+
+interface ReadoutOptions {
+  /** Optional Markdown destination; JSON always remains on stdout. */
+  markdown?: string;
+}
+
+/**
+ * Parses a comma-separated CLI selection.
+ *
+ * @param value - Comma-separated stable element IDs without whitespace normalization.
+ */
 function parseElementIds(value: string): ElementId[] {
   return value.split(",").map(id => elementIdSchema.parse(id));
 }
 
-/** Defers SDK imports/auth until an eligible element actually asks for inference. */
+/**
+ * Defers SDK imports/auth until an eligible element actually asks for inference.
+ *
+ * @param options - Model, optional ledger, and optional replay artifact from Commander.
+ * @param selected - Element IDs requested by this command.
+ * @param purpose - Stable ledger phase label (`run` or `eval`).
+ * @returns Lazy executor, cleanup function, and reproducibility metadata accessor.
+ */
 async function createRuntime(options: ModelOptions, selected: readonly ElementId[], purpose: string) {
   if (!selected.includes("beh-skipped-invocation")) {
     if (options.artifact) {
@@ -111,6 +162,11 @@ async function createRuntime(options: ModelOptions, selected: readonly ElementId
   };
 }
 
+/**
+ * Adds model/ledger/artifact options shared by prompt-capable commands.
+ *
+ * @param command - Commander command to extend.
+ */
 function addModelOptions(command: Command) {
   return command.option("--model <id>", "Copilot model (pinned for comparisons)", "gpt-5.6-sol-fast")
     .option(
@@ -123,9 +179,18 @@ function addModelOptions(command: Command) {
     );
 }
 
+/**
+ * Writes one pretty JSON document to stdout.
+ *
+ * @param value - JSON-serializable command result.
+ */
 const emit = (value: unknown) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 
-/** Configures commands without running them; only JSON results are written to stdout. */
+/**
+ * Configures commands without running them; only JSON results are written to stdout.
+ *
+ * @returns Commander program for the standalone run/eval/optimize/readout surface.
+ */
 export function createCli(): Command {
   const cli = new Command().name("taxonome").description("Standalone two-element taxonomy evaluation spike").version("0.1.0");
   cli.configureOutput({ writeOut: s => process.stderr.write(s), writeErr: s => process.stderr.write(s) });
@@ -137,7 +202,7 @@ export function createCli(): Command {
       "Comma-separated element IDs",
       "beh-skipped-invocation,beh-timeout"
     ))
-    .action(async (atif: string, options: ModelOptions & { context: string; elements: string }) => {
+    .action(async (atif: string, options: RunOptions) => {
       // Acquisition and context validation complete before any runtime is opened.
       const input = prepareInput({ atif: await loadJson(atif), context: contextSchema.parse(await loadJson(options.context)) });
       const selected = parseElementIds(options.elements);
@@ -174,7 +239,7 @@ export function createCli(): Command {
       "--elements <ids>",
       "Override case element selection"
     ))
-    .action(async (options: ModelOptions & { cases: string; gold: string; split: string; samples: string; elements?: string }) => {
+    .action(async (options: EvalOptions) => {
       const allCases = await loadCases(options.cases);
       const gold = await loadGold(options.gold);
       if (!["train", "validation", "heldout", "unit", "all"].includes(options.split)) {
@@ -277,7 +342,7 @@ export function createCli(): Command {
       "Finite Ax metric budget, not the all-in ledger cap",
       "48"
     ))
-    .action(async (options: ModelOptions & { cases: string; gold: string; output: string; maxMetricCalls: string }) => {
+    .action(async (options: OptimizeOptions) => {
       if (!options.ledger) {
         throw new Error("--ledger is required for optimization");
       }
@@ -331,7 +396,7 @@ export function createCli(): Command {
 
   // Convert validated structured results into deterministic JSON and optional Markdown.
   cli.command("readout <results>").option("--markdown <path>", "Write Markdown preview (stdout remains JSON)")
-    .action(async (path: string, options: { markdown?: string }) => {
+    .action(async (path: string, options: ReadoutOptions) => {
       const report = buildReadout(JSON.parse(await readFile(path, "utf8")) as unknown);
       if (options.markdown) {
         await writeFile(options.markdown, readoutMarkdown(report));

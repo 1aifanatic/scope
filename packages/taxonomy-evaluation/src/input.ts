@@ -8,12 +8,23 @@ const TRANSIENT = new Set([429, 500, 502, 503, 504]);
 
 /** Carries retry metadata for HTTP responses without exposing the requested URL. */
 class HttpFailure extends Error {
+  /**
+   * @param status - HTTP status code returned by the ATIF endpoint.
+   * @param retryAfter - Raw Retry-After header, or null when absent.
+   */
   constructor(readonly status: number, readonly retryAfter: string | null) {
     super(`ATIF download failed: HTTP ${status}`);
   }
 }
 
-/** Performs one complete bounded fetch, including redirects and streamed body reads. */
+/**
+ * Performs one complete bounded fetch, including redirects and streamed body reads.
+ *
+ * @param location - Absolute HTTP(S) URL without userinfo credentials.
+ * @param byteLimit - Maximum response body size in bytes.
+ * @param timeoutMs - Deadline in milliseconds covering redirects and body reads.
+ * @returns UTF-8 response text.
+ */
 async function downloadAttempt(location: string, byteLimit: number, timeoutMs: number): Promise<string> {
   let url = new URL(location);
   if (url.username || url.password) {
@@ -98,7 +109,13 @@ async function downloadAttempt(location: string, byteLimit: number, timeoutMs: n
   }
 }
 
-/** Converts Retry-After into a bounded delay or refuses a wait the CLI cannot honor. */
+/**
+ * Converts Retry-After into a bounded delay or refuses a wait the CLI cannot honor.
+ *
+ * @param header - Retry-After seconds/date value, or null for exponential backoff.
+ * @param attempt - Zero-based retry attempt used by the fallback backoff.
+ * @returns Delay in milliseconds, capped by the two-second retry budget.
+ */
 function retryDelay(header: string | null, attempt: number): number {
   if (!header) {
     return 100 * 2 ** attempt;
@@ -119,6 +136,12 @@ function retryDelay(header: string | null, attempt: number): number {
 /**
  * Reads bounded JSON from a file or HTTP(S), without credentials or embedded-URL fetching.
  * One retry layer covers complete downloads; invalid input and permanent HTTP failures throw.
+ *
+ * @param location - Local path or HTTP(S) URL.
+ * @param options.maxBytes - Maximum bytes to read; defaults to 2 MiB and cannot exceed it.
+ * @param options.timeoutMs - Per-attempt network deadline in milliseconds; defaults to 10000.
+ * @param options.attempts - Total network attempts from 1 through 3; defaults to 3.
+ * @returns Parsed JSON as unknown for caller-specific validation.
  */
 export async function loadJson(
   location: string,

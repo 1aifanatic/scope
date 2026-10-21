@@ -22,16 +22,51 @@ export { CallLedger } from "./ledger.js";
 export { createSkippedProgram, promptEvidence } from "./prompt.js";
 export const DEFAULT_MODEL = "gpt-5.6-sol-fast";
 
+/** Provider usage fields exposed by SDK assistant-usage events. */
+export interface CopilotUsage {
+  /** Model ID actually reported by the SDK. */
+  model?: string;
+  /** Prompt tokens charged for the request. */
+  inputTokens?: number;
+  /** Generated tokens charged for the request. */
+  outputTokens?: number;
+  /** Other SDK usage fields retained without interpretation. */
+  [key: string]: unknown;
+}
+
+/** One text completion returned by the transport. */
+export interface CopilotCompletion {
+  /** Assistant text consumed by Ax. */
+  content: string;
+  /** Provider usage when exposed; absence means unknown, not zero. */
+  usage?: CopilotUsage;
+}
+
+/** One text-only completion transport backed by an isolated Copilot SDK client. */
 export interface CopilotTransport {
+  /**
+   * Sends one system/user pair.
+   *
+   * @param system - Trusted system text installed with replace semantics.
+   * @param user - Model-visible text envelope containing Ax roles/evidence.
+   * @param signal - Optional cancellation signal forwarded to the SDK lifecycle.
+   * @returns Assistant text and provider usage fields when available.
+   */
   complete(
     system: string,
     user: string,
     signal?: AbortSignal,
-  ): Promise<{ content: string; usage?: Record<string, unknown> }>;
+  ): Promise<CopilotCompletion>;
+  /** Stops the SDK process and removes its isolated temporary home. */
   close(): Promise<void>;
 }
 
-/** Attempts every close independently, preserving a primary failure alongside cleanup failures. */
+/**
+ * Attempts every close independently, preserving a primary failure alongside cleanup failures.
+ *
+ * @param transports - Student/teacher transports to close exactly once each.
+ * @param primary - Optional failure from the operation that preceded cleanup.
+ */
 export async function closeTransports(
   transports: readonly Pick<CopilotTransport, "close">[],
   primary?: unknown,
@@ -50,6 +85,11 @@ export async function closeTransports(
 /**
  * Opens an isolated, tool-free SDK client using only the explicit environment token.
  * The caller owns close(); a failed submission blocks further calls until reconciliation.
+ *
+ * @param ledger - Initialized shared ledger that gates every completion.
+ * @param model - Exact model ID used for session creation and usage verification.
+ * @param purpose - Stable ledger label attached to every completion.
+ * @returns Text-only transport. Callers must invoke `close`.
  */
 export async function openCopilotTransport(
   ledger: CallLedger,
@@ -109,7 +149,13 @@ export async function openCopilotTransport(
 
   let failed = false;
   return {
-    /** Creates one isolated tool-free session and delegates guarded submission/accounting. */
+    /**
+     * Creates one isolated tool-free session and delegates guarded submission/accounting.
+     *
+     * @param system - Trusted system prompt installed with replace semantics.
+     * @param user - Model-visible Ax text envelope.
+     * @param signal - Optional caller cancellation signal.
+     */
     async complete(system, user, signal) {
       if (failed) {
         throw new Error("Previous SDK call failed; reconcile the ledger before another live invocation");
@@ -153,7 +199,14 @@ export async function openCopilotTransport(
   };
 }
 
-/** Ax's public provider interface; every student/teacher request uses this SDK transport. */
+/**
+ * Adapts the text-only SDK transport to Ax's public provider interface.
+ *
+ * @param transport - Isolated transport that performs exactly one SDK call per chat.
+ * @param model - Pinned model ID; defaults to {@link DEFAULT_MODEL}.
+ * @param systemPrefix - Optional trusted prefix for optimizer-internal typed programs.
+ * @returns Ax AI service with tools, streaming, embeddings, and native schema mode disabled.
+ */
 export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, systemPrefix = ""): AxAIService {
   let options: AxAIServiceOptions = { stream: false, debug: false };
   const latencySamples: number[] = [];
@@ -218,7 +271,12 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
     speak: async () => {
       throw new Error("Speech is not supported");
     },
-    /** Converts one Ax text chat into one SDK completion and normalized Ax usage. */
+    /**
+     * Converts one Ax text chat into one SDK completion and normalized Ax usage.
+     *
+     * @param request - Ax text-chat request; tools/native schema/model overrides are rejected.
+     * @param callOptions - Per-call Ax options, including optional cancellation.
+     */
     async chat(request: Readonly<AxChatRequest>, callOptions?: Readonly<AxAIServiceOptions>): Promise<AxChatResponse> {
       // Reject unsupported features instead of silently degrading Ax's request.
       if (callOptions?.stream ?? options.stream) {
@@ -291,12 +349,23 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
   };
 }
 
-/** Restores optional learned components once and executes only the registered prompt element. */
+/**
+ * Restores optional learned components once and executes only the registered prompt element.
+ *
+ * @param ai - Ax service backed by the Copilot SDK transport.
+ * @param artifact - Optional complete serialized optimized program.
+ * @returns Prompt executor restricted to Skipped Invocation.
+ */
 export function skippedExecutor(ai: AxAIService, artifact?: AxSerializedOptimizedProgram): PromptExecutor {
   const program = createSkippedProgram(artifact);
 
   return {
-    /** Evaluates only Skipped Invocation through the restored one-call program. */
+    /**
+     * Evaluates only Skipped Invocation through the restored one-call program.
+     *
+     * @param id - Must be `beh-skipped-invocation`.
+     * @param input - Prepared ATIF/context evidence.
+     */
     async evaluate(id: ElementId, input: TaxonomyInput) {
       if (id !== "beh-skipped-invocation") {
         throw new Error("Unsupported prompt element");

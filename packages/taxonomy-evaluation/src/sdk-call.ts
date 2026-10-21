@@ -4,12 +4,25 @@
 import type { CopilotSession, SessionEvent } from "@github/copilot-sdk";
 import type { CallLedger } from "./ledger.js";
 
+/** Minimal SDK session surface required for one guarded completion. */
 type Session = Pick<CopilotSession, "on" | "sendAndWait" | "abort" | "disconnect" | "sessionId">;
+
+/** Minimal durable ledger surface required by the call lifecycle. */
 type Ledger = Pick<CallLedger, "reserve" | "finish">;
 
 /**
  * Submits once after a durable reservation and always attempts accounting/session cleanup.
  * Cancellation covers reservation waits; cleanup failures are reported alongside inference errors.
+ *
+ * @param session - Isolated SDK session with no tools or ambient configuration.
+ * @param ledger - Shared all-in budget ledger.
+ * @param model - Exact configured model ID recorded with every reservation.
+ * @param purpose - Stable experiment phase label.
+ * @param prompt - Model-visible user prompt text.
+ * @param deleteSession - Removes persisted SDK session data after disconnect.
+ * @param signal - Optional caller cancellation signal.
+ * @param timeoutMs - Request deadline in milliseconds; defaults to 120000.
+ * @returns Assistant text and SDK usage when exposed.
  */
 export async function executeSdkCall(
   session: Session,

@@ -6,7 +6,7 @@ import { loadCases } from "./cases.js";
 import { fileURLToPath } from "node:url";
 import { prepareInput, skippedResultSchema, timeoutResultSchema, validateResult } from "./contracts.js";
 
-/** Loads the shared packet through the production case boundary. */
+/** @returns Shared packet loaded through the production case boundary. */
 const cases = () => loadCases(fileURLToPath(new URL("../fixtures/inputs.jsonl", import.meta.url)));
 
 describe("Schema-Declared Observation v1", () => {

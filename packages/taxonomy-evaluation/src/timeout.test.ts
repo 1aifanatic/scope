@@ -13,10 +13,14 @@ vi.mock("@ax-llm/ax", () => {
   throw new Error("Deterministic execution must not load Ax");
 });
 
-/** Resolves committed case assets relative to this test module. */
+/**
+ * Resolves committed case assets relative to this test module.
+ *
+ * @param name - Fixture filename under the package fixtures directory.
+ */
 const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
 
-/** Creates the smallest valid Timeout input for focused evidence mutations. */
+/** @returns The smallest valid Timeout input for focused evidence mutations. */
 async function base(): Promise<TaxonomyInput> {
   return prepareInput({
     atif: JSON.parse(await readFile(fixture("timeout.atif.json"), "utf8")) as unknown,
@@ -24,7 +28,12 @@ async function base(): Promise<TaxonomyInput> {
   });
 }
 
-/** Runs only the deterministic element and returns its semantic result. */
+/**
+ * Runs only the deterministic element.
+ *
+ * @param input - Input variant being exercised.
+ * @returns Semantic Timeout result without the outer evaluation envelope.
+ */
 async function result(input: unknown) {
   return (await evaluate(input, ["beh-timeout"]))[0].result;
 }

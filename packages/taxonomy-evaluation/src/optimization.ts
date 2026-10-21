@@ -13,10 +13,25 @@ import { SCHEMA_VERSION, skippedResultSchema, validateResult } from "./contracts
 import { assertObservation, type EvaluationCase, type Gold } from "./cases.js";
 import { createSkippedProgram, promptEvidence, OBSERVATION_CONTRACT, SKIPPED_INSTRUCTIONS } from "./prompt.js";
 
+/**
+ * Hashes a JSON-serializable contract/corpus value deterministically.
+ *
+ * @param value - Value whose JSON representation is part of reproducibility.
+ */
 export const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
+/** @returns Hash of the immutable schema and prompt text used by replay checks. */
 export const contractHash = () => hash({ SCHEMA_VERSION, OBSERVATION_CONTRACT, SKIPPED_INSTRUCTIONS });
 
-// Validate the Ax public serialization boundary; preserve all learned components.
+/**
+ * Validates the complete saved optimization artifact.
+ *
+ * Identity/version fields pin compatibility; train/validation IDs and corpus
+ * hash pin data provenance; settings describe finite search limits;
+ * `optimized` retains all Ax components/demos/examples/statistics; metric trace
+ * retains per-case predictions and failures. Transport settings state which Ax
+ * sampling hints the SDK could not apply.
+ */
 const serializedSchema = z.custom<AxSerializedOptimizedProgram>(value => {
   const schema = z.object({
     bestScore: z.number(),
@@ -50,9 +65,17 @@ export const artifactSchema = z.object({
   optimized: serializedSchema,
   metric_trace: z.array(z.object({ case_id: z.string(), score: z.number(), errors: z.array(z.string()), prediction: z.unknown() }).strict()),
 }).strict();
+
+/** Complete Taxonome wrapper around Ax's serialized optimized program. */
 export type OptimizationArtifact = z.infer<typeof artifactSchema>;
 
-/** Rejects stale contracts/models before applying the complete Ax artifact. */
+/**
+ * Rejects stale contracts/models before applying the complete Ax artifact.
+ *
+ * @param value - Untrusted artifact JSON.
+ * @param model - Exact model ID expected by the replay command.
+ * @returns Validated artifact compatible with the current prompt contract.
+ */
 export function restoreArtifact(value: unknown, model: string): OptimizationArtifact {
   const artifact = artifactSchema.parse(value);
   if (artifact.model !== model || artifact.contract_hash !== contractHash()) {
@@ -65,6 +88,14 @@ export function restoreArtifact(value: unknown, model: string): OptimizationArti
 /**
  * Runs Ax bootstrap plus GEPA on eligible train/validation cases only.
  * The supplied AI transports, not maxMetricCalls, must enforce the all-in call budget.
+ *
+ * @param cases - Curated packet containing disjoint train/validation/heldout rows.
+ * @param gold - Fixed semantic assertions kept outside model inputs.
+ * @param studentAI - SDK-backed service used for candidate evaluation/bootstrap.
+ * @param teacherAI - SDK-backed service used for reflection/proposal work.
+ * @param model - Exact model ID persisted for replay compatibility.
+ * @param maxMetricCalls - Maximum Ax metric evaluations, default 48; not an all-in SDK cap.
+ * @returns Complete serialized artifact plus metric diagnostics.
  */
 export async function optimizeSkipped(
   cases: readonly EvaluationCase[],
@@ -98,7 +129,11 @@ export async function optimizeSkipped(
 
   const metricTrace: OptimizationArtifact["metric_trace"] = [];
 
-  // Only training rows receive supervised seed outputs; validation labels stay in the metric.
+  /**
+   * Builds one supervised bootstrap seed; validation labels stay in the metric.
+   *
+   * @param row - Eligible training case with fixed Skipped Invocation gold.
+   */
   const trainingExample = (row: EvaluationCase) => {
     const expected = gold[row.id]?.["beh-skipped-invocation"];
     if (!expected) {

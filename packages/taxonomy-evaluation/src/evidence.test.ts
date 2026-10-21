@@ -12,10 +12,18 @@ import { copilotAI, skippedExecutor } from "./copilot.js";
 import { restoreArtifact, contractHash } from "./optimization.js";
 import { buildReadout } from "./readout.js";
 
-/** Resolves committed fixtures/evidence relative to the package root. */
+/**
+ * Resolves committed fixtures/evidence relative to the package root.
+ *
+ * @param path - Package-relative fixture or evidence path.
+ */
 const file = (path: string) => fileURLToPath(new URL(`../${path}`, import.meta.url));
 
-/** Reads an evidence file without weakening its unknown boundary. */
+/**
+ * Reads an evidence file without weakening its unknown boundary.
+ *
+ * @param path - Package-relative JSON path.
+ */
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(file(path), "utf8")) as unknown;
 
 describe("committed real experiment artifacts (offline verification only)", () => {

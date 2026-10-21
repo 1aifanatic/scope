@@ -14,6 +14,14 @@ import {
   type TaxonomyInput,
 } from "./contracts.js";
 
+/**
+ * Validates one curated case row.
+ *
+ * `id` is unique within the packet; `family` and `originating_run` must not
+ * cross splits; `split` controls optimizer/evaluation use; `provenance`
+ * distinguishes synthetic/reviewed sources; `elements` is a non-empty
+ * selection; and `input` is validated separately by {@link prepareInput}.
+ */
 export const caseSchema = z.object({
   id: z.string().min(1),
   family: z.string().min(1),
@@ -23,10 +31,27 @@ export const caseSchema = z.object({
   elements: z.array(elementIdSchema).min(1),
   input: z.unknown(),
 }).strict();
+
+/**
+ * One curated evaluation row.
+ *
+ * Manifest fields retain family/origin/split provenance, while `input` is
+ * replaced with the prepared typed value after loading.
+ */
 export interface EvaluationCase extends Omit<z.infer<typeof caseSchema>, "input"> {
+  /** Validated runtime input; gold expectations remain in a separate file. */
   input: TaxonomyInput;
 }
 
+/**
+ * Assertion contract for one element result.
+ *
+ * `state` is always required; `observed` is optional and meaningful only for
+ * completed results; occurrence assertions can constrain source, discovery
+ * turn, extension-point substring, call ID, or exact related turns. Omitted
+ * occurrence fields are unconstrained. `exact` requests full deep equality;
+ * otherwise state/polarity/selected evidence fields are checked.
+ */
 export const expectationSchema = z.object({
   state: z.enum(["completed", "indeterminate", "inapplicable", "error"]),
   observed: z.boolean().optional(),
@@ -39,11 +64,20 @@ export const expectationSchema = z.object({
   }).strict()).optional(),
   exact: z.unknown().optional(),
 }).strict();
+
+/** Narrowed assertion shape derived from {@link expectationSchema}. */
 export type Expectation = z.infer<typeof expectationSchema>;
 export const goldSchema = z.record(z.record(elementIdSchema, expectationSchema));
+
+/** Gold assertions keyed by case ID, then element ID. */
 export type Gold = z.infer<typeof goldSchema>;
 
-/** Loads separate input rows and rejects IDs or originating families reused across splits. */
+/**
+ * Loads separate input rows and rejects IDs or originating families reused across splits.
+ *
+ * @param path - JSONL path; blank lines are not accepted inside the packet.
+ * @returns Prepared cases in file order.
+ */
 export async function loadCases(path: string): Promise<EvaluationCase[]> {
   const lines = (await readFile(path, "utf8")).trim().split("\n");
   const cases = lines.map(line => {
@@ -70,12 +104,22 @@ export async function loadCases(path: string): Promise<EvaluationCase[]> {
   return cases;
 }
 
-/** Loads the separate gold assertions; expected outputs never enter runtime inputs. */
+/**
+ * Loads the separate gold assertions; expected outputs never enter runtime inputs.
+ *
+ * @param path - JSON file keyed by case and element IDs.
+ */
 export async function loadGold(path: string): Promise<Gold> {
   return goldSchema.parse(JSON.parse(await readFile(path, "utf8")) as unknown);
 }
 
-/** Returns assertion failures; omitted expectation fields are unconstrained, not absent. */
+/**
+ * Returns assertion failures; omitted expectation fields are unconstrained, not absent.
+ *
+ * @param actual - Validated observation produced by execution.
+ * @param expected - Reviewed semantic and evidence assertions.
+ * @returns Human-readable failures; an empty array means the observation passed.
+ */
 export function assertObservation(actual: Observation, expected: Expectation): string[] {
   const errors: string[] = [];
 
@@ -126,7 +170,15 @@ export function assertObservation(actual: Observation, expected: Expectation): s
   return errors;
 }
 
-/** Checks selection coverage and grounded gold facts; missing gold is a configuration error. */
+/**
+ * Checks selection coverage and grounded gold facts; missing gold is a configuration error.
+ *
+ * @param row - Curated input/provenance row.
+ * @param evaluations - Results returned for this row.
+ * @param gold - Separate reviewed assertion map.
+ * @param selection - Expected unique element IDs; defaults to the case declaration.
+ * @returns All coverage, validation, and semantic assertion failures.
+ */
 export function checkCase(
   row: EvaluationCase,
   evaluations: readonly Evaluation[],

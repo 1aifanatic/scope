@@ -15,7 +15,12 @@ afterEach(async () => {
   servers.length = 0;
 });
 
-/** Starts a bounded loopback fixture and returns its HTTP base URL. */
+/**
+ * Starts a bounded loopback fixture.
+ *
+ * @param handler - Node HTTP handler implementing the acquisition scenario.
+ * @returns Loopback HTTP base URL.
+ */
 async function serve(handler: Parameters<typeof createServer>[0]) {
   const server = createServer(handler);
   servers.push(server);

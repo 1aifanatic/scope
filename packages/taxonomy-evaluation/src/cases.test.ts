@@ -6,7 +6,11 @@ import { expect, it } from "vitest";
 import { assertObservation, checkCase, loadCases, loadGold } from "./cases.js";
 import { evaluate } from "./engine.js";
 
-/** Resolves shared case/gold assets relative to this test module. */
+/**
+ * Resolves shared case/gold assets relative to this test module.
+ *
+ * @param name - Fixture filename under the package fixtures directory.
+ */
 const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
 
 it("fails missing, duplicate and unexpected element results; explicit subsets are supported", async () => {

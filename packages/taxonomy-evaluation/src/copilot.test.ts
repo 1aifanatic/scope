@@ -11,7 +11,7 @@ import { OBSERVATION_CONTRACT, SKIPPED_INSTRUCTIONS } from "./prompt.js";
 import { createSkippedProgram } from "./prompt.js";
 import { evaluate } from "./engine.js";
 
-/** Creates an observable SDK session/ledger fixture for lifecycle failure tests. */
+/** @returns Observable SDK session/ledger mocks for lifecycle failure tests. */
 function fixture() {
   const session: Pick<CopilotSession, "on" | "sendAndWait" | "abort" | "disconnect" | "sessionId"> = {
     sessionId: "mock",

@@ -13,19 +13,36 @@ import {
 import { detectTimeout } from "./timeout.js";
 
 export interface DeterministicDefinition {
+  /** Stable registered element ID whose result schema will validate the output. */
   id: ElementId;
+  /** Discriminator proving execution requires no prompt transport. */
   kind: "deterministic";
+  /**
+   * Evaluates a frozen prepared input.
+   *
+   * @param input - Validated private input; implementations must not perform hidden I/O.
+   */
   evaluate(input: TaxonomyInput): Observation;
 }
 
 export interface PromptDefinition {
+  /** Stable registered element ID evaluated by the supplied prompt executor. */
   id: ElementId;
+  /** Discriminator selecting prompt-backed execution. */
   kind: "prompt";
 }
 
+/** Registered definition for either supported execution strategy. */
 export type ElementDefinition = DeterministicDefinition | PromptDefinition;
 
 export interface PromptExecutor {
+  /**
+   * Runs one prompt-backed element.
+   *
+   * @param id - Prompt element to evaluate.
+   * @param input - Frozen prepared evidence supplied to the typed program.
+   * @returns Untrusted output that the engine validates before returning.
+   */
   evaluate(id: ElementId, input: TaxonomyInput): Promise<unknown>;
 }
 
@@ -39,7 +56,11 @@ export const behaviorMetadata = {
   "beh-timeout": { label: "Timeout", category_id: "behavior-category-invocation" },
 } as const;
 
-/** Recursively freezes the validated private copy that implementations receive. */
+/**
+ * Recursively freezes the validated private copy that implementations receive.
+ *
+ * @param value - Any nested value in the prepared input graph.
+ */
 function deepFreeze(value: unknown): void {
   if (value && typeof value === "object") {
     Object.freeze(value);
@@ -52,6 +73,11 @@ function deepFreeze(value: unknown): void {
 /**
  * Validates and freezes a private input copy before dispatch.
  * Invalid inputs throw; detector, transport and result failures become error observations.
+ *
+ * @param definition - Registered execution strategy and element identity.
+ * @param value - Untrusted input boundary value.
+ * @param executor - Required only for eligible prompt-backed execution.
+ * @returns One validated evaluation envelope.
  */
 export async function evaluateElement(
   definition: ElementDefinition,
@@ -107,7 +133,14 @@ export async function evaluateElement(
   };
 }
 
-/** Evaluates unique selections in caller order without batching or sharing model calls. */
+/**
+ * Evaluates unique selections in caller order without batching or sharing model calls.
+ *
+ * @param value - Untrusted input boundary value shared by selected elements.
+ * @param ids - Non-empty unique element IDs, preserved in caller order.
+ * @param executor - Optional prompt executor; deterministic-only selections do not use it.
+ * @returns One evaluation for every requested ID.
+ */
 export async function evaluate(
   value: unknown,
   ids: readonly ElementId[],

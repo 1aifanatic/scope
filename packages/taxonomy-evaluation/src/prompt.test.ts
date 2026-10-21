@@ -7,7 +7,11 @@ import { loadCases, loadGold, assertObservation } from "./cases.js";
 import { standaloneTargets, listStandaloneTargets } from "../../../evaluations/static-prompts/adapter/standalone.js";
 import { OBSERVATION_CONTRACT, SKIPPED_INSTRUCTIONS } from "./prompt.js";
 
-/** Resolves prompt case assets relative to this test module. */
+/**
+ * Resolves prompt case assets relative to this test module.
+ *
+ * @param name - Fixture filename under the package fixtures directory.
+ */
 const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
 
 describe("static prompt family composition and curated contract (offline, not model evidence)", () => {

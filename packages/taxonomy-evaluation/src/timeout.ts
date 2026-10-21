@@ -6,6 +6,10 @@ import type { TaxonomyInput, TimeoutResult } from "./contracts.js";
 /**
  * Pure detector over explicit timeout evidence or measured, policy-bounded delays.
  * Incomplete or contradictory evidence cannot prove absence.
+ *
+ * @param input - Frozen prepared input. `timeout_policy.threshold_ms`, when
+ * supplied, is a positive duration in milliseconds.
+ * @returns A deterministic observation with zero model calls or hidden I/O.
  */
 export function detectTimeout(input: TaxonomyInput): TimeoutResult {
   if (input.context.applicability?.["beh-timeout"] === false) {

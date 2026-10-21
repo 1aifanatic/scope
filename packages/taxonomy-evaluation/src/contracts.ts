@@ -4,6 +4,13 @@
 import { z } from "zod";
 
 export const SCHEMA_VERSION = "taxonome.observation.v1";
+
+/**
+ * Declared taxonomy surfaces accepted by source references.
+ *
+ * Keys are stable serialized IDs. Values are display labels and are not emitted
+ * in observations unless supplied as part of a source.
+ */
 export const surfaces = {
   "surface-skills": "Skills",
   "surface-mcp": "MCP",
@@ -15,14 +22,37 @@ export const surfaces = {
   "surface-base-model": "Base model",
 } as const;
 
+/**
+ * Validates a source supplied by evaluation context.
+ *
+ * `id` is the stable source identity, `label` is display text, and `surface_id`
+ * must reference one of the declared taxonomy surfaces.
+ */
 export const sourceSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   surface_id: z.enum(Object.keys(surfaces) as [keyof typeof surfaces, ...(keyof typeof surfaces)[]]),
 }).strict();
+
+/** A context-supplied source that observations may copy, but never invent. */
 export type Source = z.infer<typeof sourceSchema>;
 
+/**
+ * Validates the supported ATIF v1.7 subset while preserving unknown extensions.
+ *
+ * Step IDs and tool-call IDs are validated for order and uniqueness by
+ * {@link prepareInput}; optional timestamps are ISO 8601 strings with offsets.
+ */
 const turn = z.number().int().positive();
+
+/**
+ * Validates one ATIF tool call plus the spike's optional timing extension.
+ *
+ * `duration_ms` is a non-negative measured duration in milliseconds;
+ * `started_at`/`ended_at` are optional ISO timestamps; `outcome` records the
+ * structured call state; `progress_interrupted` states whether delay blocked
+ * progress; and `source_id` optionally references context `sources`.
+ */
 const callSchema = z.object({
   tool_call_id: z.string().min(1),
   function_name: z.string().min(1),
@@ -56,6 +86,15 @@ export const atifSchema = z.object({
   }).passthrough()),
 }).passthrough();
 
+/**
+ * Validates trusted evaluation metadata kept outside the ATIF trajectory.
+ *
+ * `completeness` controls absence claims, `sources` declares attributable
+ * extension points, `timeout_policy.threshold_ms` is an optional positive
+ * duration in milliseconds, and `applicability` explicitly includes/excludes
+ * individual elements. Run/scenario/profile fields are optional for evaluation
+ * but required by the readout boundary.
+ */
 export const contextSchema = z.object({
   run_id: z.string().min(1).optional(),
   scenario: z.object({ id: z.string().min(1), label: z.string().min(1), task: z.string().min(1).optional() }).strict().optional(),
@@ -69,14 +108,31 @@ export const contextSchema = z.object({
   }).strict().optional(),
 }).strict();
 export const inputSchema = z.object({ atif: atifSchema, context: contextSchema }).strict();
+
+/** Validated ATIF plus explicit evaluation metadata consumed by every strategy. */
 export type TaxonomyInput = z.infer<typeof inputSchema>;
+
+/** The validated ATIF trajectory portion of {@link TaxonomyInput}. */
 export type Atif = TaxonomyInput["atif"];
 
+/**
+ * Positive Skipped Invocation occurrence.
+ *
+ * `extension_point` names the unused artifact/tool, `source` is copied from
+ * context, and `discovery_turn` is the positive ATIF step ID where it was found.
+ */
 export const skippedOccurrenceSchema = z.object({
   extension_point: z.string().min(1),
   source: sourceSchema,
   discovery_turn: turn,
 }).strict();
+
+/**
+ * Positive Timeout occurrence.
+ *
+ * `source` is optional when the call is not attributable, `related_turns`
+ * contains positive ATIF step IDs, and `tool_call_id` is the exact timed call.
+ */
 export const timeoutOccurrenceSchema = z.object({
   source: sourceSchema.optional(),
   related_turns: z.array(turn).min(1),
@@ -91,7 +147,14 @@ const executionError = z.object({
   error: z.string().min(1),
 }).strict();
 
-/** Builds the shared assessment-state union around an element-specific occurrence schema. */
+/**
+ * Builds the shared assessment-state union around an element-specific occurrence schema.
+ *
+ * @param occurrence - Zod schema for one positive occurrence.
+ * Completed positives require non-empty occurrences; completed negatives omit
+ * occurrences; indeterminate/inapplicable states carry a reason; errors carry
+ * an execution error string. No state has a confidence field or default.
+ */
 function observationSchema<T extends z.ZodTypeAny>(occurrence: T) {
   return z.union([
     z.object({
@@ -106,12 +169,25 @@ function observationSchema<T extends z.ZodTypeAny>(occurrence: T) {
 }
 export const skippedResultSchema = observationSchema(skippedOccurrenceSchema);
 export const timeoutResultSchema = observationSchema(timeoutOccurrenceSchema);
+
+/** Structured assessment result for Skipped Invocation. */
 export type SkippedResult = z.infer<typeof skippedResultSchema>;
+
+/** Structured assessment result for Timeout. */
 export type TimeoutResult = z.infer<typeof timeoutResultSchema>;
+
+/** Any supported element assessment, including completed and unassessed states. */
 export type Observation = SkippedResult | TimeoutResult;
+
+/** Any positive occurrence shape used by the current two-element slice. */
 export type Occurrence = z.infer<typeof skippedOccurrenceSchema> | z.infer<typeof timeoutOccurrenceSchema>;
 
-/** Identifies one discovery event or call within a single element assessment. */
+/**
+ * Identifies one discovery event or call within a single element assessment.
+ *
+ * @param occurrence - Validated occurrence whose stable identity is needed.
+ * @returns A key unique within one element result; it is not a global ID.
+ */
 export function occurrenceIdentity(occurrence: Occurrence): string {
   return "discovery_turn" in occurrence
     ? JSON.stringify([occurrence.source.id, occurrence.discovery_turn, occurrence.extension_point])
@@ -119,6 +195,8 @@ export function occurrenceIdentity(occurrence: Occurrence): string {
 }
 
 export const elementIdSchema = z.enum(["beh-skipped-invocation", "beh-timeout"]);
+
+/** Stable ID of an element registered by this spike. */
 export type ElementId = z.infer<typeof elementIdSchema>;
 export const evaluationSchema = z.object({
   schema_version: z.literal(SCHEMA_VERSION),
@@ -135,13 +213,24 @@ export const evaluationSchema = z.object({
 });
 
 export interface Evaluation {
+  /** Version of the shared observation envelope. */
   schema_version: typeof SCHEMA_VERSION;
+  /** Element whose semantics produced `result`. */
   element_id: ElementId;
+  /** Execution strategy used for this assessment. */
   implementation: "prompt" | "deterministic";
+  /** Validated semantic assessment; category/label remain definition metadata. */
   result: Observation;
 }
 
-/** Returns a private validated copy, preserving ATIF extensions and rejecting broken references/order. */
+/**
+ * Returns a private validated copy, preserving ATIF extensions and rejecting
+ * broken references/order.
+ *
+ * @param value - Untrusted JSON boundary value.
+ * @returns A cloned input safe for freezing and implementation dispatch.
+ * @throws When schema, ordering, identity, source, or call references are invalid.
+ */
 export function prepareInput(value: unknown): TaxonomyInput {
   const input = structuredClone(inputSchema.parse(value));
 
@@ -182,7 +271,15 @@ export function prepareInput(value: unknown): TaxonomyInput {
   return input;
 }
 
-/** Validates result shape, assessment preconditions and evidence attribution; throws on violations. */
+/**
+ * Validates result shape, assessment preconditions, and evidence attribution.
+ *
+ * @param id - Element whose conditional result schema and invariants apply.
+ * @param value - Untrusted detector or model result.
+ * @param input - Prepared input used to ground sources, turns, and calls.
+ * @returns The narrowed observation.
+ * @throws When shape, trusted metadata, or evidence grounding is invalid.
+ */
 export function validateResult(id: ElementId, value: unknown, input: TaxonomyInput): Observation {
   const result = (id === "beh-timeout" ? timeoutResultSchema : skippedResultSchema).parse(value);
 

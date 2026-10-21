@@ -17,14 +17,22 @@ import {
 
 const groupingSchema = contextSchema.pick({ run_id: true, scenario: true, profile: true }).required().passthrough();
 
+/** One run supplied to the deterministic reporting boundary. */
 export interface ReadoutRun {
+  /** Required run/scenario/profile grouping context; extra evaluation metadata is preserved. */
   context: z.infer<typeof groupingSchema>;
+  /** Validated element evaluations available for this run. Missing elements count unknown. */
   results: Evaluation[];
 }
 
 const runSchema = z.object({ context: groupingSchema, results: z.array(evaluationSchema), metadata: z.unknown().optional() }).strict();
 
-/** Requires explicit reporting context, without making it mandatory for evaluation. */
+/**
+ * Requires explicit reporting context, without making it mandatory for evaluation.
+ *
+ * @param value - Untrusted JSON array of readout runs.
+ * @returns Runs with element-specific result unions narrowed.
+ */
 export function parseReadoutRuns(value: unknown): ReadoutRun[] {
   return z.array(runSchema).parse(value).map(run => ({
     context: run.context,
@@ -37,7 +45,13 @@ export function parseReadoutRuns(value: unknown): ReadoutRun[] {
   }));
 }
 
-/** Aggregates assessments without inference; duplicate identities fail instead of inflating counts. */
+/**
+ * Aggregates assessments without inference; duplicate identities fail instead of inflating counts.
+ *
+ * @param value - Untrusted readout-run array.
+ * @param selection - Unique element IDs to report; defaults to all registered elements.
+ * @returns JSON-safe scenario/profile groups with coverage, run frequency, occurrence counts, and evidence.
+ */
 export function buildReadout(value: unknown, selection: readonly ElementId[] = elementIdSchema.options) {
   const runs = parseReadoutRuns(value);
   if (!selection.length || new Set(selection).size !== selection.length) {
@@ -155,11 +169,21 @@ export function buildReadout(value: unknown, selection: readonly ElementId[] = e
   return { schema_version: "taxonome.readout.v1", groups: output };
 }
 
+/**
+ * Escapes one dynamic Markdown-table cell.
+ *
+ * @param value - Display label that may contain pipes or line breaks.
+ */
 function markdownCell(value: string) {
   return value.replaceAll("|", "\\|").replaceAll("\n", " ");
 }
 
-/** Renders the same deterministic counts and evidence drilldowns as a compact Markdown preview. */
+/**
+ * Renders the same deterministic counts and evidence drilldowns as a compact Markdown preview.
+ *
+ * @param report - Output returned by {@link buildReadout}.
+ * @returns Markdown with one table and evidence sections per scenario/profile group.
+ */
 export function readoutMarkdown(report: ReturnType<typeof buildReadout>): string {
   const lines = ["# Taxonome behavior preview", ""];
   for (const group of report.groups) {

@@ -27,17 +27,33 @@ const eventSchema = z.discriminatedUnion(
     }).strict(),
   ]
 );
+
+/**
+ * One append-only budget event.
+ *
+ * Budget events declare the immutable cap; reservations charge a call before
+ * submission; finished events record outcome, latency in milliseconds, SDK
+ * usage when exposed, and observed model-attempt count.
+ */
 export type LedgerEvent = z.infer<typeof eventSchema>;
 
 /** Durable reservations are never refunded, including crashes and failed calls. */
 export class CallLedger {
+  /** Absolute path of the shared JSONL ledger. */
   readonly path: string;
 
+  /**
+   * @param path - Ledger path shared by every process/command in one experiment.
+   */
   constructor(path: string) {
     this.path = resolve(path);
   }
 
-  /** Serializes one read-modify-write operation across processes with a fail-closed lock. */
+  /**
+   * Serializes one read-modify-write operation across processes with a fail-closed lock.
+   *
+   * @param work - Operation that exclusively owns the ledger lock.
+   */
   private async locked<T>(work: () => Promise<T>): Promise<T> {
     await mkdir(dirname(this.path), { recursive: true });
     const lock = `${this.path}.lock`;
@@ -57,7 +73,11 @@ export class CallLedger {
     }
   }
 
-  /** Appends and fsyncs one validated event before control returns to the caller. */
+  /**
+   * Appends and fsyncs one validated event before control returns to the caller.
+   *
+   * @param event - Validated budget/reservation/completion event.
+   */
   private async append(event: LedgerEvent): Promise<void> {
     const file = await open(this.path, "a", 0o600);
     try {
@@ -68,7 +88,11 @@ export class CallLedger {
     }
   }
 
-  /** Creates a ledger once or verifies the existing cap; never resets usage. */
+  /**
+   * Creates a ledger once or verifies the existing cap; never resets usage.
+   *
+   * @param cap - Positive maximum request count, default and hard maximum 500.
+   */
   async initialize(cap = 500): Promise<void> {
     headerSchema.parse({ type: "budget", cap });
 
@@ -94,7 +118,11 @@ export class CallLedger {
     });
   }
 
-  /** Parses the complete append-only log and verifies its header and reservation sequence. */
+  /**
+   * Parses the complete append-only log and verifies its header and reservation sequence.
+   *
+   * @returns Validated events in durable file order.
+   */
   async events(): Promise<LedgerEvent[]> {
     const text = await readFile(this.path, "utf8");
     const events = text.trim().split("\n").map(line => eventSchema.parse(JSON.parse(line) as unknown));
@@ -112,7 +140,13 @@ export class CallLedger {
     return events;
   }
 
-  /** Flushes one reservation before returning; exhausted budgets throw before submission. */
+  /**
+   * Flushes one reservation before returning; exhausted budgets throw before submission.
+   *
+   * @param model - Exact configured model ID for this request.
+   * @param purpose - Stable experiment phase label such as `eval` or `optimize:teacher`.
+   * @returns Monotonic 1-based reservation ID.
+   */
   async reserve(model: string, purpose: string): Promise<number> {
     return this.locked(async () => {
       const events = await this.events();
@@ -128,7 +162,15 @@ export class CallLedger {
     });
   }
 
-  /** Completes a reservation exactly once; unknown SDK usage/attempt counts remain null. */
+  /**
+   * Completes a reservation exactly once; unknown SDK usage/attempt counts remain null.
+   *
+   * @param id - Existing unfinished reservation ID.
+   * @param ok - Whether the SDK operation completed successfully.
+   * @param latency_ms - Wall-clock operation duration in milliseconds.
+   * @param usage - SDK usage payload, or null when unavailable.
+   * @param model_attempts - Observed model-attempt events, or null when unavailable.
+   */
   async finish(
     id: number,
     ok: boolean,
@@ -149,7 +191,11 @@ export class CallLedger {
     });
   }
 
-  /** Reports durable usage from reservations; unfinished and failed calls remain used. */
+  /**
+   * Reports durable usage from reservations; unfinished and failed calls remain used.
+   *
+   * @returns Cap, used/remaining request counts, and all validated events.
+   */
   async summary() {
     const events = await this.events();
     const header = headerSchema.parse(events[0]);

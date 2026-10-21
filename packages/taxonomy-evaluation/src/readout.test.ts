@@ -7,7 +7,11 @@ import { SCHEMA_VERSION, type Evaluation } from "./contracts.js";
 const source = { id: "a", label: "A", surface_id: "surface-mcp" as const };
 const context = { scenario: { id: "s", label: "Scenario", task: "task" }, profile: { id: "p", label: "Profile" } };
 
-/** Wraps a Timeout result in the shared evaluation envelope. */
+/**
+ * Wraps a Timeout result in the shared evaluation envelope.
+ *
+ * @param result - Semantic result to place in a deterministic Timeout evaluation.
+ */
 const e = (result: Evaluation["result"]): Evaluation => ({
   schema_version: SCHEMA_VERSION,
   element_id: "beh-timeout",
