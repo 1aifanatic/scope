@@ -27,7 +27,7 @@ node apps/taxonome/dist/index.js run \
 ```
 
 This deterministic example needs no token. The built CLI is also callable as
-`pnpm taxonome -- ...` during development; use the direct `node` entry point
+`pnpm -s taxonome ...` during development (preserving caller-relative paths); use the direct `node` entry point
 when the entire process stdout must be JSON (pnpm prints its own banners).
 Diagnostics/help go to stderr; evaluation failures have explicit JSON error
 states and a nonzero exit status.
@@ -172,6 +172,10 @@ metadata, derived by consumers. Confidence is rejected, not just omitted by
 convention. The original schema-declared hypothesis is simplified, not a
 mandatory second Boolean implementation:
 
+The SDK does not expose native JSON-Schema constrained decoding here. Ax
+declares/parses JSON in the prompt and the shared Zod schema validates it;
+invalid results are explicit errors, never repaired by a second element call.
+
 | Field | Producer and concrete consumer | Decision / simpler alternative |
 |---|---|---|
 | `schema_version` | Engine; artifact/replay compatibility | Keep in envelope, not each occurrence |
@@ -228,6 +232,9 @@ completeness or missing task evidence is indeterminate. These preflights make
 zero calls and are reported separately from eligible prompt predictions.
 Every eligible prompt evaluation makes exactly one SDK request. Explicit
 Timeout positives are not blocked by the complete-run requirement.
+Preflight-only cases remain in the functional regression/final packets but
+are excluded from prompt optimization, which cannot improve an authoritative
+metadata decision.
 
 The SDK cannot apply Ax's temperature/token-limit hints. The adapter emits a
 diagnostic and records `sdk-managed` sampling/low reasoning rather than
@@ -242,6 +249,121 @@ distinct-run versus occurrence counts, total/assessed/unknown/excluded/error
 coverage, and stable evidence drilldowns. Missing assessments count unknown;
 duplicate runs/assessments fail rather than double-counting. This is not a
 scorecard, fix list, narrative model call, or production readout v2.
+
+## Recorded spike findings (2026-10-21)
+
+**Recommendation: retain the simplified structured occurrence model for the
+next review, and prefer the revised baseline prompt over the learned-demo
+artifact for this packet.** This is not a production-model decision or phase
+exit. A run-level Boolean cannot preserve the tested behavior/source frequency
+and per-call drilldowns; adding confidence or repeated category metadata did
+not solve a concrete consumer need.
+
+All raw evidence is in
+[`packages/taxonomy-evaluation/evidence/`](../../packages/taxonomy-evaluation/evidence/).
+`manifest.json` records hashes, settings, per-phase usage, and the full
+cumulative ledger. Model evals are distinct from the offline tests.
+
+| Experiment | Case result | Actual SDK requests | Interpretation |
+|---|---:|---:|---|
+| Original neutral-ID baseline, 18 cases twice | 33/36 | 36 | Two relevance/inapplicability confusions and one false certainty with unknown completeness |
+| Original complete-artifact replay | 35/36 | 36 | Unknown-completeness mistake remained; preserved, not relabeled |
+| Revised baseline, same regression packet twice | 36/36 | 30 | Six known metadata preflights; eight additional deterministic Timeout assertions also passed |
+| Revised complete-artifact regression replay | 36/36 | 30 | Same assertions and preflight rules, no accuracy gain |
+| Fresh final packet baseline, 6 cases twice | 12/12 | 10 | Two preflights plus two additional deterministic Timeout assertions |
+| Fresh final packet complete-artifact replay | 12/12 | 10 | Candidate was fixed before either final comparison; no subsequent tuning |
+| Actual opaque-ID renaming replay | 3/3 | 3 | Same gold source/turn facts after run/session ID changes |
+
+The first packet became development/regression evidence once its validation
+failures informed the wrapper/precondition revision. The separate final
+packet was frozen at `dd19789a92f18254842ff1cafe3c912b563ce9ac`, is disjoint by
+family/origin, and was never supplied to the optimizer. Six-row/two-repeat
+synthetic results are functional evidence, not a statistical production
+accuracy estimate. One negative format case reconstructs a reviewed repository
+HAR fixture; these results do not establish broad real-run generalization.
+
+The correction was **not an optimizer-only accuracy claim**: authoritative
+completeness/exclusion belongs in the shared runtime. Eligible complete-run
+prompts still decide task relevance/discovery/non-use. An irrelevant reference
+is a completed negative, not an excluded assessment. No semantic gold facts
+were weakened. Earlier contract artifacts remain archived; the current loader
+deliberately rejects their old contract hash.
+
+### What the real Ax experiment established
+
+The pinned convenience API actually runs BootstrapFewShot followed by GEPA.
+Both experiments used `maxMetricCalls: 48`, with one cumulative 500-call guard
+covering student, bootstrap-teacher, reflection/proposal, and replay requests.
+The first optimization used **50** real requests; the revised one used **49**
+(44 student, 5 teacher), while its metric trace contains 47 entries.
+This demonstrates why a metric budget is not an all-in call budget.
+
+The revised selected artifact contains unchanged task-description/instruction
+components, **three learned traces from two distinct training inputs**, and
+five labeled training examples. All components, repeated traces, statistics,
+and supervised examples are preserved exactly, then restored with
+`applyOptimization` through the normal CLI. Repetition in Ax's cumulative
+trace collection is not silently deduplicated. No validation/final examples
+became demonstrations. With learned demos present, the pinned Ax replay renders
+those three traces; the five supervised seeds remain serialized provenance,
+not five additional replay demonstrations.
+Ax's serialized `totalRounds: 30` is library metadata,
+not evidence of 30 paid proposals; actual requests and metric traces are the
+authoritative experiment record.
+
+On the fresh final packet, mean input tokens/request rose from **691.8** to
+**1790.8** with demonstrations, with no observed accuracy improvement. SDK
+round-trip median was 1615ms baseline versus 1096ms replay in these sequential
+samples. This was not a controlled cache/latency experiment; do not infer a
+throughput advantage or causal speedup.
+
+### Readout fitness and budget
+
+The generated [`readout-preview.md`](../../packages/taxonomy-evaluation/evidence/readout-preview.md)
+uses an actual restored mixed result plus a separate deterministic run, with
+explicit matching scenario/profile context. Timeout occurs in **2 distinct
+runs / 4 occurrences**. `account/query` contributes **2 runs / 3 occurrences**,
+not 3 runs; `authctl` contributes 1 run / 1 occurrence. The unexecuted Skipped
+Invocation assessment in the second run is counted unknown/missing, not
+negative. JSON and Markdown come from the same deterministic consumer, without
+another inference call or prose scraping.
+
+The frozen all-in ledger ends at **256/500 requests** with 244 unused slots,
+256 completion records, one observed model attempt per request, and usage
+available for every request. Totals: **369886 input tokens**, **12161 output
+tokens**, and an SDK cost-multiplier sum of 256. Dollar cost is unknown, not
+zero. The two early proof calls (including the coordinator's) are included.
+There are no unresolved reservations or observed transport failures; preserved
+functional model mistakes are shown separately above. Tuning stopped because
+the required technical evidence was complete, not because the budget ran out.
+
+### Reproduce the review
+
+Offline verification (no credentials/inference):
+
+```bash
+pnpm --filter taxonomy-evaluation build
+pnpm --filter taxonome build
+pnpm exec vitest run packages/taxonomy-evaluation/src apps/taxonome/src --reporter=default
+pnpm --filter static-prompt-evals exec vitest run --config adapter/vitest.config.ts --reporter=default
+node apps/taxonome/dist/index.js readout \
+  packages/taxonomy-evaluation/evidence/readout-input.json \
+  --markdown /tmp/taxonome-preview.md
+```
+
+Recorded final verification: **61 tests / 10 files** for the standalone slice,
+**32 tests / 6 files** for the existing static-eval TypeScript suite; both
+standalone builds/type checks and static-eval type checking passed. The latter
+requires `pnpm --filter 'static-prompt-evals^...' build` first. License-header,
+manifest coverage, and regenerated notice checks passed. The test suite also
+restores the complete learned artifact offline and checks training-only
+provenance and actual preview counts.
+
+For a separately authorized live review, use the earlier `eval` commands
+with `fixtures/final-inputs.jsonl`, `fixtures/final-gold.json`, and
+`evidence/optimized.v2.ax.json`, an explicit token, and an external review
+ledger. Do not modify the committed evidence ledger or treat a new file as
+permission to reset the overnight budget.
 
 ## Production impact and limits
 

@@ -39,6 +39,8 @@ describe("Timeout through the public API", () => {
     ["quick non-timeout error", { outcome: "error", duration_ms: 10 }, 1000, { state: "completed", observed: false }],
     ["missing timing", { outcome: "completed" }, 1000, { state: "indeterminate" }],
     ["no guessed universal cutoff", { outcome: "abandoned", duration_ms: 9000000 }, undefined, { state: "indeterminate" }],
+    ["completion without a policy or interruption attestation", { outcome: "completed", duration_ms: 5000 }, undefined, { state: "indeterminate" }],
+    ["explicit no interruption needs no guessed cutoff", { outcome: "completed", duration_ms: 5000, progress_interrupted: false }, undefined, { state: "completed", observed: false }],
     ["contradictory timing", { outcome: "timeout", duration_ms: 10, started_at: "2026-01-01T00:00:00Z", ended_at: "2026-01-01T00:00:02Z" }, 1000, { state: "indeterminate" }],
     ["reversed timing", { outcome: "timeout", started_at: "2026-01-01T00:00:02Z", ended_at: "2026-01-01T00:00:00Z" }, 1000, { state: "indeterminate" }],
     ["timestamp duration", { outcome: "abandoned", started_at: "2026-01-01T00:00:00Z", ended_at: "2026-01-01T00:00:01Z" }, 1000, { state: "completed", observed: true }],

@@ -81,6 +81,7 @@ export async function loadJson(location: string, options: { maxBytes?: number; t
       text = bytes.subarray(0, bytesRead).toString("utf8");
     } finally { await file.close(); }
   } else {
+    try { new URL(location); } catch { throw new Error("Invalid HTTP(S) ATIF URL"); }
     const timeout = options.timeoutMs ?? 10_000, attempts = options.attempts ?? 3;
     let body: string | undefined;
     for (let attempt = 0; attempt < attempts; attempt++) {

@@ -3,14 +3,14 @@
 
 import { z } from "zod";
 import { behaviorMetadata } from "./engine.js";
-import { contextSchema, elementIdSchema, evaluationSchema, skippedResultSchema, timeoutResultSchema, type ElementId, type Evaluation, type Source } from "./contracts.js";
+import { contextSchema, elementIdSchema, evaluationSchema, skippedResultSchema, timeoutResultSchema, occurrenceIdentity, type ElementId, type Evaluation, type Source } from "./contracts.js";
 
-const groupingSchema = contextSchema.pick({ run_id: true, scenario: true, profile: true }).required();
+const groupingSchema = contextSchema.pick({ run_id: true, scenario: true, profile: true }).required().passthrough();
 export interface ReadoutRun {
   context: z.infer<typeof groupingSchema>;
   results: Evaluation[];
 }
-const runSchema = z.object({ context: groupingSchema, results: z.array(evaluationSchema) }).strict();
+const runSchema = z.object({ context: groupingSchema, results: z.array(evaluationSchema), metadata: z.unknown().optional() }).strict();
 export function parseReadoutRuns(value: unknown): ReadoutRun[] {
   return z.array(runSchema).parse(value).map(run => ({
     context: run.context,
@@ -27,6 +27,12 @@ export function buildReadout(value: unknown, selection: readonly ElementId[] = e
     if (seen.has(run.context.run_id)) throw new Error("Duplicate run in readout; provide one assessment per run");
     seen.add(run.context.run_id);
     if (new Set(run.results.map(r => r.element_id)).size !== run.results.length) throw new Error("Duplicate element assessment within run");
+    for (const { result } of run.results) {
+      if (result.state === "completed" && result.observed &&
+          new Set(result.occurrences.map(occurrenceIdentity)).size !== result.occurrences.length) {
+        throw new Error("Duplicate occurrence within readout assessment");
+      }
+    }
   }
   const groups = new Map<string, ReadoutRun[]>();
   for (const run of runs) {
@@ -86,9 +92,13 @@ export function readoutMarkdown(report: ReturnType<typeof buildReadout>): string
       for (const source of behavior.sources) {
         lines.push(`| ${behavior.label} / ${cell(source.source?.label ?? "(unattributed)")} | ${source.distinct_runs}/${c.total} | ${source.occurrences} | ${c.assessed} | ${c.unknown} | ${c.inapplicable} | ${c.error} |`);
       }
-      if (behavior.sources.length) lines.push("", "Evidence (stable run, turn and call identities):", "", "```json", JSON.stringify(behavior.sources.flatMap(s => s.evidence), null, 2), "```", "");
     }
     lines.push("");
+    for (const behavior of group.behaviors) {
+      if (behavior.sources.length) lines.push(`### ${behavior.label} evidence`, "",
+        "Stable run, turn and call identities:", "", "```json",
+        JSON.stringify(behavior.sources.flatMap(s => s.evidence), null, 2), "```", "");
+    }
   }
   return lines.join("\n");
 }

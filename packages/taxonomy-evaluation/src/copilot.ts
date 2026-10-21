@@ -20,6 +20,16 @@ export interface CopilotTransport {
   complete(system: string, user: string, signal?: AbortSignal): Promise<{ content: string; usage?: Record<string, unknown> }>;
   close(): Promise<void>;
 }
+export async function closeTransports(
+  transports: readonly Pick<CopilotTransport, "close">[], primary?: unknown,
+): Promise<void> {
+  const closed = await Promise.allSettled(transports.map(async t => t.close()));
+  const errors = closed.flatMap(r => r.status === "rejected" ? [r.reason as unknown] : []);
+  if (primary !== undefined && !errors.length) throw primary;
+  if (primary !== undefined || errors.length) {
+    throw new AggregateError([...(primary !== undefined ? [primary] : []), ...errors], "Copilot SDK operation/cleanup failed");
+  }
+}
 
 export async function openCopilotTransport(
   ledger: CallLedger, model: string, purpose: string,
@@ -98,7 +108,9 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
     transcribe: async () => { throw new Error("Transcription is not supported"); },
     speak: async () => { throw new Error("Speech is not supported"); },
     async chat(request: Readonly<AxChatRequest>, callOptions?: Readonly<AxAIServiceOptions>): Promise<AxChatResponse> {
-      if (callOptions?.stream) throw new Error("Streaming is not supported by the one-call SDK adapter");
+      if (callOptions?.stream ?? options.stream) throw new Error("Streaming is not supported by the one-call SDK adapter");
+      if (request.responseFormat) throw new Error("Native structured output is not supported; use the Ax prompt/JSON parser and shared result validator");
+      if (request.model && request.model !== model) throw new Error("This SDK adapter is pinned to its configured model");
       if (request.modelConfig && Object.keys(request.modelConfig).length && !samplingWarning) {
         samplingWarning = true;
         process.stderr.write("taxonome: SDK-managed sampling; Ax temperature/token-limit hints cannot be applied by this SDK. Actual settings remain fixed low reasoning; see artifact transport settings.\n");

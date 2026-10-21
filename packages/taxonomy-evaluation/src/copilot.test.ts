@@ -3,7 +3,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import type { CopilotSession, SessionEvent } from "@github/copilot-sdk";
-import { copilotAI, skippedExecutor } from "./copilot.js";
+import { copilotAI, skippedExecutor, closeTransports } from "./copilot.js";
 import { executeSdkCall } from "./sdk-call.js";
 import { loadCases } from "./cases.js";
 import { fileURLToPath } from "node:url";
@@ -71,9 +71,19 @@ describe("Ax custom SDK provider contract (offline)", () => {
     expect(complete.mock.calls[0]?.[2]).toBe(controller.signal);
     await expect(ai.chat({ chatPrompt: [], functions: [{ name: "tool", description: "" }] })).rejects.toThrow("tools");
     await expect(ai.chat({ chatPrompt: [] }, { stream: true })).rejects.toThrow("Streaming");
+    await expect(ai.chat({ chatPrompt: [], responseFormat: { type: "json_schema", schema: {} } })).rejects.toThrow("Native structured");
+    await expect(ai.chat({ chatPrompt: [], model: "different-model" })).rejects.toThrow("pinned");
   });
 });
 describe("SDK lifecycle failures (offline)", () => {
+  it("closes student and teacher independently and preserves the original optimization error", async () => {
+    const student = { close: vi.fn(async () => { throw new Error("student cleanup"); }) };
+    const teacher = { close: vi.fn(async () => { throw new Error("teacher cleanup"); }) };
+    const failure: unknown = await closeTransports([student, teacher], new Error("optimization failed")).catch(e => e);
+    expect(student.close).toHaveBeenCalledOnce(); expect(teacher.close).toHaveBeenCalledOnce();
+    if (!(failure instanceof AggregateError)) throw new Error("Expected aggregate cleanup failure");
+    expect(failure.errors.map((e: Error) => e.message)).toEqual(["optimization failed", "student cleanup", "teacher cleanup"]);
+  });
   it("still disconnects/deletes when ledger completion fails, preserving both errors", async () => {
     const { session, ledger, deleted } = fixture();
     vi.mocked(session.sendAndWait).mockRejectedValue(new Error("primary inference failure"));

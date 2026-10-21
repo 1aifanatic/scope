@@ -41,7 +41,9 @@ export async function optimizeSkipped(
   cases: readonly EvaluationCase[], gold: Gold, studentAI: AxAIService, teacherAI: AxAIService, model: string,
   maxMetricCalls = 48,
 ): Promise<OptimizationArtifact> {
-  const selected = cases.filter(c => c.elements.includes("beh-skipped-invocation"));
+  const selected = cases.filter(c => c.elements.includes("beh-skipped-invocation") &&
+    c.input.context.completeness === "complete" && c.input.context.applicability?.["beh-skipped-invocation"] !== false &&
+    (c.input.context.scenario?.task || c.input.atif.steps.some(s => s.source === "user" && s.message.trim())));
   const train = selected.filter(c => c.split === "train"), validation = selected.filter(c => c.split === "validation");
   if (!train.length || !validation.length) throw new Error("Optimization requires disjoint train and validation cases");
   const lookup = new Map([...train, ...validation].map(c => [promptEvidence(c.input), c]));

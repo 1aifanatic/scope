@@ -28,7 +28,7 @@ export function detectTimeout(input: TaxonomyInput): TimeoutResult {
       const source = input.context.sources.find(s => s.id === meta?.source_id);
       occurrences.push({ related_turns: [step.step_id], tool_call_id: call.tool_call_id, ...(source ? { source } : {}) });
     } else if (duration === undefined || !meta?.outcome || meta.outcome === "pending" ||
-        (interrupted && !policy) || (delayed && meta?.progress_interrupted === undefined)) {
+        (!policy && meta?.progress_interrupted !== false) || (delayed && meta?.progress_interrupted === undefined)) {
       unknown = true;
     }
   }

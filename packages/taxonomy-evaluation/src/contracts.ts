@@ -54,7 +54,7 @@ export const atifSchema = z.object({
 }).passthrough();
 export const contextSchema = z.object({
   run_id: z.string().min(1).optional(),
-  scenario: z.object({ id: z.string().min(1), label: z.string().min(1), task: z.string().min(1) }).strict().optional(),
+  scenario: z.object({ id: z.string().min(1), label: z.string().min(1), task: z.string().min(1).optional() }).strict().optional(),
   profile: z.object({ id: z.string().min(1), label: z.string().min(1) }).strict().optional(),
   completeness: z.enum(["complete", "partial", "unknown"]),
   sources: z.array(sourceSchema),
@@ -99,6 +99,12 @@ export const timeoutResultSchema = observationSchema(timeoutOccurrenceSchema);
 export type SkippedResult = z.infer<typeof skippedResultSchema>;
 export type TimeoutResult = z.infer<typeof timeoutResultSchema>;
 export type Observation = SkippedResult | TimeoutResult;
+export type Occurrence = z.infer<typeof skippedOccurrenceSchema> | z.infer<typeof timeoutOccurrenceSchema>;
+export function occurrenceIdentity(occurrence: Occurrence): string {
+  return "discovery_turn" in occurrence
+    ? JSON.stringify([occurrence.source.id, occurrence.discovery_turn, occurrence.extension_point])
+    : occurrence.tool_call_id;
+}
 export const elementIdSchema = z.enum(["beh-skipped-invocation", "beh-timeout"]);
 export type ElementId = z.infer<typeof elementIdSchema>;
 export const evaluationSchema = z.object({
@@ -157,9 +163,7 @@ export function validateResult(id: ElementId, value: unknown, input: TaxonomyInp
       const call = step.tool_calls?.find(c => c.tool_call_id === occurrence.tool_call_id);
       if (call?.extra?.source_id !== occurrence.source?.id) throw new Error("Call/source attribution mismatch");
     }
-    const key = "discovery_turn" in occurrence
-      ? `${occurrence.source.id}:${occurrence.discovery_turn}:${occurrence.extension_point}`
-      : occurrence.tool_call_id;
+    const key = occurrenceIdentity(occurrence);
     if (unique.has(key)) throw new Error("Duplicate occurrence");
     unique.add(key);
   }

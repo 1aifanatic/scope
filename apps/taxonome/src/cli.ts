@@ -117,7 +117,7 @@ export function createCli(): Command {
     .action(async (options: ModelOptions & { cases: string; gold: string; output: string; maxMetricCalls: string }) => {
       if (!options.ledger) throw new Error("--ledger is required for optimization");
       if (options.artifact) throw new Error("Optimization starts from the pinned baseline; --artifact is for run/eval replay");
-      const { CallLedger, openCopilotTransport, copilotAI } = await import("taxonomy-evaluation/copilot");
+      const { CallLedger, openCopilotTransport, copilotAI, closeTransports } = await import("taxonomy-evaluation/copilot");
       const { optimizeSkipped } = await import("taxonomy-evaluation/optimization");
       const cases = await loadCases(options.cases), gold = await loadGold(options.gold);
       const max = Number(options.maxMetricCalls);
@@ -125,12 +125,17 @@ export function createCli(): Command {
       const ledger = new CallLedger(options.ledger); await ledger.initialize();
       const student = await openCopilotTransport(ledger, options.model, "optimize:student");
       let teacher: Awaited<ReturnType<typeof openCopilotTransport>> | undefined;
+      let failure: unknown;
+      let output: unknown;
       try {
         teacher = await openCopilotTransport(ledger, options.model, "optimize:teacher");
         const artifact = await optimizeSkipped(cases, gold, copilotAI(student, options.model), copilotAI(teacher, options.model, ""), options.model, max);
         await writeFile(options.output, `${JSON.stringify(artifact, null, 2)}\n`, { flag: "wx" });
-        emit({ artifact: options.output, best_score: artifact.optimized.bestScore, budget: await ledger.summary() });
-      } finally { await student.close(); await teacher?.close(); }
+        output = { artifact: options.output, best_score: artifact.optimized.bestScore, budget: await ledger.summary() };
+      } catch (error) { failure = error; }
+      await closeTransports(teacher ? [student, teacher] : [student], failure);
+      if (!output) throw new Error("Optimizer returned no artifact");
+      emit(output);
     });
   cli.command("readout <results>").option("--markdown <path>", "Write Markdown preview (stdout remains JSON)")
     .action(async (path: string, options: { markdown?: string }) => {

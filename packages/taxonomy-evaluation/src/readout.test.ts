@@ -25,6 +25,7 @@ describe("deterministic readout consumer", () => {
     expect(behavior.sources.map(s => [s.source?.id, s.distinct_runs, s.occurrences])).toEqual([["a", 2, 3], ["b", 1, 1]]);
     expect(behavior.sources[0].evidence).toHaveLength(3);
     expect(readoutMarkdown(report)).toContain("call-2");
+    expect(readoutMarkdown(report).indexOf("| Timeout |")).toBeLessThan(readoutMarkdown(report).indexOf("### Timeout evidence"));
     expect(buildReadout(JSON.parse(JSON.stringify([
       { context: { ...context, run_id: "one" }, results: [e({ state: "completed", observed: false })] },
     ])) as unknown)).toEqual(buildReadout([{ context: { ...context, run_id: "one" }, results: [e({ state: "completed", observed: false })] }]));
@@ -34,5 +35,8 @@ describe("deterministic readout consumer", () => {
     const run = { context: { ...context, run_id: "a" }, results: [e({ state: "completed", observed: false })] };
     expect(() => buildReadout([run, run])).toThrow("Duplicate run");
     expect(() => buildReadout([{ ...run, results: [...run.results, ...run.results] }])).toThrow("Duplicate element");
+    const occurrence = { source, related_turns: [2], tool_call_id: "call" };
+    expect(() => buildReadout([{ ...run, results: [e({ state: "completed", observed: true, occurrences: [occurrence, occurrence] })] }])).toThrow("Duplicate occurrence");
+    expect(buildReadout([{ ...run, context: { ...run.context, completeness: "complete", sources: [] }, metadata: { strategy: "deterministic" } }]).groups).toHaveLength(1);
   });
 });

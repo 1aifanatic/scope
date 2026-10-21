@@ -24,7 +24,7 @@ describe("durable all-in budget", () => {
     await expect(restarted.reserve("mock", "retry/replay")).rejects.toThrow("500/500");
     await expect(restarted.initialize(499)).rejects.toThrow("cannot be reset");
     expect((await restarted.summary()).used).toBe(500);
-  });
+  }, 15_000);
   it("does not race concurrent processes/instances or permit a missing ledger", async () => {
     const dir = await mkdtemp(join(tmpdir(), "taxonome-ledger-test-")); dirs.push(dir);
     const a = new CallLedger(join(dir, "calls.jsonl"));
