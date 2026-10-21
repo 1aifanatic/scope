@@ -1,6 +1,6 @@
 # Authentication & RBAC
 
-> **Status:** Proposed — implementation plan. Revised: 2026-09-21.
+> **Status:** Proposed — implementation plan. Revised: 2026-10-21.
 >
 > This document specifies the **target behavior**, not a claim that RBAC is deployed.
 > Project filtering, centralized API clients, and a Portal sign-in MVP already exist;
@@ -39,8 +39,10 @@
 |---|---|
 | Authentication | Proving the caller's identity with an IdP token, PAT, or internal credential |
 | Authorization | Scope's decision to permit an operation on a particular resource |
-| Platform role | Platform-wide administrative rights, independent of project membership |
-| Project role | A `user` or `admin` membership for one project |
+| Platform admin | The only platform role; manages global resources, projects, and platform users, independently of project membership |
+| Project admin | A project membership that permits all project operations, including metadata and RBAC administration |
+| Project contributor | A project membership that permits all project-content operations, but not metadata edits or RBAC assignment |
+| Project reader | A project membership that permits read-only access to that project |
 | Personal access token (PAT) | A credential for a Scope user, not a separate role or service identity |
 | Readonly share | An explicit, expiring grant bound to one immutable IdP tenant/subject that permits one Scope user to read one run or report without project membership |
 | Provider credentials | Agent/provider secrets managed by Token Manager, not user sessions or PATs |
@@ -82,18 +84,22 @@ consistent platform and project enforcement.
 ### Access policy
 
 These tables are the policy reference for the technical contracts and acceptance
-scenarios later in this document.
+scenarios later in this document. There are exactly four roles: **platform admin**,
+**project admin**, **project contributor**, and **project reader**. Use these names
+consistently; authentication, PATs, and readonly shares do not introduce other roles.
 
 #### Role scopes
 
-| Scope | Role | Responsibility |
-|---|---|---|
-| Platform | `admin` | Global resources, project control-plane operations, and platform-user administration |
-| Project | `user` | The user-accessible resource classes in one project |
-| Project | `admin` | All project resource classes, that project's settings, and membership/RBAC |
+| Scope | Role | Stored value | Responsibility |
+|---|---|---|---|
+| Platform | Platform admin | `admin` | Global resources, project control-plane operations, and platform-user administration |
+| Project | Project admin | `admin` | All project content, that project's metadata, and membership/RBAC |
+| Project | Project contributor | `contributor` | All project-content operations; may read but not edit project metadata or assign/change RBAC |
+| Project | Project reader | `reader` | Read-only access to project content, metadata, and memberships |
 
-An account can be a project `user` in two projects and a project `admin` in three
-others. A project role grants nothing in another project or at platform level.
+An account can be a project contributor in two projects, a project admin in three
+others, and a project reader in another. A project role grants nothing in another
+project or at platform level.
 
 Every project-scoped document has one immutable `projectId`. Normal content access
 requires a membership for that project; knowing or selecting its ID is not a grant.
@@ -102,33 +108,44 @@ The only non-member content-access path is an
 
 #### Resource permissions
 
-**Feature flags, agents, models, and secrets are platform-admin-only for every
-supported method**, including list/read. There is no read-only role for them, and a
-project role cannot make them visible. `secrets` includes provider credentials and
-the Token Manager secret-management surfaces, not user-session material or personal
-token self-service.
+**Any logged-in user may list and view models and agents**, even without a platform
+role or project membership. Only platform admins may create, update, or delete them.
+Feature flags and secrets remain platform-admin-only for every supported method,
+including list/read. `secrets` includes provider credentials and the Token Manager
+secret-management surfaces, not user-session material or personal token self-service.
 
-All other user-facing content is project-scoped. Read and mutation rights are
-separate so a project user can compose and render runs without administering the
-project's catalogs:
+| Global resource or operation | Any logged-in user | Platform admin |
+|---|---|---|
+| Models and agents | List/read | Full CRUD |
+| Feature flags | No | Full CRUD |
+| Secrets and provider credentials | No | Full administration |
+| Project creation/deletion | No | Create/delete |
+| Platform-user and platform-role administration | No; own identity via `/users/me` | Full administration |
 
-| Resource class | Project `user` read | Project `user` create/update/delete | Project `admin` |
-|---|---|---|---|
-| Runs, attempts, logs, snapshots, archives | Yes | Yes | Full CRUD |
-| Statistics and analytics | Yes | Yes, where the API supports mutations | Full CRUD |
-| Reports and insights | Yes | Yes | Full CRUD |
-| Prompts and criteria | Yes | Yes | Full CRUD |
-| Prompt features and codebases, including revisions | Yes | Yes | Full CRUD |
-| Profiles, personas, scenarios, skills, skill revisions, report templates | Yes | No | Full CRUD |
-| MCP servers and extensions | Yes | No | Full CRUD |
-| Project metadata | Yes | No | Read/update |
-| Project memberships | No; the user's own role is returned by `/users/me` | No | Full administration, subject to the last-admin invariant |
+All other user-facing content is project-scoped. A **project contributor can do
+everything within a project except edit its metadata or assign/change RBAC**,
+including creating, updating, and deleting shared catalog definitions. Creating or
+deleting the project container remains a platform-admin operation.
 
-A document's creator has no special rights over another member of the same project.
-Creating a run validates read access to every referenced profile, scenario, persona,
-MCP server, skill, extension, and report template in the same project. A project
-user can therefore discover valid inputs and submit or render runs, but cannot
-change those shared definitions.
+| Resource class | Project reader | Project contributor | Project admin | Platform admin |
+|---|---|---|---|---|
+| Runs, attempts, logs, snapshots, archives | Read | Full CRUD | Full CRUD | According to project membership |
+| Statistics and analytics | Read | Full CRUD | Full CRUD | According to project membership |
+| Reports and insights | Read | Full CRUD | Full CRUD | According to project membership |
+| Prompts and criteria | Read | Full CRUD | Full CRUD | According to project membership |
+| Prompt features and codebases, including revisions | Read | Full CRUD | Full CRUD | According to project membership |
+| Profiles, personas, scenarios, skills, skill revisions, report templates | Read | Full CRUD | Full CRUD | According to project membership |
+| MCP servers and extensions | Read | Full CRUD | Full CRUD | According to project membership |
+| Project metadata | Read | Read | Read/update | Read/update, without membership |
+| Project memberships/RBAC | Read | Read | Full administration | Full administration, without membership |
+
+Permissions cover only methods the API supports. Membership administration always
+respects the last-admin invariant. A document's creator has no special rights over
+another member with the same role in that project. Creating a run validates read
+access to every referenced profile, scenario, persona, MCP server, skill, extension,
+and report template in the same project. Project readers may inspect these inputs
+and existing runs, but only project contributors and project admins may submit or
+render new runs/reports or change shared definitions.
 
 #### Project operations
 
@@ -136,7 +153,8 @@ change those shared definitions.
 |---|---|
 | Create a project | Platform admin only; the creator becomes project admin atomically. |
 | List/inspect projects | Project member sees their projects; platform admin sees all project metadata. |
-| Read or change project-scoped content | Membership in that project with the resource permission; platform admin alone is insufficient. An explicit readonly share grants its named recipient reads only. |
+| Read project-scoped content | Project reader, project contributor, or project admin in that project; platform admin alone is insufficient. An explicit readonly share grants its named recipient reads only. |
+| Create, update, or delete project-scoped content | Project contributor or project admin in that project; platform admin alone is insufficient. |
 | Update project metadata or that project's memberships | Project admin for that project, or platform admin. |
 | Delete a project | Platform admin only. |
 
@@ -144,7 +162,7 @@ Creation grants the platform-admin creator an explicit project-admin membership,
 not ownership. A project admin may change project metadata and RBAC but cannot
 create or delete projects.
 
-A platform administrator can use the project control plane without joining the
+A platform admin can use the project control plane without joining the
 project. They may add themselves as a project admin when necessary, but platform
 administration alone never authorizes project-content access. Content requests still
 need membership or the same narrow user-bound sharing exception available to other
@@ -152,8 +170,9 @@ accounts.
 
 ### Authenticated run and report sharing
 
-A project member with read access to a run or report may grant **readonly access to
-one named user**. The grantor may enter an exact email/UPN and Entra tenant as
+A project contributor or project admin with access to a run or report may grant
+**readonly access to one named user**. A project reader cannot create or revoke
+shares. The grantor may enter an exact email/UPN and Entra tenant as
 discovery input, but Scope must resolve it through the trusted IdP directory to one
 immutable `(idp, idpTenant, idpSubject)` tuple before creating the share. Recipients
 must log in with that exact subject but do not need source-project membership. The
@@ -166,7 +185,8 @@ grant adds no role and does not add the project or item to lists.
 
 A readonly share never authorizes create, update, delete, membership, list, or
 platform-resource operations. Shares expire after 30 days by default, bounded by
-`SHARE_LINK_MAX_TTL`; the creator or a project admin may revoke them at any time.
+`SHARE_LINK_MAX_TTL`; a project contributor or project admin in the source project
+may revoke them at any time.
 Scope may generate a normal navigation URL for the recipient, but the URL contains
 no bearer capability and grants nothing by itself. Email/UPN is notification and
 display metadata only; alias changes or reassignment never change the recipient. See
@@ -177,14 +197,15 @@ enforcement and identity-binding details.
 
 | Journey | User experience |
 |---|---|
-| Sign in | Authenticate to Scope; the account's platform role and project memberships determine subsequent access. |
+| Sign in | Authenticate to Scope to view models and agents; platform-admin assignment and project memberships determine additional access. |
 | Create/select a project | A platform admin may create one and becomes its project admin. Selecting a project chooses context; the API still checks access. |
 | Administer a project | Use project metadata and membership controls according to [Project operations](#project-operations). Platform administration is not a shortcut into project content. |
 | Open a shared run/report | Log in as the named recipient, then view only the shared resource read-only. This does not join the source project. |
 
 Portal navigation and actions follow the [resource policy](#resource-permissions):
-project-admin resources depend on the selected project role, and platform resources
-depend on the platform role. UI gating does not replace server-side enforcement.
+project actions depend on the selected project role; models and agents are visible
+to every logged-in user, while global mutations, feature flags, and secrets require
+platform admin. UI gating does not replace server-side enforcement.
 
 ### CLI authentication and personal tokens
 
@@ -223,7 +244,7 @@ every authenticated user, independent of platform role or active-project members
 
 Closing or navigating away from the one-time disclosure panel clears the value from
 Portal state. Normal lists and subsequent reloads never contain the secret. Neither
-project nor platform administrators receive an endpoint to list or recover another
+project admins nor platform admins receive an endpoint to list or recover another
 user's PATs.
 
 #### CLI capabilities
@@ -252,7 +273,8 @@ and [Client integration](#client-integration) for MSAL, SecretStore, and HTTP cl
 | [Scope-owned authorization](#identity-provider-verification) | Keeps access portable across IdPs instead of coupling it to Entra roles/groups. |
 | [Independent role scopes](#role-scopes) | Supports different responsibilities in different projects. |
 | [Platform/project separation](#project-operations) | Limits global-admin content access while permitting explicit RBAC recovery through self-assignment. |
-| [Platform-only global resources](#resource-permissions) | Sensitive global resources have no read-only role. |
+| [Global resource permissions](#resource-permissions) | Every logged-in user can discover models and agents; global mutations, feature flags, and secrets require platform admin. |
+| [Three project roles](#role-scopes) | Project readers inspect data, project contributors manage all content, and project admins additionally edit metadata and assign RBAC. |
 | [Platform-only project deletion](#project-operations) | Prevents local or accidental deletion of the project container. |
 | [No ownership or general ACLs](#non-goals-and-future-scope) | Collaboration is project-based; the narrow, user-bound sharing exception supports intentional external review without membership. |
 | [User-equivalent PATs](#credential-behavior) | Enables automation without stale, copied, or independently elevated privileges. |
@@ -386,7 +408,8 @@ lookup and returns one tenant/object-ID subject. Zero or multiple matches fail w
 `422`; a directory outage fails with `503`. It never falls back to `users.email`,
 `users.upn`, token claims from the grantor, prefix/fuzzy search, or an alias-only
 pending record. An external recipient must first have an Entra B2B guest object (or
-the administrator must supply an otherwise verified immutable object ID) before
+the project admin or platform admin must supply an otherwise verified immutable
+object ID) before
 Scope can provision a project member or persist a share.
 
 ```text
@@ -421,10 +444,11 @@ A bootstrap identity tuple may promote a user to platform admin only when its
 verified tenant is in `AUTH_ALLOWED_TENANTS`. Bootstrap is promote-only: removing
 configuration does not silently demote an admin. Email is never a bootstrap key.
 
-Platform-role assignment/removal is explicit and audited. There are no per-user
-permission additions/removals in v1; platform roles and project memberships determine
-permissions, with only the explicit user-bound readonly-sharing exception for
-non-member access.
+Platform-admin assignment/removal is explicit and audited. There are no per-user
+permission additions/removals in v1; the authenticated model/agent read baseline,
+platform-admin assignment, and project memberships determine permissions. The only
+non-member project-content access is the explicit user-bound readonly-sharing
+exception.
 
 The platform must always have at least one enabled platform admin, and every
 non-deleted project must always have at least one enabled project admin. Demotion,
@@ -435,21 +459,44 @@ requests cannot both remove the final admins.
 ### Permission resolution
 
 Routes authorize on permissions derived by separate platform and project resolvers
-from the [access policy](#access-policy).
+from the [access policy](#access-policy). Every enabled, authenticated user receives
+model/agent read permissions, independent of role or project membership. This
+authenticated baseline is not another role.
 
 ```ts
-const PROJECT_USER_PERMISSIONS: ProjectPermission[] = [
-  "project/run:read", "project/run:write", "project/run:delete",
-  "project/statistic:read", "project/statistic:write", "project/statistic:delete",
-  "project/report:read", "project/report:write", "project/report:delete",
-  "project/insight:read", "project/insight:write", "project/insight:delete",
-  "project/prompt:read", "project/prompt:write", "project/prompt:delete",
-  "project/criteria:read", "project/criteria:write", "project/criteria:delete",
-  "project/prompt-feature:read", "project/prompt-feature:write", "project/prompt-feature:delete",
-  "project/codebase:read", "project/codebase:write", "project/codebase:delete",
+const AUTHENTICATED_PERMISSIONS: PlatformPermission[] = [
+  "platform/agent:read",
+  "platform/model:read",
+];
+
+const PROJECT_READER_PERMISSIONS: ProjectPermission[] = [
+  "project/run:read", "project/statistic:read", "project/report:read",
+  "project/insight:read", "project/prompt:read", "project/criteria:read",
+  "project/prompt-feature:read", "project/codebase:read",
   "project/profile:read", "project/persona:read", "project/scenario:read",
   "project/skill:read", "project/skill-revision:read", "project/report-template:read",
   "project/mcp-server:read", "project/extension:read", "project/project:read",
+  "project/project-membership:read",
+];
+
+const PROJECT_CONTRIBUTOR_PERMISSIONS: ProjectPermission[] = [
+  ...PROJECT_READER_PERMISSIONS,
+  "project/run:write", "project/run:delete",
+  "project/statistic:write", "project/statistic:delete",
+  "project/report:write", "project/report:delete",
+  "project/insight:write", "project/insight:delete",
+  "project/prompt:write", "project/prompt:delete",
+  "project/criteria:write", "project/criteria:delete",
+  "project/prompt-feature:write", "project/prompt-feature:delete",
+  "project/codebase:write", "project/codebase:delete",
+  "project/profile:write", "project/profile:delete",
+  "project/persona:write", "project/persona:delete",
+  "project/scenario:write", "project/scenario:delete",
+  "project/skill:write", "project/skill:delete",
+  "project/skill-revision:write", "project/skill-revision:delete",
+  "project/report-template:write", "project/report-template:delete",
+  "project/mcp-server:write", "project/mcp-server:delete",
+  "project/extension:write", "project/extension:delete",
 ];
 
 const PROJECT_ADMIN_PERMISSIONS: ProjectPermission[] = ["project/*:admin"];
@@ -509,7 +556,7 @@ export type ProjectPermission =
 export type PlatformPermission = `platform/${PlatformResource}:${Action}`;
 export type Permission = ProjectPermission | PlatformPermission;
 export type PlatformRole = "admin";
-export type ProjectRole = "user" | "admin";
+export type ProjectRole = "admin" | "contributor" | "reader";
 
 export interface UserDocument {
   _id: string; // Scope-owned UUID
@@ -648,7 +695,9 @@ type AuthorizationConfig =
   | {
       kind: "project-control-plane";
       projectPermission:
+        | "project/project:read"
         | "project/project:admin"
+        | "project/project-membership:read"
         | "project/project-membership:admin";
       platformPermission: "platform/project:admin";
       resolveProjectId: (req: TypedRequest) => Promise<string>;
@@ -680,16 +729,18 @@ apiRoute(ctx.app, ctx.registry, {
 });
 ```
 
-- `platform` invokes only the platform resolver.
+- `platform` invokes only the platform resolver, which combines the authenticated
+  model/agent read baseline with platform-admin permissions when applicable.
 - `project` resolves the exact target project, loads
   `(projectId, principal.userId)` membership, and evaluates only project
   permissions.
 - `project-or-readonly-share` is available only to the documented run/report read
   routes and their permitted rendering children. Its type cannot carry write,
   delete, unrelated-resource, or platform permissions.
-- `project-control-plane` implements the project-admin **or** platform-admin rule
-  without converting either permission into the other namespace. It is used for
-  project metadata and membership administration.
+- `project-control-plane` permits project members to read metadata/memberships and
+  project admins to administer them; platform admins may do both without membership.
+  It never converts either permission into the other namespace or grants content
+  access.
 
 Authorization resolvers use Redis as a read-through cache for each user's resolved
 platform permissions and per-project permissions. Cache keys include the stable
@@ -757,9 +808,12 @@ DELETE /api/v1/projects/:projectId/members/:userId
 Project creation requires `platform/project:admin` and atomically creates the
 caller's project-admin membership.
 
-Membership roles are only `user` and `admin`. The rate-limited member-create body
-names `idpTenant`, `role`, and either exact `emailOrUpn` discovery input or an
-immutable `idpSubject`. It performs no fuzzy, prefix, or general user search:
+Membership roles are only `admin`, `contributor`, and `reader`, corresponding to
+project admin, project contributor, and project reader. Membership list reads are
+available to all three project roles and platform admins; assigning, changing, or
+removing memberships requires project admin or platform admin. The rate-limited
+member-create body names `idpTenant`, `role`, and either exact `emailOrUpn` discovery
+input or an immutable `idpSubject`. It performs no fuzzy, prefix, or general user search:
 
 - `IdentityDirectory` resolves the email/UPN to exactly one immutable subject, or
   verifies the supplied subject in the named allowed tenant, before any record is
@@ -830,8 +884,8 @@ project. They must not accept a `userId` query, path, or body selector.
 
 List responses contain only `_id`, `note`, `createdAt`, `expiresAt`, `lastUsedAt`,
 and `revokedAt`. Creation additionally returns `token` once; deletion returns no
-token value. A user can view and revoke only their own records; administrators
-receive no route to list or recover another user's tokens.
+token value. A user can view and revoke only their own records; project admins and
+platform admins receive no route to list or recover another user's tokens.
 
 ### Readonly sharing lifecycle and API
 
@@ -862,11 +916,13 @@ GET    /api/v1/reports/:reportId/shares
 DELETE /api/v1/reports/:reportId/shares/:shareId
 ```
 
-These are project-member routes. Creating/listing requires the corresponding
-run/report read permission in the source project. Deleting requires the creator or
-a project admin. Responses contain share metadata and may include the ordinary
-resource URL; they never return a bearer capability. Lists expose the named
-recipient only to callers authorized to manage that source resource.
+These are project-member routes. Listing requires the corresponding run/report
+read permission in the source project. Creating or deleting requires the
+corresponding run/report write permission, held by project contributors and project
+admins; project readers cannot mutate shares. A platform admin needs the same
+project membership to manage shares. Responses contain share metadata and may
+include the ordinary resource URL; they never return a bearer capability. Lists
+expose the named recipient only to members authorized to read that source resource.
 
 ### Service-to-service auth
 
@@ -881,7 +937,8 @@ behalf of the initiating user:
   `iss = "scope-api"`, `aud = "scope-internal"`, expiry of at most five minutes,
   and a `jti`.
 - The token carries no platform/project permissions. Verifiers re-resolve the live
-  user, disabled state, and membership for the target `projectId`.
+  user, disabled state, membership, and required resource permissions for the target
+  `projectId`; project-reader membership never authorizes a report write.
 - The API private key and per-service keys live in Key Vault. Verifiers receive
   only the internal JWT public key.
 - Report queue messages carry `projectId` and request/report IDs, not owner IDs.
@@ -1001,7 +1058,7 @@ on project documents.
    [data-organization-projects.md](data-organization-projects.md).
 7. File legacy project-scoped data into the Default project without inferring
    document ownership or membership.
-8. Have a platform administrator explicitly establish Default-project memberships
+8. Have a platform admin explicitly establish Default-project memberships
    before granting access to its legacy content.
 
 Migrations must be CosmosDB-compatible, using supported compound indexes without
@@ -1072,8 +1129,9 @@ project-content enforcement must ship together.
    all scoped lists, reads, writes, deletes, analytics, run dependency resolution,
    and derived endpoints. Covers
    [project/platform authorization](#project-and-platform-authorization-scenarios).
-10. **[Platform-resource scoping](#resource-permissions).** Protect feature flags, agents,
-   models, and secrets for every method; no read-only role. Covers
+10. **[Platform-resource scoping](#resource-permissions).** Allow every logged-in user
+   to list/read models and agents. Require platform admin for their mutations and
+   for every feature-flag and secret method. Covers
    [project/platform authorization](#project-and-platform-authorization-scenarios).
 11. **[Service-to-service migration](#service-to-service-auth).** Move report generation
     to project-aware on-behalf-of tokens and ship with project-resource enforcement.
@@ -1115,15 +1173,15 @@ project-content enforcement must ship together.
 |---|---|---|
 | 4 | Platform admin creates a project | The project and the creator's project-admin membership are created atomically. |
 | 5 | Authenticated non-platform-admin creates a project | `403`; project membership or project-admin status does not grant project creation. |
-| 6 | A user is a member of projects A and B and an admin of C, D, and E | `/users/me` reports all five memberships and the correct independent role for each. |
-| 7 | Project user accesses runs, statistics, reports, insights, prompts, criteria, prompt features, or codebases in their project | All supported read/write/delete methods succeed. |
-| 8 | Project user reads profiles, personas, scenarios, skills, report templates, MCP servers, and extensions, then submits and renders a run using them | Reads and run/report operations succeed; attempts to create, update, or delete those shared catalog entries return `403`. |
+| 6 | A user is a project contributor in A and B, a project admin in C and D, and a project reader in E | `/users/me` reports all five memberships and the correct independent role for each. |
+| 7 | Project contributor accesses any project content, including profiles, personas, scenarios, skills/revisions, report templates, MCP servers, and extensions | All supported read/create/update/delete methods succeed; metadata and RBAC reads succeed, but editing metadata or assigning/changing/removing RBAC returns `403`. |
+| 8 | Project reader accesses project content, metadata, or memberships, then attempts a mutation | Supported list/read methods succeed; create/update/delete operations, run submission, report generation, and share creation/revocation return `403`. |
 | 9 | Project admin accesses MCP servers, extensions, profiles, project settings, or membership settings in their project | Supported methods succeed, subject to the last-admin invariant. |
 | 10 | Caller accesses project content without membership or a readonly share bound to their user ID | `404`, including logs, snapshots, reports, analytics, and other derived endpoints. |
 | 11 | Platform admin lists projects and changes RBAC on a project they do not belong to | Succeeds; they can add themselves as project admin. |
 | 12 | Platform admin accesses a run in a project they have not joined | `404`; platform role alone is insufficient. |
 | 13 | Platform admin accesses feature flags, agents, models, or secrets | All supported methods succeed. |
-| 14 | Non-platform-admin accesses feature flags, agents, models, or secrets | `403` for list, read, create, update, and delete; no read-only exception exists. |
+| 14 | Logged-in user without platform admin or any project membership accesses models, agents, feature flags, or secrets | Model/agent list/read succeeds; their mutations and every feature-flag/secret method return `403`. |
 | 15 | Project admin attempts to delete their project | `403`; a platform admin can delete it. |
 | 16 | Project admin adds a directory identity for which no Scope user exists | Scope resolves the immutable tenant/subject tuple, provisions the user, and creates the membership immediately without exposing a general lookup or sending an invitation. |
 | 17 | Email/UPN is reassigned from member subject A to subject B after A is added | Subject B does not receive A's membership; it remains bound to subject A's immutable identity and user ID. |
@@ -1135,17 +1193,17 @@ project-content enforcement must ship together.
 
 | # | Scenario | Expected result |
 |---|---|---|
-| 21 | Report generator handles a report for a project where the initiating user has membership | It can read/write only through an on-behalf-of token that resolves that user's current membership. |
-| 22 | User is disabled or loses project membership while an internal token remains unexpired | The next request is rejected; the service re-resolves liveness and membership. |
+| 21 | Report generator handles a report initiated by a project contributor or project admin | It can read/write only through an on-behalf-of token that resolves that user's current membership and required resource permissions. |
+| 22 | User is disabled, loses project membership, or is demoted to project reader while an internal token remains unexpired | The next request requiring the lost permission is rejected; the service re-resolves liveness, membership, and permissions. |
 | 23 | Role or membership change | Takes effect on the next request and writes a redacted audit event. |
 
 #### Sharing scenarios
 
 | # | Scenario | Expected result |
 |---|---|---|
-| 24 | A project member shares a run or report with a directory subject that has not signed in to Scope | Scope persists the immutable subject tuple; only that subject can later claim and view the exact resource read-only. |
+| 24 | A project contributor or project admin shares a run or report with a directory subject that has not signed in to Scope | Scope persists the immutable subject tuple; only that subject can later claim and view the exact resource read-only. |
 | 25 | A recipient updates/deletes a shared resource, reads an unrelated resource, or forwards its navigation URL to another user | The write returns `403`; unrelated reads and the other user's read return `404`; the URL is not a capability. |
-| 26 | The creator or project admin revokes a readonly share | The recipient's subsequent request returns `404`, even before the original expiry. |
+| 26 | A project contributor or project admin in the source project revokes a readonly share, including one created by another member | The recipient's subsequent request returns `404`, even before the original expiry. |
 
 #### PAT, Profile, and CLI scenarios
 
@@ -1154,7 +1212,7 @@ project-content enforcement must ship together.
 | 27 | A user creates a PAT with a valid short note and expiration | The token is returned once; its list entry contains only metadata and Scope retains only its hash. |
 | 28 | A user presents their PAT after a platform-role or project-membership change | The next request has exactly the user's newly effective access; it cannot retain the prior access or gain any new independent privilege. |
 | 29 | A PAT is expired, revoked, malformed, unknown, or belongs to a disabled user | The authentication-failure response is indistinguishable `401`; no secret appears in that response, audit event, log, metric, or diagnostic. |
-| 30 | A user or platform administrator lists another user's PATs or requests a previously created plaintext value | The API has no such route or value to return; only the issuing user can list/revoke their own metadata. |
+| 30 | A user or platform admin lists another user's PATs or requests a previously created plaintext value | The API has no such route or value to return; only the issuing user can list/revoke their own metadata. |
 | 31 | CLI or Portal creates and uses a PAT | `SCOPE_TOKEN` is used without persistence or display; Portal shows the plaintext once and clears it on close/navigation; later reloads and deletion never reveal it. |
 
 ### Open decisions and follow-ups
