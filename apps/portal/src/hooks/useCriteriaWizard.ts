@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { slugify } from "@/lib/utils";
 import { toast } from "sonner";
 import { gatesSatisfyInvariant, type GateId } from "@/lib/gates";
+import type { CriterionKind, CriterionSubject, TaxonomyElementId } from "@/types";
 
 export interface UseCriteriaWizardOptions {
   /** Pre-populated parent dependency IDs */
@@ -15,11 +16,26 @@ export interface UseCriteriaWizardOptions {
   initialGates?: GateId[];
   /** Gates that cannot be unselected in the gate picker (e.g. inline creation) */
   lockedGates?: GateId[];
+  initialKind?: CriterionKind;
+  initialTaxonomyElementId?: TaxonomyElementId;
+  /** Pre-populated evaluation subject (observations default to "run"). */
+  initialSubject?: CriterionSubject;
   /** Called with the new criterion ID after successful creation */
   onSuccess: (id: string) => void;
+  /** User-facing entity name for notifications. */
+  entityLabel?: "Criterion" | "Observation";
 }
 
-export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedGates, onSuccess }: UseCriteriaWizardOptions) {
+export function useCriteriaWizard({
+  initialDependsOn = [],
+  initialGates,
+  lockedGates,
+  initialKind = "gate",
+  initialTaxonomyElementId,
+  initialSubject = "run",
+  onSuccess,
+  entityLabel = "Criterion",
+}: UseCriteriaWizardOptions) {
   const queryClient = useQueryClient();
 
   // Wizard step (1 or 2)
@@ -31,6 +47,9 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
   const [idManuallyEdited, setIdManuallyEdited] = useState(false);
   const [dependsOn, setDependsOn] = useState<string[]>(initialDependsOn);
   const [gates, setGates] = useState<GateId[] | undefined>(initialGates ?? ["select"]);
+  const [kind, setKind] = useState<CriterionKind>(initialKind);
+  const [taxonomyElementId, setTaxonomyElementId] = useState<TaxonomyElementId | undefined>(initialTaxonomyElementId);
+  const [subject, setSubject] = useState<CriterionSubject>(initialSubject);
 
   // Step 2 fields
   const [prompt, setPrompt] = useState("");
@@ -53,7 +72,13 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
     () => existingCriteria.some((c) => c.id === id.trim()),
     [id, existingCriteria],
   );
-  const canContinue = behavior.trim().length > 0 && id.trim().length > 0 && idValid && !idExists && !criteriaLoading;
+  const canContinue =
+    behavior.trim().length > 0 &&
+    id.trim().length > 0 &&
+    idValid &&
+    !idExists &&
+    !criteriaLoading &&
+    (kind === "observation" || !!gates?.length);
 
   // Gate compatibility lookup for parent/child suggestion filtering.
   const criterionGatesById = useMemo(() => {
@@ -90,17 +115,17 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
   useEffect(() => {
     setDependsOn((prev) => {
       const next = prev.filter(
-        (pid) => !criterionGatesById.has(pid) || gatesSatisfyInvariant(criterionGatesById.get(pid), gates),
+        (pid) => kind === "observation" || !criterionGatesById.has(pid) || gatesSatisfyInvariant(criterionGatesById.get(pid), gates),
       );
       return next.length === prev.length ? prev : next;
     });
     setAcceptedChildren((prev) => {
       const next = prev.filter(
-        (cid) => !criterionGatesById.has(cid) || gatesSatisfyInvariant(gates, criterionGatesById.get(cid)),
+        (cid) => kind === "observation" || !criterionGatesById.has(cid) || gatesSatisfyInvariant(gates, criterionGatesById.get(cid)),
       );
       return next.length === prev.length ? prev : next;
     });
-  }, [gates, criterionGatesById, suggestedParents, suggestedChildren]);
+  }, [gates, kind, criterionGatesById, suggestedParents, suggestedChildren]);
 
   // Auto-suggest ID from behavior (unless manually edited)
   const handleBehaviorChange = useCallback(
@@ -137,6 +162,11 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
       } else {
         setSuggestedChildren([]);
         setAcceptedChildren([]);
+      }
+      // Prefill the evaluation subject from the AI suggestion (observations
+      // only; the toggle is hidden for gates). User can still override it.
+      if (data.suggestedSubject) {
+        setSubject(data.suggestedSubject);
       }
     },
     onError: () => {
@@ -175,11 +205,14 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
         }),
       );
       queryClient.invalidateQueries({ queryKey: ["criteria"] });
-      toast.success(`Criterion "${data.id}" created`);
+      toast.success(`${entityLabel} "${data.id}" created`);
       if (failedChildren.length > 0) {
+        const childLabel = entityLabel === "Observation"
+          ? failedChildren.length === 1 ? "observation" : "observations"
+          : failedChildren.length === 1 ? "criterion" : "criteria";
         toast.warning(
           `Created "${data.id}", but couldn't link ${failedChildren.length} child ` +
-            `${failedChildren.length === 1 ? "criterion" : "criteria"} ` +
+            `${childLabel} ` +
             `(${failedChildren.join(", ")}). Add the dependency manually.`,
         );
       }
@@ -190,8 +223,8 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
   // Step 1 → Step 2
   const handleContinue = useCallback(() => {
     setStep(2);
-    generateMutation.mutate({ behavior: behavior.trim(), gates });
-  }, [behavior, gates, generateMutation]);
+    generateMutation.mutate({ behavior: behavior.trim(), gates: kind === "gate" ? gates : undefined });
+  }, [behavior, gates, kind, generateMutation]);
 
   // Step 2 → Submit
   const handleCreate = useCallback(() => {
@@ -200,17 +233,20 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
       id: id.trim(),
       prompt: prompt.trim(),
       dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
-      gates,
+      ...(kind === "gate" ? { gates } : {}),
+      kind,
+      ...(kind === "observation" && taxonomyElementId ? { taxonomyElementId } : {}),
+      ...(kind === "observation" ? { subject } : {}),
     });
-  }, [id, prompt, dependsOn, gates, createMutation]);
+  }, [id, prompt, dependsOn, gates, kind, taxonomyElementId, subject, createMutation]);
 
   // Regenerate prompt
   const handleRegenerate = useCallback(() => {
     setSuggestedParents([]);
     setSuggestedChildren([]);
     setAcceptedChildren([]);
-    generateMutation.mutate({ behavior: behavior.trim(), gates });
-  }, [behavior, gates, generateMutation]);
+    generateMutation.mutate({ behavior: behavior.trim(), gates: kind === "gate" ? gates : undefined });
+  }, [behavior, gates, kind, generateMutation]);
 
   // Reset all state to initial values
   const reset = useCallback(() => {
@@ -220,12 +256,15 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
     setIdManuallyEdited(false);
     setDependsOn(initialDependsOn);
     setGates(initialGates ?? ["select"]);
+    setKind(initialKind);
+    setTaxonomyElementId(initialTaxonomyElementId);
+    setSubject(initialSubject);
     setPrompt("");
     setAiGenerated(false);
     setSuggestedParents([]);
     setSuggestedChildren([]);
     setAcceptedChildren([]);
-  }, [initialDependsOn, initialGates]);
+  }, [initialDependsOn, initialGates, initialKind, initialTaxonomyElementId, initialSubject]);
 
   return {
     // State
@@ -241,6 +280,12 @@ export function useCriteriaWizard({ initialDependsOn = [], initialGates, lockedG
     gates,
     setGates,
     lockedGates,
+    kind,
+    setKind,
+    taxonomyElementId,
+    setTaxonomyElementId,
+    subject,
+    setSubject,
     prompt,
     setPrompt,
     aiGenerated,

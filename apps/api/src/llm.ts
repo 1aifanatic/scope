@@ -3,11 +3,13 @@
 
 import {
   gatesSatisfyInvariant,
+  type CriterionSubject,
   type GateId,
 } from "shared";
-import { isUnexpected } from "@azure-rest/ai-inference";
-import { postAdaptiveChatCompletion } from "./adaptive-chat-completions.js";
-import { acquireInferenceClient, isLlmAvailable as inferenceAvailable } from "./llm-token.js";
+import {
+  completePortalLlm,
+  isLlmAvailable as inferenceAvailable,
+} from "./llm-token.js";
 
 export type SuggestDirection = "parents" | "children";
 
@@ -30,6 +32,11 @@ Given a natural-language description of a behavior or pattern to detect, you mus
    - Contain only lowercase letters, digits, and underscores
    - Be concise but descriptive (e.g., has_unit_tests, uses_typescript, build_succeeds)
 
+3. Classify the evaluation SUBJECT — whether the behavior must be judged across the WHOLE run or within a SINGLE iteration in isolation:
+   - "run": the behavior spans multiple steps/iterations or describes a transition over the course of the session — phrasing like "at any point", "ever", "then later", "added then removed", "during the run", or anything only confirmable by viewing the entire run together.
+   - "iteration": the behavior is a single end-state fact or a per-step property judgeable from one iteration alone (e.g., "uses TypeScript", "has a Dockerfile", "ran the test suite this turn").
+   When unsure, prefer "run".
+
 Here are examples of good criteria prompts:
 - Codebase evidence: "The project uses the React framework. Look for a react dependency in package.json and .jsx or .tsx files containing React components."
 - Codebase evidence: "The project uses Azure Bicep for infrastructure as code. Look for *.bicep files, bicepconfig.json, or a main.bicep entry point."
@@ -38,7 +45,7 @@ Here are examples of good criteria prompts:
 - Tool-output evidence (non-gate command): "The agent verified the running server responds. The captured tool-call history contains a request to the local endpoint (e.g. a curl to http://localhost) that returned a 2xx status."
 
 Respond with ONLY a JSON object in this exact format (no markdown, no code fences):
-{"prompt": "your evaluation prompt here", "suggestedId": "your_suggested_id"}`;
+{"prompt": "your evaluation prompt here", "suggestedId": "your_suggested_id", "suggestedSubject": "run"}`;
 
 /**
  * Per-gate description of the evidence a criterion compatible with that gate is
@@ -164,6 +171,10 @@ export interface GenerateResult {
   suggestedId: string;
   suggestedParents: string[];
   suggestedChildren: string[];
+  /** Suggested evaluation granularity for observation criteria. Defaults to
+   *  "run"; "iteration" only when the model clearly detects an end-state /
+   *  per-step property. Ignored by gate criteria (always per-iteration). #1156. */
+  suggestedSubject: CriterionSubject;
 }
 
 export interface CriteriaPromptRequest {
@@ -180,8 +191,6 @@ export function isLlmAvailable(): boolean {
   return inferenceAvailable();
 }
 
-type ChatClient = Awaited<ReturnType<typeof acquireInferenceClient>>["client"];
-
 function sanitizeId(suggestedId: unknown): string {
   if (typeof suggestedId !== "string") return "new_criterion";
   const sanitized = suggestedId
@@ -191,6 +200,12 @@ function sanitizeId(suggestedId: unknown): string {
     .replace(/_+/g, "_")
     .replace(/_$/, "");
   return sanitized || "new_criterion";
+}
+
+/** Coerce a model-suggested subject. Defaults to "run" — "iteration" is only
+ *  honored when the model returns it exactly (matching "prefer run when unsure"). */
+function sanitizeSubject(value: unknown): CriterionSubject {
+  return value === "iteration" ? "iteration" : "run";
 }
 
 function parseJson(content: string): any {
@@ -223,7 +238,7 @@ export function buildCriteriaAuthoringRequest(
 
 export function parseCriteriaAuthoringResponse(
   content: string,
-): { prompt: string; suggestedId: string } {
+): { prompt: string; suggestedId: string; suggestedSubject: CriterionSubject } {
   const parsed: unknown = parseJson(content);
   if (
     !parsed ||
@@ -237,6 +252,9 @@ export function parseCriteriaAuthoringResponse(
   return {
     prompt: String(value.prompt).trim(),
     suggestedId: sanitizeId(value.suggestedId),
+    suggestedSubject: sanitizeSubject(
+      (parsed as { suggestedSubject?: unknown }).suggestedSubject,
+    ),
   };
 }
 
@@ -292,29 +310,10 @@ export function selectCriteriaDependencyPool(
 }
 
 async function chat(
-  llm: ChatClient,
-  endpoint: string,
   request: CriteriaPromptRequest,
+  explicitModel?: string,
 ): Promise<string> {
-  const response = await postAdaptiveChatCompletion({
-    endpoint,
-    model: request.model,
-    messages: request.messages,
-    temperature: request.temperature,
-    maxTokens: request.max_tokens,
-    send: (body) => llm.path("/chat/completions").post({ body }),
-  });
-
-  if (isUnexpected(response)) {
-    const errBody = response.body as any;
-    throw new Error(`LLM request failed: ${errBody?.error?.message || response.status}`);
-  }
-
-  const content = response.body.choices?.[0]?.message?.content;
-  if (!content) {
-    throw new Error("LLM returned empty response");
-  }
-  return content;
+  return completePortalLlm(request, explicitModel);
 }
 
 /**
@@ -322,16 +321,14 @@ async function chat(
  * is the one indispensable result of generation.
  */
 async function author(
-  llm: ChatClient,
-  endpoint: string,
   model: string,
   behavior: string,
   gates?: GateId[],
-): Promise<{ prompt: string; suggestedId: string }> {
+  explicitModel?: string,
+): Promise<{ prompt: string; suggestedId: string; suggestedSubject: CriterionSubject }> {
   const content = await chat(
-    llm,
-    endpoint,
     buildCriteriaAuthoringRequest(behavior, gates, model),
+    explicitModel,
   );
   return parseCriteriaAuthoringResponse(content);
 }
@@ -363,23 +360,21 @@ function buildSuggestMessage(
  */
 async function suggestDeps(
   direction: SuggestDirection,
-  llm: ChatClient,
-  endpoint: string,
   model: string,
   behavior: string,
   pool: ExistingCriterion[],
+  explicitModel?: string,
 ): Promise<string[]> {
   if (pool.length === 0) return [];
   try {
     const content = await chat(
-      llm,
-      endpoint,
       buildCriteriaDependencySuggestionRequest(
         direction,
         behavior,
         pool,
         model,
       ),
+      explicitModel,
     );
     return parseCriteriaDependencySuggestionResponse(content, pool);
   } catch (err) {
@@ -408,14 +403,7 @@ export async function generateCriteriaPrompt(
   newGates?: GateId[],
   model?: string,
 ): Promise<GenerateResult> {
-  const {
-    client: llm,
-    endpoint,
-    model: foundryModel,
-  } = await acquireInferenceClient();
-
-  // Priority: explicit arg > key-specific (from Foundry blob) > env > default.
-  const modelName = model || foundryModel || process.env.LLM_MODEL || "gpt-4.1";
+  const modelName = model || process.env.LLM_MODEL || "gpt-4.1";
 
   const parentPool = selectCriteriaDependencyPool(
     "parents",
@@ -429,22 +417,20 @@ export async function generateCriteriaPrompt(
   );
 
   const [authored, suggestedParents, suggestedChildrenRaw] = await Promise.all([
-    author(llm, endpoint, modelName, behavior, newGates),
+    author(modelName, behavior, newGates, model),
     suggestDeps(
       "parents",
-      llm,
-      endpoint,
       modelName,
       behavior,
       parentPool,
+      model,
     ),
     suggestDeps(
       "children",
-      llm,
-      endpoint,
       modelName,
       behavior,
       childPool,
+      model,
     ),
   ]);
 
@@ -464,5 +450,6 @@ export async function generateCriteriaPrompt(
     suggestedId: authored.suggestedId,
     suggestedParents,
     suggestedChildren,
+    suggestedSubject: authored.suggestedSubject,
   };
 }

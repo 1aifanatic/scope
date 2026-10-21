@@ -12,6 +12,7 @@ import {
   LogEvent,
   ReportDocument,
   ReportTemplateDocument,
+  ReportTemplateVersionDocument,
   Reporter,
   TokenManagerClient,
   type VisibilityHeartbeat,
@@ -88,6 +89,11 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
     const generationStart = Date.now();
     const reportId = doc._id;
     const requestId = doc.requestId;
+    if (!requestId) {
+      throw new Error(
+        `Report ${reportId} has no requestId and cannot be processed by report-generator`,
+      );
+    }
 
     if (!ReportQueueProcessor.coldStartTracked) {
       ReportQueueProcessor.coldStartTracked = true;
@@ -117,12 +123,24 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
         throw new Error(`Report ${reportId} has no templateId — reports without a template are no longer supported`);
       }
 
-      const template = await this.fetchReportTemplate(doc.templateId, doc.projectId);
+      if (!doc.templateVersionId) {
+        throw new Error(
+          `Report ${reportId} has no frozen templateVersionId`,
+        );
+      }
+      const template = await this.fetchReportTemplate(
+        doc.templateId,
+        doc.templateVersionId,
+        doc.projectId,
+      );
       if (!template) {
         throw new Error(`Report template '${doc.templateId}' not found for report ${reportId}`);
       }
 
-      await log("info", `Using report template '${template.id}' (${template.name})`);
+      await log(
+        "info",
+        `Using report template '${template.templateId}' version ${template.version}`,
+      );
 
       // Resolve model: template override → global config fallback
       const resolvedModel = template.model ?? this.reportConfig.reportModel;
@@ -138,8 +156,8 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
       };
 
       // Update status to "generating" and set reporter
-      await withRetry(() => this.collection.updateOne(
-        { _id: reportId } as any,
+      const claimed = await withRetry(() => this.collection.updateOne(
+        { _id: reportId, deletedAt: { $exists: false } } as any,
         {
           $set: {
             status: "generating",
@@ -148,6 +166,9 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
           },
         } as any
       ));
+      if (claimed.matchedCount === 0) {
+        throw new Error(`Report ${reportId} is deleted or stale`);
+      }
 
       await log("info", `Reporter: ${reporter.agentId}@${reporter.agentVersion}, model: ${reporter.model}`);
 
@@ -170,8 +191,8 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
       trackMetric({ name: "report_generator.llm_session_duration_ms", value: Date.now() - llmStart, properties: { service: "report-generator" } });
 
       // --- Persist report content ---
-      await withRetry(() => this.collection.updateOne(
-        { _id: reportId } as any,
+      const persisted = await withRetry(() => this.collection.updateOne(
+        { _id: reportId, deletedAt: { $exists: false } } as any,
         {
           $set: {
             status: "completed",
@@ -180,6 +201,9 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
           },
         } as any
       ));
+      if (persisted.matchedCount === 0) {
+        throw new Error(`Report ${reportId} is deleted or stale`);
+      }
 
       await log("info", `Report completed (${content.length} chars)`, { final: true });
       trackMetric({ name: "report_generator.generation_duration_ms", value: Date.now() - generationStart, properties: { service: "report-generator" } });
@@ -356,17 +380,18 @@ export class ReportQueueProcessor extends BaseQueueProcessor<ReportDocument> {
    */
   private async fetchReportTemplate(
     templateId: string,
-    projectId: string
-  ): Promise<ReportTemplateDocument | null> {
+    templateVersionId: string,
+    projectId: string,
+  ): Promise<ReportTemplateVersionDocument | null> {
     try {
       const response = await fetch(
-        `${this.reportConfig.apiBaseUrl}/api/v1/report-templates/${encodeURIComponent(templateId)}?projectId=${encodeURIComponent(projectId)}`
+        `${this.reportConfig.apiBaseUrl}/api/v1/report-templates/${encodeURIComponent(templateId)}/versions/${encodeURIComponent(templateVersionId)}?projectId=${encodeURIComponent(projectId)}`
       );
       if (!response.ok) {
         console.warn(`[report-generator] Failed to fetch template '${templateId}' (project ${projectId}): ${response.status}`);
         return null;
       }
-      return await response.json() as ReportTemplateDocument;
+      return await response.json() as ReportTemplateVersionDocument;
     } catch (error) {
       console.warn(`[report-generator] Error fetching template '${templateId}' (project ${projectId}): ${error}`);
       return null;

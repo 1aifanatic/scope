@@ -37,7 +37,10 @@ import {
   isCriterionCompatibleWithGate,
   orderGates,
   computeTaskPromptId,
+  ExperimentStore,
+  LEGACY_REQUEST_COMPOSITION_DEPRECATION_ID,
 } from "shared";
+import { trackMetric } from "telemetry";
 import type {
   ProfileDocument,
   ProfileVersionDocument,
@@ -83,6 +86,10 @@ import {
   requestedAgentCapabilities,
   validateAgentTarget,
 } from "../../utils/agent-helpers.js";
+import {
+  ExperimentMembershipCoordinator,
+  ExperimentMembershipError,
+} from "../../experiment-membership.js";
 
 type RequestCollection = RouteContext["requestCollection"];
 type RunFacetsResponse = z.infer<typeof RunFacetsResponseSchema>;
@@ -216,6 +223,83 @@ export function planResubmitResources(
 
 export function registerRequestsRoutes(ctx: RouteContext): void {
 
+const experimentStore = new ExperimentStore({
+  experiments: ctx.experimentCollection,
+  executions: ctx.experimentExecutionsCollection,
+  chunks: ctx.experimentChunksCollection,
+});
+const experimentMembership = new ExperimentMembershipCoordinator({
+  requests: ctx.requestCollection,
+  experiments: ctx.experimentCollection,
+  executions: ctx.experimentExecutionsCollection,
+  chunks: ctx.experimentChunksCollection,
+});
+
+const coordinatedDeletionRevision = async (
+  documents: RequestDocument[],
+): Promise<
+  | {
+      experimentId: string;
+      experimentRevisionId: string;
+      revisionNumber: number;
+    }
+  | undefined
+> => {
+  const assigned = documents.filter(
+    (document): document is RequestDocument & { experimentId: string } =>
+      typeof document.experimentId === "string",
+  );
+  if (assigned.length === 0) return undefined;
+  const experimentIds = [...new Set(assigned.map(({ experimentId }) => experimentId))];
+  if (experimentIds.length !== 1) {
+    throw new ExperimentMembershipError(
+      "Bulk deletion cannot coordinate members from multiple Experiments; delete one Experiment selection at a time",
+      409,
+      "multiple-experiment-delete-conflict",
+      assigned.map(({ _id, experimentId }) => ({
+        requestId: _id,
+        experimentId,
+      })),
+    );
+  }
+  const experimentId = experimentIds[0]!;
+  const projectIds = [...new Set(assigned.map(({ projectId }) => projectId))];
+  if (projectIds.length !== 1) {
+    throw new ExperimentMembershipError(
+      "Experiment members must belong to one project",
+      409,
+      "cross-project-membership-conflict",
+      assigned.map(({ _id, experimentId: owner }) => ({
+        requestId: _id,
+        experimentId: owner,
+      })),
+    );
+  }
+  const projectId = projectIds[0]!;
+  const experiment = await experimentStore.get(projectId, experimentId);
+  if (!experiment) {
+    throw new ExperimentMembershipError(
+      `Owning Experiment ${experimentId} was not found`,
+      409,
+      "experiment-membership-owner-missing",
+      assigned.map(({ _id }) => ({ requestId: _id, experimentId })),
+    );
+  }
+  const result = await experimentMembership.remove({
+    projectId,
+    experimentId,
+    expectedExperimentRevisionId:
+      experiment.revision.experimentRevisionId,
+    requestIds: assigned.map(({ _id }) => _id),
+  });
+  return {
+    experimentId,
+    experimentRevisionId:
+      result.experiment.revision.experimentRevisionId,
+    revisionNumber: result.experiment.revision.revisionNumber,
+  };
+};
+
 const upload = multer({ dest: tmpdir() });
 
 const validatePersistedRequestTarget = (request: RequestDocument) =>
@@ -235,6 +319,25 @@ const validatePersistedRequestTarget = (request: RequestDocument) =>
 
 /** Maximum number of profile variations (including the base profile) allowed in one submit. */
 const MAX_PROFILE_VARIATIONS = 25;
+function emitLegacyCompositionHeaders(
+  res: { setHeader(name: string, value: string): void },
+  properties: readonly string[],
+): void {
+  if (properties.length === 0) return;
+  res.setHeader("Deprecation", "true");
+  res.setHeader(
+    "Link",
+    '</api/v1/experiments>; rel="successor-version"; title="POST /api/v1/experiments"',
+  );
+  trackMetric({
+    name: "api.deprecated_input_used",
+    value: 1,
+    properties: {
+      identifier: LEGACY_REQUEST_COMPOSITION_DEPRECATION_ID,
+      properties: [...properties].sort().join(","),
+    },
+  });
+}
 
 /**
  * Server-side validation of a request's gate configuration (docs/design/gates.md
@@ -270,6 +373,9 @@ async function validateGatesForSubmit(
       if (!doc) {
         return `Gate '${gc.gate}' references unknown criterion '${cid}'.`;
       }
+      if ((doc.kind ?? "gate") !== "gate") {
+        return `Criterion '${cid}' is an observation and cannot be used as a gate criterion.`;
+      }
       if (!isCriterionCompatibleWithGate(doc.gates as GateId[] | undefined, gc.gate)) {
         return `Criterion '${cid}' is not compatible with the '${gc.gate}' gate.`;
       }
@@ -297,7 +403,33 @@ async function validateGatesForSubmit(
 }
 
 /**
- * Materialize free-text gate prompts into typed prompt entities (docs/design/
+ * Validate the submit payload's observation-criteria ids: each must be an
+ * active kind:"observation" criterion. Gate ids are rejected. Empty/absent is
+ * valid (no observations evaluated). See issue #1156.
+ */
+async function validateObservationsForSubmit(
+  ctx: RouteContext,
+  observations: string[],
+  projectId: string,
+): Promise<string | null> {
+  if (observations.length === 0) return null;
+  const ids = [...new Set(observations)];
+  const docs = await ctx.criteriaCollection
+    .find({ projectId, id: { $in: ids }, deletedAt: { $exists: false } })
+    .toArray();
+  const byId = new Map(docs.map((c) => [c.id, c]));
+  for (const id of ids) {
+    const doc = byId.get(id);
+    if (!doc) return `Observation references unknown criterion '${id}'.`;
+    if ((doc.kind ?? "gate") !== "observation") {
+      return `Criterion '${id}' is a gate and cannot be used as an observation.`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve free-text gate prompts into typed prompt entities before validation (see
  * gates.md §4.3/§4.4). For every non-Select gate that supplies `promptText`, the
  * text is content-addressed via `taskPromptStore.findOrCreate(text, gate)` —
  * idempotent and parallel to how the request task prompt is materialized — and
@@ -449,7 +581,16 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Requests"],
   summary: "Submit request(s)",
   body: CreateRequestInputSchema.extend({
-    count: z.number().min(1).max(10).default(1),
+    count: z
+      .number()
+      .min(1)
+      .max(10)
+      .default(1)
+      .openapi({
+        deprecated: true,
+        description:
+          "Deprecated for composition. Use POST /api/v1/experiments and its requests array.",
+      }),
     skills: z.array(z.string()).optional(),
     agentVersion: z.string().optional(),
     codebase: z.string().optional(),
@@ -459,7 +600,7 @@ apiRoute(ctx.app, ctx.registry, {
   successStatus: 201,
   handler: async (req, res) => {
     const projectId = getQueryProjectId(req);
-    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, agentsMd: requestedAgentsMd, agentsMdParentIds: requestedAgentsMdParentIds, gates: requestedGates, codebase: codebaseSpec, codebaseRevisionId: requestedCodebaseRevisionId, resources: resourceSpecs } = req.body;
+    const { scenario: scenarioObj, persona: personaObj, maxIterations, personaInstructions, count = 1, model: requestedModel, reasoningEffort: requestedReasoningEffort, mcpServers: mcpServerSlugs, skills: skillSlugs, extensions: extensionIds, agentVersion: requestedAgentVersion, profileId: requestedProfileSpec, profileVariations, priority: requestedPriority, agentsMd: requestedAgentsMd, agentsMdParentIds: requestedAgentsMdParentIds, gates: requestedGates, observations: requestedObservations, codebase: codebaseSpec, codebaseRevisionId: requestedCodebaseRevisionId, resources: resourceSpecs } = req.body;
     let worker = req.query.worker as string | undefined;
 
     // AGENTS.md body + lineage (for any caller that wants to attach an
@@ -524,6 +665,10 @@ apiRoute(ctx.app, ctx.registry, {
       ? profileVariations.filter((v: unknown): v is string => typeof v === "string")
       : [];
     const isVariationSubmit = typedProfileVariations.length > 0;
+    emitLegacyCompositionHeaders(res, [
+      ...(count > 1 ? ["count"] : []),
+      ...(isVariationSubmit ? ["profileVariations"] : []),
+    ]);
 
     if (isVariationSubmit) {
       if (!requestedProfileSpec) {
@@ -609,7 +754,7 @@ apiRoute(ctx.app, ctx.registry, {
       const taskPromptId = taskPrompt._id;
 
       // Gates are the shared evaluation harness for the whole comparative
-      // submission, not a per-variation controlled field: every variation
+      // request batch, not a per-variation controlled field: every variation
       // (including the base) runs the same gate configuration. Resolve, validate
       // and canonicalize them up front so an invalid config fails the whole
       // submit before any inserts (docs/design/gates.md §4.3), mirroring the
@@ -806,9 +951,8 @@ apiRoute(ctx.app, ctx.registry, {
         });
       }
 
-      // Pass 2: build documents and insert them under a single shared submissionId.
-      // All variations belong to the same comparative submission so consumers can
-      // group them via `submissionId` (matches docs/architecture/app-design.md).
+      // Preserve the legacy request-batch correlation value. Experiments remain
+      // explicit resources created only by POST /experiments.
       const submissionId = uuidv4();
       const allNewIds: string[] = [];
       const newDocs: RequestDocument[] = [];
@@ -1035,6 +1179,17 @@ apiRoute(ctx.app, ctx.registry, {
       }
     }
 
+    // Validate the optional observation-criteria selection (issue #1156).
+    const observationsProvided = Array.isArray(requestedObservations) && requestedObservations.length > 0;
+    const resolvedObservations: string[] = observationsProvided ? (requestedObservations as string[]) : [];
+    if (observationsProvided) {
+      const obsError = await validateObservationsForSubmit(ctx, resolvedObservations, projectId);
+      if (obsError) {
+        res.status(400).json({ error: obsError });
+        return;
+      }
+    }
+
     // Validate count if provided
     if (typeof count !== "number" || count < 1 || count > 10) {
       res.status(400).json({ error: "count must be a number between 1 and 10" });
@@ -1221,7 +1376,7 @@ apiRoute(ctx.app, ctx.registry, {
     const taskPrompt = await ctx.taskPromptStore.findOrCreate(projectId, scenario.task);
     const taskPromptId = taskPrompt._id;
 
-    // Resolve AGENTS.md lineage once for this submission (shared across count>1).
+    // Resolve AGENTS.md lineage once for this request batch (shared across count>1).
     const agentsMdPromptId = await resolveAgentsMdPromptId();
     const agentsMdFields = buildAgentsMdFields(agentsMdPromptId);
 
@@ -1233,7 +1388,11 @@ apiRoute(ctx.app, ctx.registry, {
         )
       : undefined;
 
-    // Generate a submission ID to group all runs from this request
+    // Persisted observation-criteria selection (issue #1156); deduped, evaluated
+    // by the pp-observations post-processor. Absent/empty = no observations evaluated.
+    const persistedObservations: string[] | undefined = observationsProvided
+      ? [...new Set(resolvedObservations)]
+      : undefined;
     const submissionId = uuidv4();
 
     // Handle multiple runs (count > 1)
@@ -1268,6 +1427,7 @@ apiRoute(ctx.app, ctx.registry, {
           ...(profileId ? { profileId } : {}),
           ...(profileVersionId ? { profileVersionId } : {}),
           ...(persistedGates ? { gates: persistedGates } : {}),
+          ...(persistedObservations ? { observations: persistedObservations } : {}),
           submissionId,
           ...agentsMdFields,
           // Mint a distinct run id for the first attempt. Blob artifacts
@@ -1330,6 +1490,7 @@ apiRoute(ctx.app, ctx.registry, {
       ...(profileId ? { profileId } : {}),
       ...(profileVersionId ? { profileVersionId } : {}),
       ...(persistedGates ? { gates: persistedGates } : {}),
+      ...(persistedObservations ? { observations: persistedObservations } : {}),
       submissionId,
       ...agentsMdFields,
       // Mint a distinct run id for the first attempt. Blob artifacts
@@ -1429,13 +1590,19 @@ apiRoute(ctx.app, ctx.registry, {
     const taskPromptIdFilter = req.query.taskPromptId as string;
     const criteriaFilter = req.query.criteria as string;
     const submissionIdFilter = req.query.submissionId as string;
+    const experimentIdFilter = req.query.experimentId as string;
     const searchFilter = req.query.search as string | undefined;
     const turnsFilterRaw = req.query.turns as string | undefined;
     const turnsOpFilter = (req.query.turnsOp as string | undefined) ?? "eq";
     const maxIterationsFilterRaw = req.query.maxIterations as string | undefined;
     const maxIterationsOpFilter = (req.query.maxIterationsOp as string | undefined) ?? "eq";
     const includeDeleted = req.query.includeDeleted === "true";
-    const groupByParam = req.query.groupBy as "task" | "submissionId" | "profile" | undefined;
+    const groupByParam = req.query.groupBy as
+      | "task"
+      | "submissionId"
+      | "experimentId"
+      | "profile"
+      | undefined;
     const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
     const afterParam = req.query.after as string | undefined;
     const beforeParam = req.query.before as string | undefined;
@@ -1503,8 +1670,13 @@ apiRoute(ctx.app, ctx.registry, {
     pushClause(buildMultiClause("agentVersion", agentVersionValues));
 
     if (submissionIdFilter) {
-      // Prefix-based matching: allow filtering by partial submission ID.
-      flat.submissionId = { $regex: `^${submissionIdFilter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` };
+      flat.submissionId = {
+        $regex: `^${submissionIdFilter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+      };
+    }
+    if (experimentIdFilter) {
+      // Prefix-based matching: allow filtering by partial experiment ID.
+      flat.experimentId = { $regex: `^${experimentIdFilter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` };
     }
     if (!includeDeleted) {
       flat.deletedAt = { $exists: false };
@@ -1601,7 +1773,12 @@ apiRoute(ctx.app, ctx.registry, {
 
     // Grouped mode: paginated RunGroup[] via two-phase aggregation
     if (groupByParam) {
-      const groupByField = groupByParam === "task" ? "taskPromptId" : groupByParam === "profile" ? "profileId" : "submissionId";
+      const groupByField =
+        groupByParam === "task"
+          ? "taskPromptId"
+          : groupByParam === "profile"
+            ? "profileId"
+            : groupByParam;
       const groupByAggField = `$${groupByField}`;
 
       // Decode group cursor
@@ -1835,6 +2012,7 @@ apiRoute(ctx.app, ctx.registry, {
     criteria: z.string().optional(),
     features: z.string().optional(),
     submissionId: z.string().optional(),
+    experimentId: z.string().optional(),
     k: z.string().optional(),
   }).merge(ProjectIdQuerySchema),
   response: z.object({}).passthrough().describe("Analysis metrics"),
@@ -2191,7 +2369,18 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Requests"],
   summary: "Bulk soft-delete requests",
   body: z.object({ ids: z.array(z.string()) }),
-  response: z.object({ deleted: z.number() }),
+  response: z.object({
+    deleted: z.number(),
+    notFound: z.array(z.string()),
+    membershipRevision: z.object({
+      experimentId: z.string(),
+      experimentRevisionId: z.string(),
+      revisionNumber: z.number().int(),
+    }).optional(),
+  }),
+  errorResponses: {
+    409: { description: "Deletion spans Experiments or membership changed" },
+  },
   handler: async (req, res) => {
     const { ids } = req.body as { ids?: string[] };
 
@@ -2201,24 +2390,48 @@ apiRoute(ctx.app, ctx.registry, {
     }
 
     // Find which IDs exist and are not already deleted
+    const uniqueIds = [...new Set(ids)];
+    if (uniqueIds.length !== ids.length) {
+      res.status(400).json({ error: "Request IDs must be unique" });
+      return;
+    }
     const existingDocs = await ctx.requestCollection.find(
-      { _id: { $in: ids }, deletedAt: { $exists: false } },
-      { projection: { _id: 1 } }
+      { _id: { $in: uniqueIds }, deletedAt: { $exists: false } },
     ).toArray();
     const existingIds = new Set(existingDocs.map(d => d._id));
 
+    let membershipRevision;
+    try {
+      membershipRevision = await coordinatedDeletionRevision(existingDocs);
+    } catch (error) {
+      if (error instanceof ExperimentMembershipError) {
+        res.status(error.status).json({
+          error: error.message,
+          code: error.code,
+          ...(error.conflicts ? { conflicts: error.conflicts } : {}),
+        });
+        return;
+      }
+      throw error;
+    }
+
     // Soft-delete all matching documents
     const result = await ctx.requestCollection.updateMany(
-      { _id: { $in: ids }, deletedAt: { $exists: false } },
+      {
+        _id: { $in: uniqueIds },
+        deletedAt: { $exists: false },
+        experimentId: { $exists: false },
+      },
       { $set: { deletedAt: new Date() } }
     );
 
     // Determine which IDs were not found or already deleted
-    const notFound = ids.filter(id => !existingIds.has(id));
+    const notFound = uniqueIds.filter(id => !existingIds.has(id));
 
     res.json({
       deleted: result.modifiedCount,
       notFound,
+      ...(membershipRevision ? { membershipRevision } : {}),
     });
   },
 });
@@ -2230,27 +2443,68 @@ apiRoute(ctx.app, ctx.registry, {
   tags: ["Requests"],
   summary: "Soft-delete request",
   params: z.object({ id: z.string() }),
-  response: z.object({ message: z.string() }),
-  errorResponses: { 404: { description: "Not found" } },
+  response: z.object({
+    id: z.string(),
+    deleted: z.literal(true),
+    membershipRevision: z.object({
+      experimentId: z.string(),
+      experimentRevisionId: z.string(),
+      revisionNumber: z.number().int(),
+    }).optional(),
+  }),
+  errorResponses: {
+    404: { description: "Not found" },
+    409: { description: "Membership changed" },
+    410: { description: "Already deleted" },
+  },
   handler: async (req, res) => {
     const { id } = req.params;
 
+    const document = await ctx.requestCollection.findOne({ _id: id });
+    if (!document) {
+      res.status(404).json({ error: "Request not found" });
+      return;
+    }
+    if (document.deletedAt) {
+      res.status(410).json({ error: "Request already deleted" });
+      return;
+    }
+    let membershipRevision;
+    try {
+      membershipRevision = await coordinatedDeletionRevision([document]);
+    } catch (error) {
+      if (error instanceof ExperimentMembershipError) {
+        res.status(error.status).json({
+          error: error.message,
+          code: error.code,
+          ...(error.conflicts ? { conflicts: error.conflicts } : {}),
+        });
+        return;
+      }
+      throw error;
+    }
     const result = await ctx.requestCollection.updateOne(
-      { _id: id, deletedAt: { $exists: false } },
+      {
+        _id: id,
+        deletedAt: { $exists: false },
+        experimentId: { $exists: false },
+      },
       { $set: { deletedAt: new Date() } }
     );
 
     if (result.matchedCount === 0) {
-      const exists = await ctx.requestCollection.findOne({ _id: id });
-      if (!exists) {
-        res.status(404).json({ error: "Request not found" });
-      } else {
-        res.status(410).json({ error: "Request already deleted" });
-      }
+      res.status(409).json({
+        error: "Request membership changed before deletion",
+        code: "request-membership-contention",
+      });
       return;
     }
 
-    res.json({ id, deleted: true });
+    res.json({
+      id,
+      deleted: true,
+      ...(membershipRevision ? { membershipRevision } : {}),
+    });
   },
 });
 
@@ -2570,7 +2824,7 @@ async function finalizePendingRun(
   const topChat = run.artifacts.get("run.chat-export.json");
   if (topChat) runState.rawChatUrl = topChat;
 
-  // Materialize the task-prompt entity for this run. The submission flow
+  // Materialize the task-prompt entity for this run. The request creation flow
   // (POST /api/v1/requests) goes through `taskPromptStore.findOrCreate` so
   // every run has a row in the `task-prompts` collection that backs
   // features, report triggers, group-by-task, the runs-list task filter and

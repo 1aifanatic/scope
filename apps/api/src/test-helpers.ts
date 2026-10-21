@@ -49,11 +49,29 @@ export function createMockCollection<T extends Document = Document>(docs: T[] = 
       insertedCount: 1,
       acknowledged: true,
     }),
-    updateOne: vi.fn().mockResolvedValue({
-      matchedCount: 1,
-      modifiedCount: 1,
-      acknowledged: true,
-    }),
+    updateOne: vi.fn().mockImplementation(
+      async (
+        filter: Record<string, unknown>,
+        update: { $setOnInsert?: T },
+        options?: { upsert?: boolean },
+      ) => {
+        const existing = data.find((doc) => doc._id === filter._id);
+        if (!existing && options?.upsert && update.$setOnInsert) {
+          data.push({ ...update.$setOnInsert });
+          return {
+            matchedCount: 0,
+            modifiedCount: 0,
+            upsertedCount: 1,
+            acknowledged: true,
+          };
+        }
+        return {
+          matchedCount: 1,
+          modifiedCount: 1,
+          acknowledged: true,
+        };
+      },
+    ),
     updateMany: vi.fn().mockResolvedValue({
       matchedCount: 1,
       modifiedCount: 1,
@@ -204,6 +222,9 @@ export function createAllMockDependencies() {
   const db = createMockDb();
   const collection = createMockCollection();
   const runsCollection = createMockCollection();
+  const experimentCollection = createMockCollection();
+  const experimentExecutionsCollection = createMockCollection();
+  const experimentChunksCollection = createMockCollection();
   const criteriaCollection = createMockCollection();
   const promptFeatureCollection = createMockCollection();
   const reportCollection = createMockCollection();
@@ -214,6 +235,7 @@ export function createAllMockDependencies() {
   const taskPromptCollection = createMockCollection();
   const featureFlagCollection = createMockCollection();
   const reportTemplateCollection = createMockCollection();
+  const reportTemplateVersionCollection = createMockCollection();
   const skillCollection = createMockCollection();
   const skillRevisionCollection = createMockCollection();
   const profileCollection = createMockCollection();
@@ -232,6 +254,9 @@ export function createAllMockDependencies() {
     db,
     collection,
     runsCollection,
+    experimentCollection,
+    experimentExecutionsCollection,
+    experimentChunksCollection,
     criteriaCollection,
     promptFeatureCollection,
     reportCollection,
@@ -242,6 +267,7 @@ export function createAllMockDependencies() {
     taskPromptCollection,
     featureFlagCollection,
     reportTemplateCollection,
+    reportTemplateVersionCollection,
     skillCollection,
     skillRevisionCollection,
     profileCollection,
@@ -262,6 +288,9 @@ export function createAllMockDependencies() {
     db: ReturnType<typeof createMockDb>;
     collection: Collection;
     runsCollection: Collection;
+    experimentCollection: Collection;
+    experimentExecutionsCollection: Collection;
+    experimentChunksCollection: Collection;
     criteriaCollection: Collection;
     promptFeatureCollection: Collection;
     reportCollection: Collection;
@@ -272,6 +301,7 @@ export function createAllMockDependencies() {
     taskPromptCollection: Collection;
     featureFlagCollection: Collection;
     reportTemplateCollection: Collection;
+    reportTemplateVersionCollection: Collection;
     skillCollection: Collection;
     skillRevisionCollection: Collection;
     profileCollection: Collection;

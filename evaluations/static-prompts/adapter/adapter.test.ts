@@ -3,6 +3,10 @@
 
 import { describe, expect, it } from "vitest";
 import { REPORT_SYSTEM_PROMPT } from "../../../packages/shared/src/index.js";
+import { READOUT_SYSTEM_PROMPT } from "../../../apps/workers/readout/src/prompt.js";
+import {
+  EXPERIMENT_REPORT_SYSTEM_PROMPT,
+} from "../../../apps/workers/readout/src/experiment-report-generator.js";
 import {
   buildCriteriaAuthoringRequest,
   buildCriteriaDependencySuggestionRequest,
@@ -41,7 +45,7 @@ function fakeContext(
 }
 
 describe("static prompt adapter registry", () => {
-  it("registers all ten approved prompt families and their variants", () => {
+  it("registers all eleven approved prompt families and their variants", () => {
     expect(listPromptTargets()).toEqual([
       { family: "criteria-authoring", variants: ["default"] },
       {
@@ -66,6 +70,15 @@ describe("static prompt adapter registry", () => {
       },
       {
         family: "run-report",
+        variants: [
+          "default",
+          "append",
+          "override-control",
+          "experiment-readout",
+        ],
+      },
+      {
+        family: "experiment-report",
         variants: ["default", "append", "override-control"],
       },
     ]);
@@ -94,6 +107,16 @@ describe("static prompt adapter registry", () => {
       adapterId: "run-report/override-control",
       family: "run-report",
       variant: "override-control",
+    });
+    expect(targets).toContainEqual({
+      adapterId: "run-report/experiment-readout",
+      family: "run-report",
+      variant: "experiment-readout",
+    });
+    expect(targets).toContainEqual({
+      adapterId: "experiment-report/default",
+      family: "experiment-report",
+      variant: "default",
     });
     expect(JSON.parse(JSON.stringify(targets))).toEqual(targets);
   });
@@ -126,6 +149,7 @@ describe("API prompt production contracts", () => {
     expect(result.output).toEqual({
       prompt: "Use captured build output.",
       suggestedId: "builds_cleanly",
+      suggestedSubject: "run",
     });
   });
 
@@ -422,4 +446,87 @@ describe("session prompt adapters", () => {
       ]),
     );
   });
+
+  it("composes the exact experiment-readout prompt without tools", async () => {
+    const evidence = {
+      experimentId: "experiment-1",
+      experimentExecutionId: "execution-1",
+      runs: [],
+    };
+    const result = await getPromptTarget(
+      "run-report",
+      "experiment-readout",
+    ).run(
+      { evidence },
+      "experiment-readout",
+      fakeContext(() => "{}"),
+    );
+
+    expect(result.request.messages).toEqual([
+      { role: "system", content: READOUT_SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: [
+          "Generate the Experiment readout synthesis for this exact immutable execution evidence vector.",
+          JSON.stringify(evidence),
+        ].join("\n\n"),
+      },
+    ]);
+    expect(result.request.tools).toEqual([]);
+  });
+
+  it.each([
+    ["default", undefined],
+    ["append", "Use a concise executive style."],
+    ["override-control", "Use only these replacement instructions."],
+  ] as const)(
+    "composes the exact Experiment report %s boundary without tools",
+    async (variant, systemPromptContent) => {
+      const evidence = {
+        experimentId: "experiment-1",
+        experimentExecutionId: "execution-1",
+        runs: [],
+      };
+      const linkedRunReports = [{
+        runTemplateId: "run-template-1",
+        requestId: "request-1",
+        runId: "run-1",
+        reportId: "report-1",
+        content: "# Run report",
+      }];
+      const result = await getPromptTarget("experiment-report", variant).run(
+        {
+          userPrompt: "Compare the exact Experiment runs.",
+          evidence,
+          linkedRunReports,
+          ...(systemPromptContent ? { systemPromptContent } : {}),
+        },
+        variant,
+        fakeContext(() => "# Experiment report"),
+      );
+
+      const systemMessage = result.request.messages[0].content;
+      if (variant === "default") {
+        expect(systemMessage).toBe(EXPERIMENT_REPORT_SYSTEM_PROMPT);
+      } else if (variant === "append") {
+        expect(systemMessage).toBe(
+          `${EXPERIMENT_REPORT_SYSTEM_PROMPT}\n\n${systemPromptContent}`,
+        );
+      } else {
+        expect(systemMessage).toBe(systemPromptContent);
+        expect(systemMessage).not.toContain(EXPERIMENT_REPORT_SYSTEM_PROMPT);
+      }
+      expect(result.request.messages[1].content).toBe([
+        "Compare the exact Experiment runs.",
+        "",
+        "<scope_experiment_evidence>",
+        JSON.stringify({ experiment: evidence, linkedRunReports }),
+        "</scope_experiment_evidence>",
+      ].join("\n"));
+      expect(result.request.tools).toEqual([]);
+      expect(result.request.metadata.insertionPoint).toBe(
+        "template.userPrompt immediately before <scope_experiment_evidence>",
+      );
+    },
+  );
 });

@@ -16,11 +16,16 @@ export interface PostProcessorMessage {
 export interface HandlerContext {
   blobStorage: BlobStorage;
   collection: Collection;
+  /** The `criteria` collection — lets handlers resolve criterion metadata
+   *  (e.g. observation `subject`/`taxonomyElementId`) by id. #1156. */
+  criteriaCollection: Collection;
   log: (level: LogEvent["level"], msg: string, data?: Record<string, unknown>) => Promise<void>;
 }
 
 /** Interface for post-processing handlers (extensibility point). */
 export interface PostProcessHandler {
   readonly type: string;
+  readonly version: number;
+  readonly autoBackfill: boolean;
   process(message: PostProcessorMessage, ctx: HandlerContext): Promise<void>;
 }

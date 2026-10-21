@@ -9,6 +9,7 @@
 #   docker compose --profile vscode-web up               # + VS Code Web worker
 #   docker compose --profile claude-code --profile copilot up  # multiple workers
 #   docker compose --profile report up                   # + Report Generator worker
+#   docker compose --profile readout up                  # + Experiment readout worker
 #   docker compose up mongodb redis azurite              # infra only (run app services natively)
 #
 # Host-native debugging:
@@ -35,6 +36,7 @@ x-worker-env: &worker-env
   <<: *common-env
   JUDGE_SERVICE_URL: http://judge:80
   SCOPE_MT_API_URL: http://api:80
+  SCHEDULER_URL: http://scheduler:8080
   TOKEN_MANAGER_URL: http://token-manager:80
 
 x-worker-deps: &worker-deps
@@ -148,7 +150,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # Creates the 'har' blob container in Azurite for the gateway HAR plugin.
+  # Creates the 'har' blob container in Azurite.
   azurite-init:
     image: mcr.microsoft.com/azure-cli:2.68.0
     restart: "no"
@@ -555,6 +557,7 @@ services:
       SCHEDULER_TARGET_QUEUE_DEPTH: "2"
       SCHEDULER_POLL_INTERVAL_MS: "2000"
       PORT: "8080"
+      API_URL: http://api:80
     depends_on:
       mongodb:
         condition: service_healthy
@@ -867,7 +870,52 @@ services:
       api:
         condition: service_started
 
-  register-version-post-processor:
+  readout-handler:
+    build:
+      context: .
+      dockerfile: apps/workers/readout/Dockerfile
+      args:
+        <<: *npm-build-args
+    profiles: [readout, all]
+    environment:
+      <<: *common-env
+      AZURE_STORAGE_QUEUE_READOUT: pp-readout-queue
+      READOUT_MODEL: ${READOUT_MODEL:-gpt-5.4}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      TOKEN_MANAGER_URL: http://token-manager:80
+      GIT_COMMIT: ${GIT_COMMIT:-development}
+      READOUT_SESSION_TIMEOUT_MS: ${READOUT_SESSION_TIMEOUT_MS:-300000}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+      azurite:
+        condition: service_healthy
+      scheduler:
+        condition: service_started
+      register-handler-readout:
+        condition: service_completed_successfully
+
+  register-handler-readout:
+    build:
+      context: .
+      dockerfile: apps/workers/readout/Dockerfile
+      args:
+        <<: *npm-build-args
+    profiles: [readout, all]
+    environment:
+      <<: *common-env
+      HANDLER_YAML_PATH: apps/workers/readout/handler.yaml
+      SCHEDULER_URL: http://scheduler:8080
+    depends_on:
+      scheduler:
+        condition: service_started
+    restart: "no"
+    entrypoint: ["npx", "tsx", "packages/shared/src/scripts/register-handler.ts"]
+
+  register-handler-post-processor:
     build:
       context: .
       dockerfile: apps/workers/post-processor/Dockerfile
@@ -876,12 +924,32 @@ services:
     profiles: [post-processor]
     environment:
       <<: *common-env
+      HANDLER_YAML_PATH: apps/workers/post-processor/handler.yaml
+      SCHEDULER_URL: http://scheduler:8080
     depends_on:
-      mongodb:
-        condition: service_healthy
-        required: false
+      scheduler:
+        condition: service_started
     restart: "no"
-    entrypoint: ["npx", "tsx", "apps/workers/post-processor/src/register-version.ts"]
+    entrypoint: ["npx", "tsx", "packages/shared/src/scripts/register-handler.ts"]
+
+  # Registers the pp-taxonomy handler (observation evaluator) — shares the
+  # post-processor worker + post-processor-queue, depends on pp-atif. Issue #1156.
+  register-handler-taxonomy:
+    build:
+      context: .
+      dockerfile: apps/workers/post-processor/Dockerfile
+      args:
+        <<: *npm-build-args
+    profiles: [post-processor]
+    environment:
+      <<: *common-env
+      HANDLER_YAML_PATH: apps/workers/post-processor/handler.taxonomy.yaml
+      SCHEDULER_URL: http://scheduler:8080
+    depends_on:
+      scheduler:
+        condition: service_started
+    restart: "no"
+    entrypoint: ["npx", "tsx", "packages/shared/src/scripts/register-handler.ts"]
 
   post-processor:
     # Resource limits mirror prod K8s main container
@@ -897,6 +965,11 @@ services:
       <<: *common-env
       AZURE_STORAGE_QUEUE_POSTPROCESSOR: post-processor-queue
       SCOPE_MT_API_URL: http://api:80
+      SCHEDULER_URL: http://scheduler:8080
+      # pp-taxonomy (issue #1156) calls the judge service to evaluate
+      # observation criteria. Without this the JudgeClient falls back to
+      # localhost:3002 and cannot reach the judge container.
+      JUDGE_SERVICE_URL: http://judge:80
     depends_on:
       mongodb:
         condition: service_healthy
@@ -907,7 +980,9 @@ services:
         condition: service_healthy
       api:
         condition: service_started
-      register-version-post-processor:
+      register-handler-post-processor:
+        condition: service_completed_successfully
+      register-handler-taxonomy:
         condition: service_completed_successfully
 
 volumes:

@@ -539,6 +539,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "judgeFeedback": {
             "type": "string",
           },
+          "observationResults": {
+            "items": {
+              "$ref": "#/components/schemas/CriterionResult",
+            },
+            "type": "array",
+          },
           "passed": {
             "type": "boolean",
           },
@@ -682,13 +688,206 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "pattern": "^[a-z][a-z0-9_]*$",
             "type": "string",
           },
+          "kind": {
+            "default": "gate",
+            "enum": [
+              "gate",
+              "observation",
+            ],
+            "type": "string",
+          },
           "prompt": {
+            "type": "string",
+          },
+          "subject": {
+            "enum": [
+              "run",
+              "iteration",
+            ],
+            "type": "string",
+          },
+          "taxonomyElementId": {
+            "enum": [
+              "dimension:idiomatic-use",
+              "dimension:dependency-currency",
+              "dimension:configuration-correctness",
+            ],
             "type": "string",
           },
         },
         "required": [
           "id",
           "prompt",
+        ],
+        "type": "object",
+      },
+      "CreateExperimentInput": {
+        "properties": {
+          "metadata": {
+            "additionalProperties": false,
+            "properties": {
+              "description": {
+                "maxLength": 4096,
+                "type": "string",
+              },
+              "name": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "name",
+            ],
+            "type": "object",
+          },
+          "mode": {
+            "enum": [
+              "compose",
+              "empty",
+              "existing",
+            ],
+            "type": "string",
+          },
+          "reportTemplateIds": {
+            "default": [],
+            "items": {
+              "minLength": 1,
+              "type": "string",
+            },
+            "maxItems": 1000,
+            "type": "array",
+          },
+          "requestIds": {
+            "default": [],
+            "items": {
+              "minLength": 1,
+              "type": "string",
+            },
+            "maxItems": 250000,
+            "type": "array",
+          },
+          "requests": {
+            "default": [],
+            "items": {
+              "properties": {
+                "agentsMd": {
+                  "type": "string",
+                },
+                "agentsMdParentIds": {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+                "codebaseRevisionId": {
+                  "type": "string",
+                },
+                "extensions": {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+                "gates": {
+                  "items": {
+                    "$ref": "#/components/schemas/GateConfig",
+                  },
+                  "type": "array",
+                },
+                "maxIterations": {
+                  "maximum": 50,
+                  "minimum": 1,
+                  "type": "integer",
+                },
+                "mcpServers": {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+                "model": {
+                  "type": "string",
+                },
+                "observations": {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+                "persona": {
+                  "$ref": "#/components/schemas/Persona",
+                },
+                "personaInstructions": {
+                  "type": "string",
+                },
+                "priority": {
+                  "type": "integer",
+                },
+                "profileId": {
+                  "type": "string",
+                },
+                "reasoningEffort": {
+                  "type": "string",
+                },
+                "reportTemplateIds": {
+                  "items": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+                "resources": {
+                  "items": {
+                    "$ref": "#/components/schemas/ResourceBindingSpec",
+                  },
+                  "type": "array",
+                },
+                "scenario": {
+                  "$ref": "#/components/schemas/Scenario",
+                },
+                "skillRevisions": {
+                  "items": {
+                    "type": "string",
+                  },
+                  "type": "array",
+                },
+                "workerType": {
+                  "minLength": 1,
+                  "type": "string",
+                },
+              },
+              "required": [
+                "scenario",
+                "workerType",
+              ],
+              "type": "object",
+            },
+            "maxItems": 250000,
+            "type": "array",
+          },
+        },
+        "required": [
+          "mode",
+          "metadata",
+        ],
+        "type": "object",
+      },
+      "CreateExperimentResponse": {
+        "properties": {
+          "experiment": {
+            "$ref": "#/components/schemas/ExperimentResponse",
+          },
+          "requestIds": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+        },
+        "required": [
+          "experiment",
+          "requestIds",
         ],
         "type": "object",
       },
@@ -868,6 +1067,10 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "description": {
             "type": "string",
           },
+          "enabled": {
+            "default": true,
+            "type": "boolean",
+          },
           "id": {
             "type": "string",
           },
@@ -876,6 +1079,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "name": {
             "type": "string",
+          },
+          "subject": {
+            "$ref": "#/components/schemas/ReportTemplateSubject",
           },
           "systemPrompt": {
             "$ref": "#/components/schemas/ReportTemplateSystemPrompt",
@@ -938,6 +1144,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "model": {
             "type": "string",
           },
+          "observations": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
           "persona": {
             "$ref": "#/components/schemas/Persona",
           },
@@ -951,6 +1163,8 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "profileVariations": {
+            "deprecated": true,
+            "description": "Deprecated for composition. Use POST /api/v1/experiments and its requests array.",
             "items": {
               "type": "string",
             },
@@ -958,6 +1172,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "reasoningEffort": {
             "type": "string",
+          },
+          "reportTemplateIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string",
+            },
+            "type": "array",
           },
           "resources": {
             "items": {
@@ -1156,7 +1377,29 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "id": {
             "type": "string",
           },
+          "kind": {
+            "enum": [
+              "gate",
+              "observation",
+            ],
+            "type": "string",
+          },
           "prompt": {
+            "type": "string",
+          },
+          "subject": {
+            "enum": [
+              "run",
+              "iteration",
+            ],
+            "type": "string",
+          },
+          "taxonomyElementId": {
+            "enum": [
+              "dimension:idiomatic-use",
+              "dimension:dependency-currency",
+              "dimension:configuration-correctness",
+            ],
             "type": "string",
           },
         },
@@ -1204,10 +1447,32 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "id": {
             "type": "string",
           },
+          "kind": {
+            "enum": [
+              "gate",
+              "observation",
+            ],
+            "type": "string",
+          },
           "projectId": {
             "type": "string",
           },
           "prompt": {
+            "type": "string",
+          },
+          "subject": {
+            "enum": [
+              "run",
+              "iteration",
+            ],
+            "type": "string",
+          },
+          "taxonomyElementId": {
+            "enum": [
+              "dimension:idiomatic-use",
+              "dimension:dependency-currency",
+              "dimension:configuration-correctness",
+            ],
             "type": "string",
           },
           "updatedAt": {
@@ -1267,6 +1532,1002 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "required": [
           "next",
           "prev",
+        ],
+        "type": "object",
+      },
+      "ExperimentExecutionListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ExperimentExecutionResponse",
+            },
+            "type": "array",
+          },
+          "nextCursor": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "data",
+        ],
+        "type": "object",
+      },
+      "ExperimentExecutionResponse": {
+        "properties": {
+          "attemptNumber": {
+            "type": "integer",
+          },
+          "blockers": {
+            "items": {
+              "properties": {
+                "error": {
+                  "type": "string",
+                },
+                "handlerId": {
+                  "type": "string",
+                },
+                "reason": {
+                  "type": "string",
+                },
+                "requestId": {
+                  "type": "string",
+                },
+                "runId": {
+                  "type": "string",
+                },
+              },
+              "required": [
+                "handlerId",
+                "reason",
+              ],
+              "type": "object",
+            },
+            "type": "array",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "discardReason": {
+            "type": "string",
+          },
+          "discardedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "experimentExecutionId": {
+            "type": "string",
+          },
+          "finishedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "progress": {
+            "additionalProperties": {
+              "properties": {
+                "error": {
+                  "type": "string",
+                },
+                "status": {
+                  "enum": [
+                    "queued",
+                    "processing",
+                    "done",
+                    "failed",
+                  ],
+                  "type": "string",
+                },
+                "updatedAt": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null",
+                  ],
+                },
+              },
+              "required": [
+                "status",
+                "updatedAt",
+              ],
+              "type": "object",
+            },
+            "type": "object",
+          },
+          "readiness": {
+            "enum": [
+              "empty",
+              "waiting",
+              "blocked",
+              "ready",
+              "processing",
+              "done",
+              "failed",
+            ],
+            "type": "string",
+          },
+          "report": {
+            "properties": {
+              "reportId": {
+                "type": "string",
+              },
+              "updatedAt": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
+              "url": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "reportId",
+              "url",
+              "updatedAt",
+            ],
+            "type": "object",
+          },
+          "reportTemplates": {
+            "additionalProperties": {
+              "properties": {
+                "blockers": {
+                  "items": {
+                    "properties": {
+                      "error": {
+                        "type": "string",
+                      },
+                      "reason": {
+                        "enum": [
+                          "run-template-unused",
+                          "run-report-pending",
+                          "run-report-failed",
+                          "template-unavailable",
+                        ],
+                        "type": "string",
+                      },
+                      "requestId": {
+                        "type": "string",
+                      },
+                      "runId": {
+                        "type": "string",
+                      },
+                      "runTemplateId": {
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "reason",
+                    ],
+                    "type": "object",
+                  },
+                  "type": "array",
+                },
+                "error": {
+                  "type": "string",
+                },
+                "matchingRunCount": {
+                  "minimum": 0,
+                  "type": "integer",
+                },
+                "report": {
+                  "properties": {
+                    "reportId": {
+                      "type": "string",
+                    },
+                    "updatedAt": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null",
+                      ],
+                    },
+                    "url": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "reportId",
+                    "url",
+                    "updatedAt",
+                  ],
+                  "type": "object",
+                },
+                "source": {
+                  "enum": [
+                    "always",
+                    "linked",
+                    "selected",
+                  ],
+                  "type": "string",
+                },
+                "status": {
+                  "enum": [
+                    "waiting",
+                    "not-applicable",
+                    "unavailable",
+                    "queued",
+                    "processing",
+                    "done",
+                    "failed",
+                  ],
+                  "type": "string",
+                },
+                "templateContentFingerprint": {
+                  "type": "string",
+                },
+                "templateId": {
+                  "type": "string",
+                },
+                "templateVersion": {
+                  "exclusiveMinimum": 0,
+                  "type": "integer",
+                },
+                "templateVersionId": {
+                  "type": "string",
+                },
+                "updatedAt": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null",
+                  ],
+                },
+              },
+              "required": [
+                "templateId",
+                "source",
+                "status",
+                "matchingRunCount",
+                "blockers",
+                "updatedAt",
+              ],
+              "type": "object",
+            },
+            "type": "object",
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "supersededAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "supersededByExperimentExecutionId": {
+            "type": "string",
+          },
+          "supersededReason": {
+            "enum": [
+              "rollover",
+              "retry",
+              "membership",
+              "templates",
+            ],
+            "type": "string",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "experimentExecutionId",
+          "attemptNumber",
+          "readiness",
+          "blockers",
+          "progress",
+          "reportTemplates",
+          "createdAt",
+          "updatedAt",
+        ],
+        "type": "object",
+      },
+      "ExperimentLifecycleResponse": {
+        "properties": {
+          "blocking": {
+            "items": {
+              "properties": {
+                "error": {
+                  "type": "string",
+                },
+                "id": {
+                  "type": "string",
+                },
+                "kind": {
+                  "enum": [
+                    "request",
+                    "report",
+                    "experiment",
+                  ],
+                  "type": "string",
+                },
+                "reason": {
+                  "type": "string",
+                },
+              },
+              "required": [
+                "kind",
+                "id",
+                "reason",
+              ],
+              "type": "object",
+            },
+            "type": "array",
+          },
+          "deleteCompletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "deleteRequestedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "experimentId": {
+            "type": "string",
+          },
+          "operationId": {
+            "type": "string",
+          },
+          "phase": {
+            "enum": [
+              "deleting",
+              "deleted",
+              "restoring",
+              "restored",
+            ],
+            "type": "string",
+          },
+          "progress": {
+            "properties": {
+              "completedReports": {
+                "minimum": 0,
+                "type": "integer",
+              },
+              "completedRequests": {
+                "minimum": 0,
+                "type": "integer",
+              },
+              "expectedReports": {
+                "minimum": 0,
+                "type": "integer",
+              },
+              "expectedRequests": {
+                "minimum": 0,
+                "type": "integer",
+              },
+            },
+            "required": [
+              "expectedRequests",
+              "completedRequests",
+              "expectedReports",
+              "completedReports",
+            ],
+            "type": "object",
+          },
+          "restoreCompletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "restoreRequestedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "stateVersion": {
+            "exclusiveMinimum": 0,
+            "type": "integer",
+          },
+        },
+        "required": [
+          "experimentId",
+          "operationId",
+          "phase",
+          "stateVersion",
+          "progress",
+          "blocking",
+          "deleteRequestedAt",
+        ],
+        "type": "object",
+      },
+      "ExperimentListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ExperimentResponse",
+            },
+            "type": "array",
+          },
+          "nextCursor": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "data",
+        ],
+        "type": "object",
+      },
+      "ExperimentMembershipInput": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedExperimentRevisionId": {
+            "minLength": 1,
+            "type": "string",
+          },
+          "requestIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string",
+            },
+            "maxItems": 250000,
+            "minItems": 1,
+            "type": "array",
+          },
+        },
+        "required": [
+          "expectedExperimentRevisionId",
+          "requestIds",
+        ],
+        "type": "object",
+      },
+      "ExperimentMembershipResponse": {
+        "properties": {
+          "attachedRequestIds": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "detachedRequestIds": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "experiment": {
+            "$ref": "#/components/schemas/ExperimentResponse",
+          },
+        },
+        "required": [
+          "experiment",
+          "attachedRequestIds",
+          "detachedRequestIds",
+        ],
+        "type": "object",
+      },
+      "ExperimentReportTemplateSelectionInput": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedExperimentRevisionId": {
+            "minLength": 1,
+            "type": "string",
+          },
+          "reportTemplateIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string",
+            },
+            "maxItems": 1000,
+            "type": "array",
+          },
+        },
+        "required": [
+          "expectedExperimentRevisionId",
+          "reportTemplateIds",
+        ],
+        "type": "object",
+      },
+      "ExperimentResponse": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "currentExecution": {
+            "properties": {
+              "attemptNumber": {
+                "type": "integer",
+              },
+              "blockers": {
+                "items": {
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                    },
+                    "handlerId": {
+                      "type": "string",
+                    },
+                    "reason": {
+                      "type": "string",
+                    },
+                    "requestId": {
+                      "type": "string",
+                    },
+                    "runId": {
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "handlerId",
+                    "reason",
+                  ],
+                  "type": "object",
+                },
+                "type": "array",
+              },
+              "createdAt": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
+              "discardReason": {
+                "type": "string",
+              },
+              "discardedAt": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
+              "experimentExecutionId": {
+                "type": "string",
+              },
+              "finishedAt": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
+              "progress": {
+                "additionalProperties": {
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                    },
+                    "status": {
+                      "enum": [
+                        "queued",
+                        "processing",
+                        "done",
+                        "failed",
+                      ],
+                      "type": "string",
+                    },
+                    "updatedAt": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null",
+                      ],
+                    },
+                  },
+                  "required": [
+                    "status",
+                    "updatedAt",
+                  ],
+                  "type": "object",
+                },
+                "type": "object",
+              },
+              "readiness": {
+                "enum": [
+                  "empty",
+                  "waiting",
+                  "blocked",
+                  "ready",
+                  "processing",
+                  "done",
+                  "failed",
+                ],
+                "type": "string",
+              },
+              "report": {
+                "properties": {
+                  "reportId": {
+                    "type": "string",
+                  },
+                  "updatedAt": {
+                    "format": "date-time",
+                    "type": [
+                      "string",
+                      "null",
+                    ],
+                  },
+                  "url": {
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "reportId",
+                  "url",
+                  "updatedAt",
+                ],
+                "type": "object",
+              },
+              "reportTemplates": {
+                "additionalProperties": {
+                  "properties": {
+                    "blockers": {
+                      "items": {
+                        "properties": {
+                          "error": {
+                            "type": "string",
+                          },
+                          "reason": {
+                            "enum": [
+                              "run-template-unused",
+                              "run-report-pending",
+                              "run-report-failed",
+                              "template-unavailable",
+                            ],
+                            "type": "string",
+                          },
+                          "requestId": {
+                            "type": "string",
+                          },
+                          "runId": {
+                            "type": "string",
+                          },
+                          "runTemplateId": {
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "reason",
+                        ],
+                        "type": "object",
+                      },
+                      "type": "array",
+                    },
+                    "error": {
+                      "type": "string",
+                    },
+                    "matchingRunCount": {
+                      "minimum": 0,
+                      "type": "integer",
+                    },
+                    "report": {
+                      "properties": {
+                        "reportId": {
+                          "type": "string",
+                        },
+                        "updatedAt": {
+                          "format": "date-time",
+                          "type": [
+                            "string",
+                            "null",
+                          ],
+                        },
+                        "url": {
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "reportId",
+                        "url",
+                        "updatedAt",
+                      ],
+                      "type": "object",
+                    },
+                    "source": {
+                      "enum": [
+                        "always",
+                        "linked",
+                        "selected",
+                      ],
+                      "type": "string",
+                    },
+                    "status": {
+                      "enum": [
+                        "waiting",
+                        "not-applicable",
+                        "unavailable",
+                        "queued",
+                        "processing",
+                        "done",
+                        "failed",
+                      ],
+                      "type": "string",
+                    },
+                    "templateContentFingerprint": {
+                      "type": "string",
+                    },
+                    "templateId": {
+                      "type": "string",
+                    },
+                    "templateVersion": {
+                      "exclusiveMinimum": 0,
+                      "type": "integer",
+                    },
+                    "templateVersionId": {
+                      "type": "string",
+                    },
+                    "updatedAt": {
+                      "format": "date-time",
+                      "type": [
+                        "string",
+                        "null",
+                      ],
+                    },
+                  },
+                  "required": [
+                    "templateId",
+                    "source",
+                    "status",
+                    "matchingRunCount",
+                    "blockers",
+                    "updatedAt",
+                  ],
+                  "type": "object",
+                },
+                "type": "object",
+              },
+              "startedAt": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
+              "updatedAt": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
+            },
+            "required": [
+              "experimentExecutionId",
+              "attemptNumber",
+              "readiness",
+              "blockers",
+              "progress",
+              "reportTemplates",
+              "createdAt",
+              "updatedAt",
+            ],
+            "type": "object",
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "experimentId": {
+            "type": "string",
+          },
+          "lifecycle": {
+            "properties": {
+              "blocking": {
+                "items": {
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                    },
+                    "id": {
+                      "type": "string",
+                    },
+                    "kind": {
+                      "enum": [
+                        "request",
+                        "report",
+                        "experiment",
+                      ],
+                      "type": "string",
+                    },
+                    "reason": {
+                      "enum": [
+                        "target-missing",
+                        "target-conflict",
+                        "reconciliation-failed",
+                      ],
+                      "type": "string",
+                    },
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "reason",
+                  ],
+                  "type": "object",
+                },
+                "type": "array",
+              },
+              "deleteCompletedAt": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
+              "deleteRequestedAt": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
+              "operationId": {
+                "type": "string",
+              },
+              "phase": {
+                "enum": [
+                  "deleting",
+                  "deleted",
+                  "restoring",
+                  "restored",
+                ],
+                "type": "string",
+              },
+              "progress": {
+                "properties": {
+                  "completedReports": {
+                    "minimum": 0,
+                    "type": "integer",
+                  },
+                  "completedRequests": {
+                    "minimum": 0,
+                    "type": "integer",
+                  },
+                  "expectedReports": {
+                    "minimum": 0,
+                    "type": "integer",
+                  },
+                  "expectedRequests": {
+                    "minimum": 0,
+                    "type": "integer",
+                  },
+                },
+                "required": [
+                  "expectedRequests",
+                  "completedRequests",
+                  "expectedReports",
+                  "completedReports",
+                ],
+                "type": "object",
+              },
+              "restoreCompletedAt": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
+              "restoreRequestedAt": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
+              "stateVersion": {
+                "exclusiveMinimum": 0,
+                "type": "integer",
+              },
+            },
+            "required": [
+              "operationId",
+              "phase",
+              "stateVersion",
+              "progress",
+              "blocking",
+              "deleteRequestedAt",
+            ],
+            "type": "object",
+          },
+          "metadata": {
+            "additionalProperties": false,
+            "properties": {
+              "createdBy": {
+                "type": "string",
+              },
+              "description": {
+                "maxLength": 4096,
+                "type": "string",
+              },
+              "name": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "name",
+            ],
+            "type": "object",
+          },
+          "projectId": {
+            "type": "string",
+          },
+          "revision": {
+            "properties": {
+              "createdAt": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null",
+                ],
+              },
+              "experimentRevisionId": {
+                "type": "string",
+              },
+              "memberCount": {
+                "type": "integer",
+              },
+              "reportTemplateIds": {
+                "items": {
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "revisionNumber": {
+                "type": "integer",
+              },
+            },
+            "required": [
+              "experimentRevisionId",
+              "revisionNumber",
+              "memberCount",
+              "reportTemplateIds",
+              "createdAt",
+            ],
+            "type": "object",
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+        },
+        "required": [
+          "experimentId",
+          "projectId",
+          "metadata",
+          "revision",
+          "currentExecution",
+          "createdAt",
+          "updatedAt",
         ],
         "type": "object",
       },
@@ -1520,6 +2781,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "type": "string",
           },
           "codebaseRevisionId": {
+            "type": "string",
+          },
+          "experimentId": {
             "type": "string",
           },
           "extensions": {
@@ -2344,7 +3608,45 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "null",
             ],
           },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "deletionProvenance": {
+            "additionalProperties": false,
+            "properties": {
+              "experimentId": {
+                "minLength": 1,
+                "type": "string",
+              },
+              "kind": {
+                "enum": [
+                  "experiment",
+                ],
+                "type": "string",
+              },
+              "operationId": {
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "kind",
+              "experimentId",
+              "operationId",
+            ],
+            "type": "object",
+          },
           "error": {
+            "type": "string",
+          },
+          "experimentExecutionId": {
+            "type": "string",
+          },
+          "experimentId": {
             "type": "string",
           },
           "insightReferences": {
@@ -2356,10 +3658,17 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "projectId": {
             "type": "string",
           },
+          "reportVersion": {
+            "exclusiveMinimum": 0,
+            "type": "integer",
+          },
           "reporter": {
             "$ref": "#/components/schemas/Reporter",
           },
           "requestId": {
+            "type": "string",
+          },
+          "runId": {
             "type": "string",
           },
           "status": {
@@ -2371,7 +3680,23 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             ],
             "type": "string",
           },
+          "structuredArtifact": {
+            "$ref": "#/components/schemas/StructuredReportArtifact",
+          },
+          "supersedesReportId": {
+            "type": "string",
+          },
+          "templateContentFingerprint": {
+            "type": "string",
+          },
           "templateId": {
+            "type": "string",
+          },
+          "templateVersion": {
+            "exclusiveMinimum": 0,
+            "type": "integer",
+          },
+          "templateVersionId": {
             "type": "string",
           },
           "updatedAt": {
@@ -2384,7 +3709,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "required": [
           "_id",
-          "requestId",
           "status",
           "createdAt",
           "projectId",
@@ -2423,12 +3747,22 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "_id": {
             "type": "string",
           },
+          "contentFingerprint": {
+            "type": "string",
+          },
           "createdAt": {
             "format": "date-time",
             "type": [
               "string",
               "null",
             ],
+          },
+          "currentVersion": {
+            "exclusiveMinimum": 0,
+            "type": "integer",
+          },
+          "currentVersionId": {
+            "type": "string",
           },
           "deletedAt": {
             "format": "date-time",
@@ -2439,6 +3773,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "description": {
             "type": "string",
+          },
+          "enabled": {
+            "type": "boolean",
           },
           "id": {
             "type": "string",
@@ -2451,6 +3788,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "projectId": {
             "type": "string",
+          },
+          "subject": {
+            "$ref": "#/components/schemas/ReportTemplateSubject",
           },
           "systemPrompt": {
             "$ref": "#/components/schemas/ReportTemplateSystemPrompt",
@@ -2476,12 +3816,24 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "required": [
           "_id",
           "id",
+          "subject",
           "name",
           "userPrompt",
+          "enabled",
+          "currentVersionId",
+          "currentVersion",
+          "contentFingerprint",
           "createdAt",
           "projectId",
         ],
         "type": "object",
+      },
+      "ReportTemplateSubject": {
+        "enum": [
+          "run",
+          "experiment",
+        ],
+        "type": "string",
       },
       "ReportTemplateSystemPrompt": {
         "properties": {
@@ -2499,6 +3851,59 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "required": [
           "mode",
           "content",
+        ],
+        "type": "object",
+      },
+      "ReportTemplateVersionResponse": {
+        "properties": {
+          "_id": {
+            "type": "string",
+          },
+          "contentFingerprint": {
+            "type": "string",
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "model": {
+            "type": "string",
+          },
+          "projectId": {
+            "type": "string",
+          },
+          "systemPrompt": {
+            "$ref": "#/components/schemas/ReportTemplateSystemPrompt",
+          },
+          "templateId": {
+            "type": "string",
+          },
+          "timeoutMs": {
+            "exclusiveMinimum": 0,
+            "type": "integer",
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/ReportTrigger",
+          },
+          "userPrompt": {
+            "type": "string",
+          },
+          "version": {
+            "exclusiveMinimum": 0,
+            "type": "integer",
+          },
+        },
+        "required": [
+          "_id",
+          "projectId",
+          "templateId",
+          "version",
+          "contentFingerprint",
+          "userPrompt",
+          "createdAt",
         ],
         "type": "object",
       },
@@ -2595,6 +4000,29 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             ],
             "type": "object",
           },
+          {
+            "properties": {
+              "reportTemplateIds": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "minItems": 1,
+                "type": "array",
+              },
+              "type": {
+                "enum": [
+                  "run-report-templates",
+                ],
+                "type": "string",
+              },
+            },
+            "required": [
+              "type",
+              "reportTemplateIds",
+            ],
+            "type": "object",
+          },
         ],
       },
       "Reporter": {
@@ -2662,6 +4090,58 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "null",
             ],
           },
+          "deletionProvenance": {
+            "additionalProperties": false,
+            "properties": {
+              "experimentId": {
+                "minLength": 1,
+                "type": "string",
+              },
+              "kind": {
+                "enum": [
+                  "experiment",
+                ],
+                "type": "string",
+              },
+              "operationId": {
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "kind",
+              "experimentId",
+              "operationId",
+            ],
+            "type": "object",
+          },
+          "experimentExpectedRequestCount": {
+            "minimum": 0,
+            "type": "integer",
+          },
+          "experimentFinalizedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null",
+            ],
+          },
+          "experimentId": {
+            "type": "string",
+          },
+          "experimentInitialRunId": {
+            "type": "string",
+          },
+          "experimentMembershipOperationId": {
+            "type": "string",
+          },
+          "experimentMembershipRevisionId": {
+            "type": "string",
+          },
+          "experimentRequestIndex": {
+            "minimum": 0,
+            "type": "integer",
+          },
           "extensions": {
             "items": {
               "type": "string",
@@ -2691,6 +4171,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "model": {
             "type": "string",
+          },
+          "observations": {
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
           },
           "persona": {
             "$ref": "#/components/schemas/Persona",
@@ -3024,6 +4510,66 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         },
         "type": "object",
       },
+      "RetryExperimentResponse": {
+        "properties": {
+          "attemptNumber": {
+            "type": "integer",
+          },
+          "blockers": {
+            "items": {
+              "properties": {
+                "error": {
+                  "type": "string",
+                },
+                "handlerId": {
+                  "type": "string",
+                },
+                "reason": {
+                  "type": "string",
+                },
+                "requestId": {
+                  "type": "string",
+                },
+                "runId": {
+                  "type": "string",
+                },
+              },
+              "required": [
+                "handlerId",
+                "reason",
+              ],
+              "type": "object",
+            },
+            "type": "array",
+          },
+          "experimentExecutionId": {
+            "type": "string",
+          },
+          "experimentId": {
+            "type": "string",
+          },
+          "readiness": {
+            "enum": [
+              "empty",
+              "waiting",
+              "blocked",
+              "ready",
+              "processing",
+              "done",
+              "failed",
+            ],
+            "type": "string",
+          },
+        },
+        "required": [
+          "experimentId",
+          "experimentExecutionId",
+          "attemptNumber",
+          "readiness",
+          "blockers",
+        ],
+        "type": "object",
+      },
       "RunFacetBucket": {
         "properties": {
           "count": {
@@ -3185,6 +4731,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           "mcpRegistered": {
             "type": "boolean",
           },
+          "observationResults": {
+            "items": {
+              "$ref": "#/components/schemas/CriterionResult",
+            },
+            "type": "array",
+          },
           "os": {
             "properties": {
               "arch": {
@@ -3227,6 +4779,13 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "rawChatUrl": {
             "type": "string",
+          },
+          "reportTemplateIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string",
+            },
+            "type": "array",
           },
           "resources": {
             "items": {
@@ -3564,6 +5123,32 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
         "type": "object",
       },
+      "StructuredReportArtifact": {
+        "properties": {
+          "contentType": {
+            "enum": [
+              "application/json",
+            ],
+            "type": "string",
+          },
+          "schemaId": {
+            "type": "string",
+          },
+          "schemaVersion": {
+            "type": "string",
+          },
+          "url": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "schemaId",
+          "schemaVersion",
+          "contentType",
+          "url",
+        ],
+        "type": "object",
+      },
       "SuggestedPromptFeature": {
         "properties": {
           "behavior": {
@@ -3734,7 +5319,29 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "type": "array",
           },
+          "kind": {
+            "enum": [
+              "gate",
+              "observation",
+            ],
+            "type": "string",
+          },
           "prompt": {
+            "type": "string",
+          },
+          "subject": {
+            "enum": [
+              "run",
+              "iteration",
+            ],
+            "type": "string",
+          },
+          "taxonomyElementId": {
+            "enum": [
+              "dimension:idiomatic-use",
+              "dimension:dependency-currency",
+              "dimension:configuration-correctness",
+            ],
             "type": "string",
           },
         },
@@ -3873,6 +5480,9 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "properties": {
           "description": {
             "type": "string",
+          },
+          "enabled": {
+            "type": "boolean",
           },
           "model": {
             "type": [
@@ -4585,6 +6195,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           {
             "in": "query",
+            "name": "experimentId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
             "name": "k",
             "required": false,
             "schema": {
@@ -4921,6 +6539,20 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "enum": [
                 "true",
                 "false",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "description": "Filter by criterion kind",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "description": "Filter by criterion kind",
+              "enum": [
+                "gate",
+                "observation",
               ],
               "type": "string",
             },
@@ -5432,6 +7064,970 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         "summary": "Update criterion",
         "tags": [
           "Criteria",
+        ],
+      },
+    },
+    "/api/v1/experiments": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer",
+            },
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "includeDeleted",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false",
+              ],
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentListResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List experiments",
+        "tags": [
+          "Experiments",
+        ],
+      },
+      "post": {
+        "description": "Canonical composition endpoint. Request and run IDs are minted before insertion; the exact revision/execution is then finalized idempotently.",
+        "parameters": [
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateExperimentInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateExperimentResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "Invalid request selection",
+          },
+          "404": {
+            "description": "Request not found",
+          },
+          "409": {
+            "description": "Experiment identity conflict",
+          },
+        },
+        "summary": "Create an experiment and zero or more new requests",
+        "tags": [
+          "Experiments",
+        ],
+      },
+    },
+    "/api/v1/experiments/{id}": {
+      "delete": {
+        "description": "Returns 202 with a stable lifecycle operation ID. Poll the lifecycle endpoint until phase is deleted or blockers require intervention.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentLifecycleResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Experiment not found",
+          },
+          "409": {
+            "description": "An incompatible Experiment mutation is active",
+          },
+        },
+        "summary": "Start or resume cascading Experiment deletion",
+        "tags": [
+          "Experiments",
+        ],
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "includeDeleted",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false",
+              ],
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Experiment not found",
+          },
+        },
+        "summary": "Get an experiment",
+        "tags": [
+          "Experiments",
+        ],
+      },
+    },
+    "/api/v1/experiments/{id}/executions": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer",
+            },
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "includeDeleted",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false",
+              ],
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentExecutionListResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Experiment not found",
+          },
+        },
+        "summary": "List current and historical experiment executions",
+        "tags": [
+          "Experiments",
+        ],
+      },
+    },
+    "/api/v1/experiments/{id}/executions/{experimentExecutionId}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "experimentExecutionId",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "includeDeleted",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false",
+              ],
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentExecutionResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Experiment execution not found",
+          },
+        },
+        "summary": "Get one exact experiment execution",
+        "tags": [
+          "Experiments",
+        ],
+      },
+    },
+    "/api/v1/experiments/{id}/executions/{experimentExecutionId}/logs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "experimentExecutionId",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "fromStart",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false",
+              ],
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-sent event stream of log entries",
+          },
+          "404": {
+            "description": "Experiment execution not found",
+          },
+        },
+        "summary": "Stream logs for one exact Experiment execution",
+        "tags": [
+          "Experiments",
+        ],
+      },
+    },
+    "/api/v1/experiments/{id}/executions/{experimentExecutionId}/reports": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "experimentExecutionId",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "includeDeleted",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false",
+              ],
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReportResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Experiment execution not found",
+          },
+        },
+        "summary": "List reports for one exact Experiment execution",
+        "tags": [
+          "Reports",
+        ],
+      },
+    },
+    "/api/v1/experiments/{id}/executions/{experimentExecutionId}/reports/{reportId}/structured": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "experimentExecutionId",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "reportId",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+          },
+          "404": {
+            "description": "Experiment report or structured artifact not found",
+          },
+        },
+        "summary": "Download structured JSON for an exact Experiment report",
+        "tags": [
+          "Reports",
+        ],
+      },
+    },
+    "/api/v1/experiments/{id}/executions/{experimentExecutionId}/reports/{templateId}/retry": {
+      "post": {
+        "description": "Creates a new append-only report version in the same exact Experiment execution and preserves the frozen immutable template identity.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "experimentExecutionId",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Experiment template report not found",
+          },
+          "409": {
+            "description": "Execution is stale or report is already active",
+          },
+        },
+        "summary": "Retry one current Experiment template report",
+        "tags": [
+          "Reports",
+        ],
+      },
+    },
+    "/api/v1/experiments/{id}/lifecycle": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentLifecycleResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Experiment not found",
+          },
+          "409": {
+            "description": "Experiment has no lifecycle operation",
+          },
+        },
+        "summary": "Get and repair Experiment lifecycle progress",
+        "tags": [
+          "Experiments",
+        ],
+      },
+    },
+    "/api/v1/experiments/{id}/report-templates": {
+      "put": {
+        "description": "Selection is an unordered set. A real change creates a new Experiment revision and execution; duplicate- or order-only changes are no-ops.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperimentReportTemplateSelectionInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "400": {
+            "description": "One or more template IDs are not selectable",
+          },
+          "404": {
+            "description": "Experiment not found",
+          },
+          "409": {
+            "description": "Stale Experiment revision",
+          },
+        },
+        "summary": "Replace manually selected Experiment report templates",
+        "tags": [
+          "Experiments",
+        ],
+      },
+    },
+    "/api/v1/experiments/{id}/requests": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperimentMembershipInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentMembershipResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Experiment or request not found",
+          },
+          "409": {
+            "description": "Stale revision or membership conflict",
+          },
+        },
+        "summary": "Remove requests from an Experiment",
+        "tags": [
+          "Experiments",
+        ],
+      },
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperimentMembershipInput",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentMembershipResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Experiment or request not found",
+          },
+          "409": {
+            "description": "Stale revision or membership conflict",
+          },
+        },
+        "summary": "Move standalone requests into an Experiment",
+        "tags": [
+          "Experiments",
+        ],
+      },
+    },
+    "/api/v1/experiments/{id}/restore": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentLifecycleResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Experiment not found",
+          },
+          "409": {
+            "description": "Experiment is not deleted or another intent is active",
+          },
+        },
+        "summary": "Start or resume cascading Experiment restore",
+        "tags": [
+          "Experiments",
+        ],
+      },
+    },
+    "/api/v1/experiments/{id}/retry": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "experimentExecutionId": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "experimentExecutionId",
+                ],
+                "type": "object",
+              },
+            },
+          },
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetryExperimentResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Experiment not found",
+          },
+          "409": {
+            "description": "Execution is stale or cannot be retried",
+          },
+        },
+        "summary": "Retry current experiment processing",
+        "tags": [
+          "Experiments",
         ],
       },
     },
@@ -7917,14 +10513,6 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
       "get": {
         "parameters": [
           {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "type": "string",
-            },
-          },
-          {
             "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
             "in": "query",
             "name": "projectId",
@@ -7934,6 +10522,38 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "example": "00000000-0000-0000-0000-000000000000",
               "minLength": 1,
               "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "subject",
+            "required": false,
+            "schema": {
+              "enum": [
+                "run",
+                "experiment",
+              ],
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "includeDisabled",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": [
+                "boolean",
+                "null",
+              ],
             },
           },
         ],
@@ -7992,11 +10612,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "description": "Success",
           },
+          "400": {
+            "description": "Invalid template or linked run templates",
+          },
           "409": {
             "description": "Report template already exists",
           },
         },
-        "summary": "Create report template",
+        "summary": "Create a versioned report template",
         "tags": [
           "Report Templates",
         ],
@@ -8108,7 +10731,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             "description": "Report template not found",
           },
         },
-        "summary": "Delete report template",
+        "summary": "Soft-delete a report template",
         "tags": [
           "Report Templates",
         ],
@@ -8199,11 +10822,115 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
             },
             "description": "Success",
           },
+          "400": {
+            "description": "Invalid template or linked run templates",
+          },
           "404": {
             "description": "Report template not found",
           },
+          "409": {
+            "description": "Concurrent template update",
+          },
         },
-        "summary": "Update report template",
+        "summary": "Update a report template and append immutable content versions",
+        "tags": [
+          "Report Templates",
+        ],
+      },
+    },
+    "/api/v1/report-templates/{id}/versions": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReportTemplateVersionResponse",
+                  },
+                  "type": "array",
+                },
+              },
+            },
+            "description": "Success",
+          },
+        },
+        "summary": "List immutable report template versions",
+        "tags": [
+          "Report Templates",
+        ],
+      },
+    },
+    "/api/v1/report-templates/{id}/versions/{versionId}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "path",
+            "name": "versionId",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+            "in": "query",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "description": "Project scope. Required on scoped list and root-create operations; requests without a resolvable project are rejected with 400. There is no default project.",
+              "example": "00000000-0000-0000-0000-000000000000",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportTemplateVersionResponse",
+                },
+              },
+            },
+            "description": "Success",
+          },
+          "404": {
+            "description": "Template version not found",
+          },
+        },
+        "summary": "Get an exact immutable report template version",
         "tags": [
           "Report Templates",
         ],
@@ -8222,9 +10949,37 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           {
             "in": "query",
+            "name": "experimentId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "experimentExecutionId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
             "name": "projectId",
             "required": false,
             "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "includeDeleted",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false",
+              ],
               "type": "string",
             },
           },
@@ -8662,6 +11417,32 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
         ],
       },
     },
+    "/api/v1/reports/{id}/structured": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+            },
+          },
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+          },
+          "404": {
+            "description": "Report or structured artifact not found",
+          },
+        },
+        "summary": "Download a report's structured JSON artifact",
+        "tags": [
+          "Reports",
+        ],
+      },
+    },
     "/api/v1/requests": {
       "get": {
         "parameters": [
@@ -8702,6 +11483,14 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           {
             "in": "query",
             "name": "submissionId",
+            "required": false,
+            "schema": {
+              "type": "string",
+            },
+          },
+          {
+            "in": "query",
+            "name": "experimentId",
             "required": false,
             "schema": {
               "type": "string",
@@ -8849,6 +11638,7 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "enum": [
                 "task",
                 "submissionId",
+                "experimentId",
                 "profile",
               ],
               "type": "string",
@@ -9067,6 +11857,8 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                       },
                       "count": {
                         "default": 1,
+                        "deprecated": true,
+                        "description": "Deprecated for composition. Use POST /api/v1/experiments and its requests array.",
                         "maximum": 10,
                         "minimum": 1,
                         "type": "number",
@@ -9185,15 +11977,44 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
                     "deleted": {
                       "type": "number",
                     },
+                    "membershipRevision": {
+                      "properties": {
+                        "experimentId": {
+                          "type": "string",
+                        },
+                        "experimentRevisionId": {
+                          "type": "string",
+                        },
+                        "revisionNumber": {
+                          "type": "integer",
+                        },
+                      },
+                      "required": [
+                        "experimentId",
+                        "experimentRevisionId",
+                        "revisionNumber",
+                      ],
+                      "type": "object",
+                    },
+                    "notFound": {
+                      "items": {
+                        "type": "string",
+                      },
+                      "type": "array",
+                    },
                   },
                   "required": [
                     "deleted",
+                    "notFound",
                   ],
                   "type": "object",
                 },
               },
             },
             "description": "Success",
+          },
+          "409": {
+            "description": "Deletion spans Experiments or membership changed",
           },
         },
         "summary": "Bulk soft-delete requests",
@@ -9612,12 +12433,38 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
               "application/json": {
                 "schema": {
                   "properties": {
-                    "message": {
+                    "deleted": {
+                      "enum": [
+                        true,
+                      ],
+                      "type": "boolean",
+                    },
+                    "id": {
                       "type": "string",
+                    },
+                    "membershipRevision": {
+                      "properties": {
+                        "experimentId": {
+                          "type": "string",
+                        },
+                        "experimentRevisionId": {
+                          "type": "string",
+                        },
+                        "revisionNumber": {
+                          "type": "integer",
+                        },
+                      },
+                      "required": [
+                        "experimentId",
+                        "experimentRevisionId",
+                        "revisionNumber",
+                      ],
+                      "type": "object",
                     },
                   },
                   "required": [
-                    "message",
+                    "id",
+                    "deleted",
                   ],
                   "type": "object",
                 },
@@ -9627,6 +12474,12 @@ exports[`OpenAPI spec snapshot > matches the committed snapshot 1`] = `
           },
           "404": {
             "description": "Not found",
+          },
+          "409": {
+            "description": "Membership changed",
+          },
+          "410": {
+            "description": "Already deleted",
           },
         },
         "summary": "Soft-delete request",

@@ -2,9 +2,10 @@
 // Licensed under the MIT License.
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, type RunCreateInput } from "@/lib/api";
+import type { ExperimentView } from "@/lib/experiments";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -184,7 +185,11 @@ function CollapsibleCard({ icon: Icon, title, summary, open, onOpenChange, disab
 // SubmitRun
 // ────────────────────────────────────────────────────────────────────────────
 
-export function SubmitRun() {
+export function SubmitRun({
+  mode = "run",
+}: {
+  mode?: "run" | "experiment";
+}) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const strictAgentCapabilities = useStrictAgentCapabilities();
@@ -201,6 +206,7 @@ export function SubmitRun() {
   // Form state
   const [task, setTask] = useState("");
   const [pickedCriteria, setPickedCriteria] = useState<string[]>([]);
+  const [pickedObservations, setPickedObservations] = useState<string[]>([]);
   const [worker, setWorker] = useState<string>("");
   const [model, setModel] = useState<string>("");
   const [reasoningEffort, setReasoningEffort] = useState<string>("");
@@ -214,6 +220,12 @@ export function SubmitRun() {
   const [occurrences, setOccurrences] = useState<number>(5);
   const [priority, setPriority] = useState<number>(0);
   const [agentsMd, setAgentsMd] = useState<string>("");
+  const [experimentName, setExperimentName] = useState("");
+  const [experimentDescription, setExperimentDescription] = useState("");
+  const [experimentReportTemplateIds, setExperimentReportTemplateIds] =
+    useState<string[]>([]);
+  const [experimentDescriptionOpen, setExperimentDescriptionOpen] =
+    useState(false);
 
   // Optional add-ons
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
@@ -234,6 +246,7 @@ export function SubmitRun() {
 
   // Inline criteria creation dialog
   const [createCriterionOpen, setCreateCriterionOpen] = useState(false);
+  const [createObservationOpen, setCreateObservationOpen] = useState(false);
   const [gateCriterionDialog, setGateCriterionDialog] = useState<Exclude<GateId, "select"> | null>(null);
   const [createProfileOpen, setCreateProfileOpen] = useState(false);
 
@@ -271,6 +284,14 @@ export function SubmitRun() {
     queryKey: ["profiles"],
     queryFn: () => api.listProfiles(),
   });
+  const { data: experimentReportTemplates = [] } = useQuery({
+    queryKey: ["report-templates", "experiment", "manual"],
+    queryFn: () => api.listReportTemplates({ subject: "experiment" }),
+    enabled: mode === "experiment",
+  });
+  const manualExperimentReportTemplates = experimentReportTemplates.filter(
+    (template) => !template.trigger,
+  );
 
   const { data: profileVersions = [] } = useQuery({
     queryKey: ["profile-versions", selectedProfileId],
@@ -283,6 +304,8 @@ export function SubmitRun() {
     queryFn: () => api.listRuns({ limit: 3 }),
   });
   const recentRuns: Run[] = recentRunsResp?.data ?? [];
+  const hasScenario = task.trim().length > 0;
+  const showRunComposition = mode === "run" || hasScenario;
 
   // ─── Derived ────────────────────────────────────────────────────────────
   const activeMcpServers = mcpServers.filter((s: McpServerDocument) => !s.deletedAt);
@@ -516,6 +539,7 @@ export function SubmitRun() {
   const applyRecentRun = (run: Run) => {
     if (run.scenario?.task) setTask(run.scenario.task);
     if (run.scenario?.criteria) setPickedCriteria(run.scenario.criteria);
+    setPickedObservations(run.observations ?? []);
     setWorker(run.workerType);
     if (run.model) setModel(run.model);
     if (run.agentVersion) setSelectedAgentVersion(run.agentVersion);
@@ -661,20 +685,49 @@ export function SubmitRun() {
     : [];
   const gateErrors = [...gateValidationErrors, ...promptValidationErrors];
 
-  const submitMutation = useMutation({
-    mutationFn: api.submitRun,
+  type SubmitResult =
+    | ExperimentView
+    | Awaited<ReturnType<typeof api.submitRun>>;
+
+  const submitMutation = useMutation<
+    SubmitResult,
+    Error,
+    { request?: RunCreateInput }
+  >({
+    mutationFn: ({ request }: { request?: RunCreateInput }) =>
+      mode === "experiment"
+        ? api.createExperiment({
+            metadata: {
+              name: experimentName.trim(),
+              ...(experimentDescription.trim()
+                ? { description: experimentDescription.trim() }
+                : {}),
+            },
+            reportTemplateIds: experimentReportTemplateIds,
+            ...(request ? { request } : { empty: true }),
+          })
+        : api.submitRun(request!),
     onSuccess: (data) => {
-      if ("ids" in data && data.ids.length > 1) {
-        navigate("/runs");
-      } else if ("id" in data) {
+      if (mode === "experiment" && "experimentId" in data) {
+        navigate(`/experiments/${data.experimentId}`);
+        return;
+      }
+      if ("id" in data && typeof data.id === "string") {
         navigate(`/runs/${data.id}`);
-      } else {
-        navigate("/runs");
+        return;
+      }
+      if ("ids" in data && Array.isArray(data.ids) && data.ids[0]) {
+        navigate(`/runs/${data.ids[0]}`);
       }
     },
   });
 
   const doSubmit = () => {
+    if (mode === "experiment" && !hasScenario) {
+      if (!experimentName.trim()) return;
+      submitMutation.mutate({});
+      return;
+    }
     if (!task.trim()) return;
     const normalizedVariationDrafts = variationDrafts.filter((v) => v.profileId.trim().length > 0);
     const profileVariations: string[] = normalizedVariationDrafts.map((v) =>
@@ -685,8 +738,9 @@ export function SubmitRun() {
       ? (selectedProfileVersion ? `${selectedProfileId}@${selectedProfileVersion}` : selectedProfileId)
       : null;
 
-    submitMutation.mutate({
+    const request: RunCreateInput = {
       scenario: { task: task.trim(), criteria: pickedCriteria },
+      ...(pickedObservations.length > 0 ? { observations: pickedObservations } : {}),
       ...(inVariationMode ? {} : { ...(worker ? { worker } : {}) }),
       ...(inVariationMode ? {} : { ...(model ? { model } : {}) }),
       ...(inVariationMode ? {} : { ...(reasoningEffort ? { reasoningEffort } : {}) }),
@@ -709,7 +763,8 @@ export function SubmitRun() {
         : {
             ...(baseProfileSpec ? { profileId: baseProfileSpec } : {}),
           }),
-    });
+    };
+    submitMutation.mutate({ request });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -730,20 +785,25 @@ export function SubmitRun() {
   });
 
   const canSubmit =
-    !!task.trim() &&
-    !!selectedAgent &&
-    isAgentAvailable(selectedAgent) &&
-    !selectedVersionIsHistorical &&
-    selectedVariationTargetsAvailable &&
-    !submitMutation.isPending &&
-    !(selectedAgent && activeModelIds.length > 0 && !model) &&
-    !(maxIterations !== 1 && pickedCriteria.length === 0) &&
-    gateErrors.length === 0;
+    mode === "experiment" && !hasScenario
+      ? !!experimentName.trim() && !submitMutation.isPending
+      : !!task.trim() &&
+        (mode === "run" || !!experimentName.trim()) &&
+        !!selectedAgent &&
+        isAgentAvailable(selectedAgent) &&
+        !selectedVersionIsHistorical &&
+        selectedVariationTargetsAvailable &&
+        !submitMutation.isPending &&
+        !(selectedAgent && activeModelIds.length > 0 && !model) &&
+        !(maxIterations !== 1 && pickedCriteria.length === 0) &&
+        gateErrors.length === 0;
 
   const selectedVariationCount = variationDrafts.filter((v) => v.profileId.trim().length > 0).length;
   const compositionProfileCount = selectedProfileId ? 1 + selectedVariationCount : 0;
   const expandedRunCount = compositionProfileCount > 0 ? compositionProfileCount * occurrences : occurrences;
   const submitRunCount = expandedRunCount;
+  const usesLegacyComposition =
+    mode === "run" && (occurrences > 1 || selectedVariationCount > 0);
   const lastVariationDraft = variationDrafts.length > 0 ? variationDrafts[variationDrafts.length - 1] : null;
 
   const lastVariationName = lastVariationDraft
@@ -800,9 +860,10 @@ export function SubmitRun() {
   useCommandEnter(doSubmit, canSubmit);
 
   // ─── Render helpers ─────────────────────────────────────────────────────
-  const summaryChips: string[] = [
+  const configuredSummaryChips: string[] = [
     `${maxIterations} iteration${maxIterations === 1 ? "" : "s"}`,
     `${pickedCriteria.length} requirements criteri${pickedCriteria.length === 1 ? "on" : "a"}`,
+    pickedObservations.length > 0 ? `${pickedObservations.length} observation${pickedObservations.length === 1 ? "" : "s"}` : "",
     gatesEnabled ? `${gateConfigs.length} configured gates` : "single-pass Requirements",
     occurrences > 1 ? `×${occurrences} runs` : "",
     worker,
@@ -818,6 +879,10 @@ export function SubmitRun() {
     agentsMd.trim() ? "AGENTS.md" : "",
     selectedExtensions.length > 0 ? `${selectedExtensions.length} ext` : "",
   ].filter(Boolean);
+  const summaryChips =
+    mode === "experiment" && !hasScenario
+      ? ["No scenario selected", "0 runs"]
+      : configuredSummaryChips;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6 pb-28">
@@ -827,28 +892,136 @@ export function SubmitRun() {
           type="button"
           variant="ghost"
           size="icon"
-          onClick={() => navigate("/runs")}
-          aria-label="Back to runs"
+          onClick={() => navigate(mode === "experiment" ? "/experiments" : "/runs")}
+          aria-label={mode === "experiment" ? "Back to experiments" : "Back to runs"}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">New Run</h1>
-          <p className="text-muted-foreground">Submit a benchmark run to a coding agent worker</p>
+          <h1 className="text-3xl font-bold tracking-tight">
+            {mode === "experiment" ? "New Experiment" : "New Run"}
+          </h1>
+          <p className="text-muted-foreground">
+            {mode === "experiment"
+              ? "Create a named benchmark composition and its first execution"
+              : "Submit a benchmark run to a coding agent worker"}
+          </p>
         </div>
-        <AdvancedModeToggle
-          checked={advanced}
-          onCheckedChange={setAdvanced}
-          className="ml-auto"
-        />
+
+        {showRunComposition && (
+          <AdvancedModeToggle
+            checked={advanced}
+            onCheckedChange={setAdvanced}
+            className="ml-auto"
+          />
+        )}
       </div>
 
+      {mode === "experiment" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Experiment metadata</CardTitle>
+            <CardDescription>
+              Name this reproducible composition. Add a scenario below to
+              configure runs, or create it empty.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="experimentName">Name *</Label>
+              <Input
+                id="experimentName"
+                value={experimentName}
+                onChange={(event) => setExperimentName(event.target.value)}
+                placeholder="Copilot versus Claude on authentication"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <button
+                type="button"
+                aria-expanded={experimentDescriptionOpen}
+                aria-controls="experimentDescriptionFields"
+                onClick={() =>
+                  setExperimentDescriptionOpen((open) => !open)
+                }
+                className="flex w-full items-center gap-2 rounded-md py-1 text-left text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <ChevronDown
+                  className={`h-4 w-4 transition-transform ${
+                    experimentDescriptionOpen ? "rotate-180" : ""
+                  }`}
+                />
+                Description
+                <span className="text-xs font-normal">(optional)</span>
+              </button>
+              {experimentDescriptionOpen && (
+                <div
+                  id="experimentDescriptionFields"
+                  className="mt-2 space-y-2"
+                >
+                  <Label htmlFor="experimentDescription" className="sr-only">
+                    Description
+                  </Label>
+                  <Textarea
+                    id="experimentDescription"
+                    value={experimentDescription}
+                    onChange={(event) =>
+                      setExperimentDescription(event.target.value)
+                    }
+                    placeholder="What this experiment compares and why"
+                  />
+                </div>
+              )}
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label>Selectable reports</Label>
+              <p className="text-xs text-muted-foreground">
+                These manual templates become part of immutable revision 1.
+                Automatic Experiment reports do not need selection.
+              </p>
+              {manualExperimentReportTemplates.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No selectable Experiment report templates.
+                </p>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {manualExperimentReportTemplates.map((template) => (
+                    <label
+                      key={template.id}
+                      className="flex items-center gap-2 rounded-md border p-3 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={experimentReportTemplateIds.includes(
+                          template.id,
+                        )}
+                        onChange={() =>
+                          setExperimentReportTemplateIds((current) =>
+                            current.includes(template.id)
+                              ? current.filter((id) => id !== template.id)
+                              : [...current, template.id],
+                          )
+                        }
+                      />
+                      <span>{template.name}</span>
+                      <Badge variant="secondary">
+                        v{template.currentVersion}
+                      </Badge>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Quick Start gallery (collapsible, default closed) */}
-      {(topProfiles.length > 0 || recentRuns.length > 0) && (
+      {showRunComposition && (topProfiles.length > 0 || recentRuns.length > 0) && (
         <CollapsibleCard
           icon={Sparkles}
           title="Quick start"
-          summary="Start from a profile or re-run a recent submission"
+          summary="Start from a profile or re-run a recent benchmark"
           open={galleryOpen}
           onOpenChange={setGalleryOpen}
         >
@@ -908,7 +1081,9 @@ export function SubmitRun() {
         <CardContent className="space-y-5">
           <div className="space-y-2">
             <div className="flex items-center gap-1.5">
-              <Label htmlFor="task">Task *</Label>
+              <Label htmlFor="task">
+                Task{mode === "run" ? " *" : ""}
+              </Label>
               <HelpTooltip
                 text="The natural-language instruction sent to the coding agent. Saved to the task prompt library so you can reuse it across runs."
                 docs="taskPrompts"
@@ -921,7 +1096,7 @@ export function SubmitRun() {
               value={task}
               onChange={(e) => setTask(e.target.value)}
               rows={3}
-              required
+              required={mode === "run" || hasScenario}
             />
             <div className="flex items-center justify-between">
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -986,6 +1161,8 @@ export function SubmitRun() {
             )}
           </div>
 
+          {showRunComposition ? (
+            <>
           {/* ─── Codebase (optional, discreet) ───────────────────────────── */}
           {!(codebaseOpen || selectedCodebaseSpec) ? (
             <Button
@@ -1086,6 +1263,7 @@ export function SubmitRun() {
               onChange={setPickedCriteria}
               inputId="criteria"
               gate="select"
+              kind="gate"
               trailingAction={(
                 <Button
                   type="button"
@@ -1108,6 +1286,46 @@ export function SubmitRun() {
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Info className="h-3.5 w-3.5 shrink-0" />
               Required when max iterations &gt; 1. Optional for single-iteration runs (no judge evaluation).
+            </p>
+          </div>
+
+          <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="observations">
+                Observations{" "}
+                <span className="text-muted-foreground font-normal">(record-only criteria)</span>
+              </Label>
+              <HelpTooltip
+                text="Observation criteria are evaluated per iteration and record true/false plus evidence without gating the agent."
+                docs="criteria"
+              />
+            </div>
+            <CriteriaPicker
+              selected={pickedObservations}
+              onChange={setPickedObservations}
+              inputId="observations"
+              kind="observation"
+              trailingAction={(
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 gap-1.5 px-3"
+                  onClick={() => setCreateObservationOpen(true)}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  New Observation
+                </Button>
+              )}
+            />
+            <CreateCriterionDialog
+              open={createObservationOpen}
+              onOpenChange={setCreateObservationOpen}
+              mode="observation"
+              onCreated={(id) => setPickedObservations((prev) => [...prev, id])}
+            />
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Info className="h-3.5 w-3.5 shrink-0" />
+              Observation results appear in the run detail observations tab grouped by dimension.
             </p>
           </div>
 
@@ -1147,6 +1365,19 @@ export function SubmitRun() {
               />
             </div>
           </div>
+
+          {usesLegacyComposition && (
+            <p className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              Creating multiple runs or profile variations? Use{" "}
+              <Link
+                className="font-medium text-foreground underline underline-offset-4"
+                to="/experiments/new"
+              >
+                New Experiment
+              </Link>
+              .
+            </p>
+          )}
 
           {/* ─── AGENTS.md (optional, discreet) ──────────────────────────── */}
           {!(agentsMdOpen || agentsMd.trim()) ? (
@@ -1224,9 +1455,19 @@ export function SubmitRun() {
               </div>
             </div>
           </AdvancedSection>
+            </>
+          ) : (
+            <div role="status" className="rounded-md border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+              No scenario selected. This will create an empty Experiment with
+              zero runs. Enter or select a task to configure its run
+              composition.
+            </div>
+          )}
         </CardContent>
       </Card>
 
+      {showRunComposition && (
+        <>
       {/* ─── Gates ─────────────────────────────────────────────────────── */}
       <Card>
         <CardHeader>
@@ -1301,6 +1542,7 @@ export function SubmitRun() {
                       <Label>{meta.label} criteria</Label>
                       <CriteriaPicker
                         gate={gate}
+                        kind="gate"
                         selected={draft.criteria}
                         onChange={(criteria) => updateGateDraft(gate, { criteria })}
                         trailingAction={(
@@ -1907,6 +2149,8 @@ export function SubmitRun() {
           <ExtensionPicker selected={selectedExtensions} onChange={setSelectedExtensions} disabled={profileLocked} />
         </CollapsibleCard>
       )}
+        </>
+      )}
       </div>
 
       <Dialog open={createProfileOpen} onOpenChange={setCreateProfileOpen}>
@@ -1942,10 +2186,14 @@ export function SubmitRun() {
           <div className="flex items-center gap-2">
             {submitMutation.isError && (
               <p className="text-xs text-destructive">
-                {submitMutation.error instanceof Error ? submitMutation.error.message : "Submission failed"}
+                {submitMutation.error instanceof Error
+                  ? submitMutation.error.message
+                  : mode === "experiment"
+                    ? "Experiment creation failed"
+                    : "Run submission failed"}
               </p>
             )}
-            {!profileLocked && worker && model && (
+            {showRunComposition && !profileLocked && worker && model && (
               <Dialog open={saveProfileOpen} onOpenChange={setSaveProfileOpen}>
                 <DialogTrigger asChild>
                   <Button type="button" variant="outline" size="sm" className="gap-1.5">
@@ -1996,7 +2244,13 @@ export function SubmitRun() {
               ) : (
                 <Send className="h-4 w-4" />
               )}
-              Submit {submitRunCount > 1 ? `${submitRunCount} Runs` : "Run"}
+              {mode === "experiment"
+                ? hasScenario
+                  ? `Create experiment with ${submitRunCount} ${
+                      submitRunCount === 1 ? "run" : "runs"
+                    }`
+                  : "Create empty experiment"
+                : `Submit ${submitRunCount > 1 ? `${submitRunCount} Runs` : "Run"}`}
               <KbdBadge />
             </Button>
           </div>

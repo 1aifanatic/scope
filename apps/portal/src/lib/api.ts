@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType, ResourceDocument, ResourceRevisionDocument, ResourceBindingSpec, CreateResourceBody, CreateResourceRevisionBody, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, RunFacetsResponse, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType, RunSortField, RunSortDir } from "@/types";
+import type { Run, RunState, CriteriaDocument, CriteriaGraphData, GeneratePromptResponse, AnalysisResponse, PromptFeatureDocument, Report, BulkReportStatus, BulkReportSummary, ReportTemplate, ReportTemplateVersion, ReportTrigger, ReportTemplateSystemPrompt, KeyDocument, KeyValidationResult, CreateKeyRequest, UpdateKeyRequest, CodingAgent, AgentVersion, McpServerDocument, CreateMcpServerRequest, UpdateMcpServerRequest, BulkResubmitOverrides, Insight, InsightWithReference, TaskPrompt, TaskPromptFeatureExtractionResult, Model, FeatureFlag, SkillDocument, SkillSearchResult, SkillDiscoveryResult, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, CodebaseSourceType, ResourceDocument, ResourceRevisionDocument, ResourceBindingSpec, CreateResourceBody, CreateResourceRevisionBody, ExtensionDocument, ExtensionSearchResult, ExtensionVersionInfo, MdpResponse, AccountDocument, CreateAccountRequest, UpdateAccountRequest, ProfileWithVersion, ProfileVersionDocument, ProfileDocument, RunGroup, RunFacetsResponse, CursorPaginatedResponse, IterationOp, GateConfig, GateId, PromptType, RunSortField, RunSortDir, CriterionKind, TaxonomyElementId, CriterionSubject } from "@/types";
 
 import type { Project, CreateProjectRequest, UpdateProjectRequest } from "@/types";
 import { qs } from "./url";
@@ -9,6 +9,22 @@ import { recordServerDate } from "./serverClock";
 import { apiClient } from "./api-client";
 import { getSelectedProjectId, ProjectRequiredError } from "./project-scope";
 import { MAX_ARCHIVE_UPLOAD_LABEL } from "./codebaseUpload";
+import {
+  parseExperiment,
+  parseExperimentExecution,
+  parseExperimentExecutionPage,
+  parseExperimentLifecycle,
+  parseExperimentPage,
+  type ExistingRunExperimentCreateView,
+  type ExperimentExecutionPageView,
+  type ExperimentExecutionView,
+  type ExperimentLifecycleView,
+  type ExperimentMembershipMutationView,
+  type ExperimentMetadataView,
+  type ExperimentPageView,
+  type ExperimentRevisionIdentityView,
+  type ExperimentView,
+} from "./experiments";
 
 const BASE = "/api/v1";
 
@@ -85,7 +101,7 @@ export interface RunFilterParams {
   profileId?: string | string[];
   taskPromptId?: string;
   criteria?: string;
-  submissionId?: string;
+  experimentId?: string;
   search?: string;
   createdAfter?: string;
   createdBefore?: string;
@@ -108,7 +124,7 @@ function runFilterQs(f: RunFilterParams): Record<string, string | string[] | und
     profileId: f.profileId,
     taskPromptId: f.taskPromptId,
     criteria: f.criteria,
-    submissionId: f.submissionId,
+    experimentId: f.experimentId,
     search: f.search,
     createdAfter: f.createdAfter,
     createdBefore: f.createdBefore,
@@ -158,6 +174,36 @@ async function requestCurrentUser(
   return validateCurrentUser(user);
 }
 
+export interface RunCreateInput {
+  scenario: { task: string; criteria: string[]; version?: "v1" | "v2" };
+  observations?: string[];
+  worker?: string;
+  model?: string;
+  reasoningEffort?: string;
+  maxIterations?: number;
+  personaInstructions?: string;
+  persona?: {
+    personality: string;
+    experience: string;
+    verbosity: string;
+    type: string;
+  };
+  count?: number;
+  mcpServers?: string[];
+  skills?: string[];
+  extensions?: string[];
+  resources?: ResourceBindingSpec[];
+  agentVersion?: string;
+  profileId?: string;
+  profileVariations?: string[];
+  agentsMd?: string;
+  agentsMdParentIds?: string[];
+  gates?: GateConfig[];
+  codebase?: string;
+  codebaseRevisionId?: string;
+  priority?: number;
+}
+
 export const api = {
   /** Only AuthProvider calls these; enrollment must never be prefetched. */
   getCurrentUser: (opts: { signal?: AbortSignal } = {}): Promise<CurrentUserResponse> =>
@@ -178,8 +224,8 @@ export const api = {
     })}`, undefined, { scoped: true });
   },
 
-  /** List runs grouped by task/profile/submissionId, with cursor pagination and server-side filtering */
-  listRunGroups: (opts: RunFilterParams & { groupBy: "task" | "submissionId" | "profile"; sortBy?: RunSortField; sortDir?: RunSortDir; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<RunGroup>> => {
+  /** List runs grouped by task/profile/experimentId, with cursor pagination and server-side filtering */
+  listRunGroups: (opts: RunFilterParams & { groupBy: "task" | "experimentId" | "profile"; sortBy?: RunSortField; sortDir?: RunSortDir; limit?: number; after?: string; before?: string; last?: boolean }): Promise<CursorPaginatedResponse<RunGroup>> => {
     return request(`/requests${qs({
       groupBy: opts.groupBy,
       ...runFilterQs(opts),
@@ -209,28 +255,19 @@ export const api = {
   },
 
   /** Submit a new run (or multiple runs if count > 1) */
-  submitRun: (body: {
-    scenario: { task: string; criteria: string[]; version?: "v1" | "v2" };
-    worker?: string;
-    model?: string;
-    reasoningEffort?: string;
-    maxIterations?: number;
-    personaInstructions?: string;
-    persona?: { personality: string; experience: string; verbosity: string; type: string };
-    count?: number;
-    mcpServers?: string[];
-    skills?: string[];
-    extensions?: string[];
-    resources?: ResourceBindingSpec[];
-    agentVersion?: string;
-    profileId?: string;
-    profileVariations?: string[];
-    agentsMd?: string;
-    agentsMdParentIds?: string[];
-    gates?: GateConfig[];
-    codebase?: string;
-    codebaseRevisionId?: string;
-  }): Promise<(Run & { message: string }) | { ids: string[]; count: number; message: string }> => {
+  submitRun: (body: RunCreateInput): Promise<
+    (Run & {
+      message: string;
+      experimentId?: string;
+      submissionId?: string;
+    }) | {
+      ids: string[];
+      count: number;
+      message: string;
+      experimentId?: string;
+      submissionId?: string;
+    }
+  > => {
     const { worker, ...payload } = body;
     const url = worker ? `/requests?worker=${encodeURIComponent(worker)}` : `/requests`;
     return request(url, {
@@ -239,8 +276,288 @@ export const api = {
     }, { scoped: true });
   },
 
+  createExperiment: async (
+    body: { metadata: ExperimentMetadataView; reportTemplateIds?: string[] } & (
+      | { request: RunCreateInput; empty?: never }
+      | { empty: true; request?: never }
+    ),
+  ): Promise<ExperimentView> => {
+    const composedRequest = "request" in body ? body.request : undefined;
+    const worker = composedRequest?.worker;
+    const requestBody = composedRequest
+      ? { ...composedRequest, worker: undefined }
+      : undefined;
+    const path = worker
+      ? `/experiments?worker=${encodeURIComponent(worker)}`
+      : "/experiments";
+    const value = await request<unknown>(
+      path,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          mode: "empty" in body ? "empty" : "compose",
+          metadata: body.metadata,
+          requests: requestBody ? [requestBody] : [],
+          reportTemplateIds: body.reportTemplateIds ?? [],
+        }),
+      },
+      { scoped: true },
+    );
+    if (!value || typeof value !== "object" || !("experiment" in value)) {
+      throw new Error("Invalid experiment create response from Scope");
+    }
+    return parseExperiment(value.experiment);
+  },
+
+  createExperimentFromRuns: async (body: {
+    metadata: ExperimentMetadataView;
+    requestIds: string[];
+    reportTemplateIds?: string[];
+  }): Promise<ExistingRunExperimentCreateView> => {
+    const value = await request<unknown>(
+      "/experiments",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          mode: "existing",
+          metadata: body.metadata,
+          requests: [],
+          requestIds: body.requestIds,
+          reportTemplateIds: body.reportTemplateIds ?? [],
+        }),
+      },
+      { scoped: true },
+    );
+    if (
+      !value ||
+      typeof value !== "object" ||
+      !("experiment" in value) ||
+      !("requestIds" in value) ||
+      !Array.isArray(value.requestIds) ||
+      !value.requestIds.every((requestId) => typeof requestId === "string")
+    ) {
+      throw new Error("Invalid existing-run experiment response from Scope");
+    }
+    return {
+      experiment: parseExperiment(value.experiment),
+      requestIds: value.requestIds,
+    };
+  },
+
+  updateExperimentRequests: async (
+    method: "POST" | "DELETE",
+    id: string,
+    body: { expectedExperimentRevisionId: string; requestIds: string[] },
+  ): Promise<ExperimentMembershipMutationView> => {
+    const value = await request<unknown>(
+      `/experiments/${encodeURIComponent(id)}/requests`,
+      { method, body: JSON.stringify(body) },
+      { scoped: true },
+    );
+    if (
+      !value ||
+      typeof value !== "object" ||
+      !("experiment" in value) ||
+      !("attachedRequestIds" in value) ||
+      !Array.isArray(value.attachedRequestIds) ||
+      !value.attachedRequestIds.every((requestId) => typeof requestId === "string") ||
+      !("detachedRequestIds" in value) ||
+      !Array.isArray(value.detachedRequestIds) ||
+      !value.detachedRequestIds.every((requestId) => typeof requestId === "string")
+    ) {
+      throw new Error("Invalid experiment membership response from Scope");
+    }
+    return {
+      experiment: parseExperiment(value.experiment),
+      attachedRequestIds: value.attachedRequestIds,
+      detachedRequestIds: value.detachedRequestIds,
+    };
+  },
+
+  updateExperimentReportTemplates: async (
+    id: string,
+    body: {
+      expectedExperimentRevisionId: string;
+      reportTemplateIds: string[];
+    },
+  ): Promise<ExperimentView> => {
+    const value = await request<unknown>(
+      `/experiments/${encodeURIComponent(id)}/report-templates`,
+      { method: "PUT", body: JSON.stringify(body) },
+      { scoped: true },
+    );
+    return parseExperiment(value);
+  },
+
+  listExperiments: async (opts?: {
+    cursor?: string;
+    limit?: number;
+    includeDeleted?: boolean;
+  }): Promise<ExperimentPageView> => {
+    const value = await request<unknown>(
+      `/experiments${qs({
+        after: opts?.cursor,
+        limit: opts?.limit ? String(opts.limit) : undefined,
+        includeDeleted: opts?.includeDeleted ? "true" : undefined,
+      })}`,
+      undefined,
+      { scoped: true },
+    );
+    return parseExperimentPage(value);
+  },
+
+  getExperiment: async (
+    id: string,
+    opts?: { includeDeleted?: boolean },
+  ): Promise<ExperimentView> => {
+    const value = await request<unknown>(
+      `/experiments/${encodeURIComponent(id)}${qs({
+        includeDeleted: opts?.includeDeleted ? "true" : undefined,
+      })}`,
+      undefined,
+      { scoped: true },
+    );
+    return parseExperiment(value);
+  },
+
+  deleteExperiment: async (id: string): Promise<ExperimentLifecycleView> => {
+    const value = await request<unknown>(
+      `/experiments/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+      { scoped: true },
+    );
+    return parseExperimentLifecycle(value);
+  },
+
+  restoreExperiment: async (id: string): Promise<ExperimentLifecycleView> => {
+    const value = await request<unknown>(
+      `/experiments/${encodeURIComponent(id)}/restore`,
+      { method: "POST" },
+      { scoped: true },
+    );
+    return parseExperimentLifecycle(value);
+  },
+
+  getExperimentLifecycle: async (
+    id: string,
+  ): Promise<ExperimentLifecycleView> => {
+    const value = await request<unknown>(
+      `/experiments/${encodeURIComponent(id)}/lifecycle`,
+      undefined,
+      { scoped: true },
+    );
+    return parseExperimentLifecycle(value);
+  },
+
+  listExperimentExecutions: async (
+    id: string,
+    opts?: { cursor?: string; limit?: number; includeDeleted?: boolean },
+  ): Promise<ExperimentExecutionPageView> => {
+    const value = await request<unknown>(
+      `/experiments/${encodeURIComponent(id)}/executions${qs({
+        after: opts?.cursor,
+        limit: opts?.limit ? String(opts.limit) : undefined,
+        includeDeleted: opts?.includeDeleted ? "true" : undefined,
+      })}`,
+      undefined,
+      { scoped: true },
+    );
+    return parseExperimentExecutionPage(value);
+  },
+
+  getExperimentExecution: async (
+    id: string,
+    experimentExecutionId: string,
+    opts?: { includeDeleted?: boolean },
+  ): Promise<ExperimentExecutionView> => {
+    const value = await request<unknown>(
+      `/experiments/${encodeURIComponent(id)}/executions/${encodeURIComponent(experimentExecutionId)}${qs({
+        includeDeleted: opts?.includeDeleted ? "true" : undefined,
+      })}`,
+      undefined,
+      { scoped: true },
+    );
+    return parseExperimentExecution(value);
+  },
+
+  listExperimentReports: (
+    id: string,
+    experimentExecutionId: string,
+    opts?: { includeDeleted?: boolean },
+  ): Promise<Report[]> =>
+    request(
+      `/experiments/${encodeURIComponent(id)}/executions/${encodeURIComponent(experimentExecutionId)}/reports${qs({
+        includeDeleted: opts?.includeDeleted ? "true" : undefined,
+      })}`,
+      undefined,
+      { scoped: true },
+    ),
+
+  experimentReportStructuredUrl: (
+    id: string,
+    experimentExecutionId: string,
+    reportId: string,
+  ): string => {
+    const projectId = getSelectedProjectId();
+    if (!projectId) throw new ProjectRequiredError();
+    return `${BASE}${withProjectId(
+      `/experiments/${encodeURIComponent(id)}/executions/${encodeURIComponent(experimentExecutionId)}/reports/${encodeURIComponent(reportId)}/structured`,
+      projectId,
+    )}`;
+  },
+
+  retryExperiment: async (
+    id: string,
+    experimentExecutionId: string,
+  ): Promise<{
+    experimentId: string;
+    experimentExecutionId: string;
+    attemptNumber: number;
+  }> => {
+    const value = await request<unknown>(
+      `/experiments/${encodeURIComponent(id)}/retry`,
+      {
+        method: "POST",
+        body: JSON.stringify({ experimentExecutionId }),
+      },
+      { scoped: true },
+    );
+    if (
+      !value ||
+      typeof value !== "object" ||
+      !("experimentId" in value) ||
+      typeof value.experimentId !== "string" ||
+      !("experimentExecutionId" in value) ||
+      typeof value.experimentExecutionId !== "string" ||
+      !("attemptNumber" in value) ||
+      typeof value.attemptNumber !== "number"
+    ) {
+      throw new Error("Invalid experiment retry response from Scope");
+    }
+    return {
+      experimentId: value.experimentId,
+      experimentExecutionId: value.experimentExecutionId,
+      attemptNumber: value.attemptNumber,
+    };
+  },
+
+  retryExperimentReport: (
+    id: string,
+    experimentExecutionId: string,
+    templateId: string,
+  ): Promise<Report> =>
+    request(
+      `/experiments/${encodeURIComponent(id)}/executions/${encodeURIComponent(experimentExecutionId)}/reports/${encodeURIComponent(templateId)}/retry`,
+      { method: "POST" },
+      { scoped: true },
+    ),
+
   /** Soft-delete a run */
-  deleteRun: (id: string): Promise<{ id: string; deleted: boolean }> => {
+  deleteRun: (id: string): Promise<{
+    id: string;
+    deleted: boolean;
+    membershipRevision?: ExperimentRevisionIdentityView;
+  }> => {
     return request(`/requests/${id}`, { method: "DELETE" });
   },
 
@@ -313,7 +630,11 @@ export const api = {
   },
 
   /** Bulk soft-delete multiple runs */
-  bulkDeleteRuns: (ids: string[]): Promise<{ deleted: number; notFound: string[] }> => {
+  bulkDeleteRuns: (ids: string[]): Promise<{
+    deleted: number;
+    notFound: string[];
+    membershipRevision?: ExperimentRevisionIdentityView;
+  }> => {
     return request(`/requests/bulk`, {
       method: "DELETE",
       body: JSON.stringify({ ids }),
@@ -450,7 +771,7 @@ export const api = {
   },
 
   /** Create a new criterion */
-  createCriterion: (body: { id: string; prompt: string; dependsOn?: string[]; gates?: GateId[] }): Promise<CriteriaDocument> => {
+  createCriterion: (body: { id: string; prompt: string; dependsOn?: string[]; gates?: GateId[]; kind?: CriterionKind; taxonomyElementId?: TaxonomyElementId; subject?: CriterionSubject }): Promise<CriteriaDocument> => {
     return request("/criteria", {
       method: "POST",
       body: JSON.stringify(body),
@@ -458,7 +779,7 @@ export const api = {
   },
 
   /** Update an existing criterion (soft-scoped: prefers the active project's copy, else legacy global) */
-  updateCriterion: (id: string, body: { prompt?: string; dependsOn?: string[]; gates?: GateId[] }): Promise<CriteriaDocument> => {
+  updateCriterion: (id: string, body: { prompt?: string; dependsOn?: string[]; gates?: GateId[]; kind?: CriterionKind; taxonomyElementId?: TaxonomyElementId; subject?: CriterionSubject }): Promise<CriteriaDocument> => {
     return request(`/criteria/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
@@ -760,6 +1081,9 @@ export const api = {
     return request(`/reports/${id}`);
   },
 
+  reportStructuredUrl: (id: string): string =>
+    `${BASE}/reports/${encodeURIComponent(id)}/structured`,
+
   /** Get reports for a specific run */
   getRunReports: (requestId: string): Promise<Report[]> => {
     return request(`/requests/${requestId}/reports`);
@@ -794,13 +1118,24 @@ export const api = {
   },
 
   /** List all report templates */
-  listReportTemplates: (): Promise<ReportTemplate[]> => {
-    return request("/report-templates", undefined, { scoped: true });
+  listReportTemplates: (options?: {
+    subject?: "run" | "experiment";
+    includeDisabled?: boolean;
+  }): Promise<ReportTemplate[]> => {
+    return request(`/report-templates${qs({
+      subject: options?.subject,
+      includeDisabled: options?.includeDisabled ? "true" : undefined,
+    })}`, undefined, { scoped: true });
   },
 
   /** Get a single report template by slug ID */
   getReportTemplate: (id: string): Promise<ReportTemplate> => {
     return request(`/report-templates/${id}`, undefined, { scoped: true });
+  },
+
+  /** List immutable content versions for a report template */
+  listReportTemplateVersions: (id: string): Promise<ReportTemplateVersion[]> => {
+    return request(`/report-templates/${id}/versions`, undefined, { scoped: true });
   },
 
   /** List models available for report generation */
@@ -811,6 +1146,7 @@ export const api = {
   /** Create a new report template */
   createReportTemplate: (body: {
     id: string;
+    subject: "run" | "experiment";
     name: string;
     userPrompt: string;
     description?: string;
@@ -818,6 +1154,7 @@ export const api = {
     trigger?: ReportTrigger;
     model?: string;
     timeoutMs?: number;
+    enabled?: boolean;
   }): Promise<ReportTemplate> => {
     return request("/report-templates", {
       method: "POST",
@@ -834,6 +1171,7 @@ export const api = {
     trigger?: ReportTrigger | null;
     model?: string | null;
     timeoutMs?: number | null;
+    enabled?: boolean;
   }): Promise<ReportTemplate> => {
     return request(`/report-templates/${id}`, {
       method: "PUT",

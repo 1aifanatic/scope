@@ -10,6 +10,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { TaskPromptStore, SkillRevisionStore, SkillResolver, CodebaseStore, CodebaseRevisionStore, CodebaseResolver, ResourceStore, ResourceRevisionStore, ResourceResolver, McpSecretClient, McpSecretUnavailableError, BlobStorage, RedisHeartbeatStore, ProjectStore, loadAuthConfigFromEnv } from "shared";
+import type { ExperimentDocument, ExperimentExecutionHistoryDocument } from "shared";
 import { initTelemetry } from "telemetry";
 import type { TaskPromptDocument, SkillDocument, SkillRevisionDocument, CodebaseDocument, CodebaseRevisionDocument, ResourceDocument, ResourceRevisionDocument, ProfileDocument, ProfileVersionDocument, ProjectDocument, HeartbeatStore, AuthProvider, ProfileEnricher, UserDocument } from "shared";
 import { UserStore } from "./auth/user-store.js";
@@ -47,8 +48,11 @@ import { registerInsightsRoutes } from "./routes/insights.js";
 import { registerSecretsRoutes } from "./routes/secrets.js";
 import { registerProfilesRoutes } from "./routes/profiles.js";
 import { registerProjectsRoutes } from "./routes/projects.js";
+import { registerExperimentsRoutes } from "./routes/experiments.js";
 import { ProjectScopeError } from "./utils/project-scope.js";
 import { registerUsersRoutes } from "./routes/users.js";
+import { shutdownPortalCopilotClientPool } from "./copilot-client-pool.js";
+import { ExperimentDispatcher } from "./experiment-dispatcher.js";
 import type { RouteContext } from "./route-context.js";
 import type {
   CriteriaDocument,
@@ -87,6 +91,10 @@ const mongoCollection = process.env.MONGO_COLLECTION || "requests";
 const storageAccountName = process.env.AZURE_STORAGE_ACCOUNT_NAME || "";
 const storageConnectionString = process.env.STORAGE_CONNECTION_STRING || process.env.AZURE_STORAGE_CONNECTION_STRING || "";
 const queueReport = process.env.AZURE_STORAGE_QUEUE_REPORT || "report-queue";
+const experimentPollIntervalMs = parseInt(
+  process.env.EXPERIMENT_POLL_INTERVAL_MS || "30000",
+  10,
+);
 const strictAgentCapabilities =
   process.env.SCOPE_STRICT_AGENT_CAPABILITIES?.toLowerCase() === "true";
 const port = parseInt(process.env.PORT || "3000", 10);
@@ -96,6 +104,9 @@ let mongoClient: MongoClient;
 let db: Db;
 let collection: Collection<RequestDocument>;
 let runsCol: Collection<RunHistoryDocument>;
+let experimentCollection: Collection<ExperimentDocument>;
+let experimentExecutionsCollection: Collection<ExperimentExecutionHistoryDocument>;
+let experimentChunksCollection: Collection;
 let projectCollection: Collection<ProjectDocument>;
 let projectStore: ProjectStore;
 let criteriaCollection: Collection<CriteriaDocument>;
@@ -109,6 +120,7 @@ let taskPromptCollection: Collection<TaskPromptDocument>;
 let taskPromptStore: TaskPromptStore;
 let featureFlagCollection: Collection<FeatureFlagDocument>;
 let reportTemplateCollection: Collection<ReportTemplateDocument>;
+let reportTemplateVersionCollection: Collection<import("shared").ReportTemplateVersionDocument>;
 let skillCollection: Collection<SkillDocument>;
 let extensionCollection: Collection<ExtensionDocument>;
 let skillRevisionCollection: Collection<SkillRevisionDocument>;
@@ -135,6 +147,16 @@ let resourceResolver: ResourceResolver;
 let blobStorage: BlobStorage;
 let heartbeatStore: HeartbeatStore;
 let reportQueueClient: QueueClient;
+let experimentDispatcher: ExperimentDispatcher;
+
+function createQueueClient(queueName: string): QueueClient {
+  if (storageConnectionString) {
+    return new QueueClient(storageConnectionString, queueName);
+  }
+  const credential = new DefaultAzureCredential();
+  const queueUrl = `https://${storageAccountName}.queue.core.windows.net`;
+  return new QueueClient(`${queueUrl}/${queueName}`, credential);
+}
 
 async function initializeClients(): Promise<void> {
   // Connect to MongoDB
@@ -143,6 +165,10 @@ async function initializeClients(): Promise<void> {
   db = mongoClient.db(mongoDatabase);
   collection = db.collection<RequestDocument>(mongoCollection);
   runsCol = db.collection<RunHistoryDocument>("runs");
+  experimentCollection = db.collection<ExperimentDocument>("experiments");
+  experimentExecutionsCollection =
+    db.collection<ExperimentExecutionHistoryDocument>("experiment-executions");
+  experimentChunksCollection = db.collection("experiment-chunks");
   projectCollection = db.collection<ProjectDocument>("projects");
   projectStore = new ProjectStore(projectCollection);
   criteriaCollection = db.collection<CriteriaDocument>("criteria");
@@ -159,6 +185,7 @@ async function initializeClients(): Promise<void> {
   taskPromptStore = new TaskPromptStore(taskPromptCollection, blobStorage);
   featureFlagCollection = db.collection<FeatureFlagDocument>("feature-flags");
   reportTemplateCollection = db.collection<ReportTemplateDocument>("report-templates");
+  reportTemplateVersionCollection = db.collection("report-template-versions");
   skillCollection = db.collection<SkillDocument>("skills");
   extensionCollection = db.collection<ExtensionDocument>("extensions");
   skillRevisionCollection = db.collection<SkillRevisionDocument>("skill-revisions");
@@ -237,15 +264,7 @@ async function initializeClients(): Promise<void> {
 
   console.log(`Connected to MongoDB: ${mongoUri.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")}`);
 
-  // Coding-agent queues are initialized by the scheduler from registry version
-  // manifests. The API only owns the report-generation queue.
-  if (storageConnectionString) {
-    reportQueueClient = new QueueClient(storageConnectionString, queueReport);
-  } else {
-    const credential = new DefaultAzureCredential();
-    const queueUrl = `https://${storageAccountName}.queue.core.windows.net`;
-    reportQueueClient = new QueueClient(`${queueUrl}/${queueReport}`, credential);
-  }
+  reportQueueClient = createQueueClient(queueReport);
 
   await reportQueueClient.createIfNotExists();
   console.log(`Ensured queue exists: ${queueReport}`);
@@ -264,6 +283,16 @@ async function initializeClients(): Promise<void> {
     redisPort: parseInt(process.env.REDIS_PORT || "6300", 10),
     redisPassword: process.env.REDIS_PASSWORD || "",
   });
+
+  experimentDispatcher = new ExperimentDispatcher(
+    collection,
+    experimentCollection,
+    experimentExecutionsCollection,
+    experimentChunksCollection,
+    db,
+    createQueueClient,
+    experimentPollIntervalMs,
+  );
 }
 
 // --- OpenAPI documentation (lazy — Swagger UI mounted in main() after all routes register) ---
@@ -276,11 +305,15 @@ const routeCtx: RouteContext = {
   get db() { return db; },
   get requestCollection() { return collection; },
   get runsCollection() { return runsCol; },
+  get experimentCollection() { return experimentCollection; },
+  get experimentExecutionsCollection() { return experimentExecutionsCollection; },
+  get experimentChunksCollection() { return experimentChunksCollection; },
   get projectCollection() { return projectCollection; },
   get criteriaCollection() { return criteriaCollection; },
   get promptFeatureCollection() { return promptFeatureCollection; },
   get reportCollection() { return reportCollection; },
   get reportTemplateCollection() { return reportTemplateCollection; },
+  get reportTemplateVersionCollection() { return reportTemplateVersionCollection; },
   get agentCollection() { return agentCollection; },
   get modelCollection() { return modelCollection; },
   get mcpServerCollection() { return mcpServerCollection; },
@@ -337,6 +370,7 @@ app.use(createUserAccessMiddleware(() => userAccessResolver));
 registerSecretsRoutes(routeCtx);
 registerSystemRoutes(routeCtx);
 registerProjectsRoutes(routeCtx);
+registerExperimentsRoutes(routeCtx);
 registerRequestsRoutes(routeCtx);
 registerRequestsCancelRoutes(routeCtx);
 registerRequestsLogsRoutes(routeCtx);
@@ -379,6 +413,10 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 
 async function main(): Promise<void> {
   await initializeClients();
+  experimentDispatcher.start();
+  console.log(
+    `Experiment coordinator started (poll=${experimentPollIntervalMs}ms)`,
+  );
 
   // Mount OpenAPI docs (after all routes are registered)
   const openapiDocument = generateOpenAPIDocument();
@@ -400,6 +438,8 @@ async function main(): Promise<void> {
         process.exitCode = 1;
       }
       void Promise.all([
+        experimentDispatcher.stop(),
+        shutdownPortalCopilotClientPool(),
         userAccessCache?.close(),
         heartbeatStore.close(),
         mongoClient.close(),
@@ -422,6 +462,9 @@ export interface TestDependencies {
   db?: Db;
   collection?: Collection<RequestDocument>;
   runsCollection?: Collection<RunHistoryDocument>;
+  experimentCollection?: Collection<ExperimentDocument>;
+  experimentExecutionsCollection?: Collection<ExperimentExecutionHistoryDocument>;
+  experimentChunksCollection?: Collection;
   criteriaCollection?: Collection<CriteriaDocument>;
   promptFeatureCollection?: Collection<PromptFeatureDocument>;
   reportCollection?: Collection<ReportDocument>;
@@ -440,6 +483,7 @@ export interface TestDependencies {
   taskPromptStore?: TaskPromptStore;
   featureFlagCollection?: Collection<FeatureFlagDocument>;
   reportTemplateCollection?: Collection<ReportTemplateDocument>;
+  reportTemplateVersionCollection?: Collection<import("shared").ReportTemplateVersionDocument>;
   skillCollection?: Collection<SkillDocument>;
   skillRevisionCollection?: Collection<SkillRevisionDocument>;
   skillRevisionStore?: SkillRevisionStore;
@@ -463,6 +507,9 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.db) db = deps.db;
   if (deps.collection) collection = deps.collection;
   if (deps.runsCollection) runsCol = deps.runsCollection;
+  if (deps.experimentCollection) experimentCollection = deps.experimentCollection;
+  if (deps.experimentExecutionsCollection) experimentExecutionsCollection = deps.experimentExecutionsCollection;
+  if (deps.experimentChunksCollection) experimentChunksCollection = deps.experimentChunksCollection;
   if (deps.criteriaCollection) criteriaCollection = deps.criteriaCollection;
   if (deps.promptFeatureCollection) promptFeatureCollection = deps.promptFeatureCollection;
   if (deps.reportCollection) reportCollection = deps.reportCollection;
@@ -481,6 +528,7 @@ export function _injectTestDependencies(deps: TestDependencies): void {
   if (deps.taskPromptStore) taskPromptStore = deps.taskPromptStore;
   if (deps.featureFlagCollection) featureFlagCollection = deps.featureFlagCollection;
   if (deps.reportTemplateCollection) reportTemplateCollection = deps.reportTemplateCollection;
+  if (deps.reportTemplateVersionCollection) reportTemplateVersionCollection = deps.reportTemplateVersionCollection;
   if (deps.skillCollection) skillCollection = deps.skillCollection;
   if (deps.skillRevisionCollection) skillRevisionCollection = deps.skillRevisionCollection;
   if (deps.skillRevisionStore) skillRevisionStore = deps.skillRevisionStore;

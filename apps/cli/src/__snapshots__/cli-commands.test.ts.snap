@@ -133,8 +133,11 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--depends-on",
           "--gates",
           "--id",
+          "--kind",
           "--project",
           "--prompt",
+          "--subject",
+          "--taxonomy",
           "--url",
         ],
       },
@@ -187,8 +190,156 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--depends-on",
           "--gates",
           "--id",
+          "--kind",
           "--project",
           "--prompt",
+          "--subject",
+          "--taxonomy",
+          "--url",
+        ],
+      },
+    },
+  },
+  "experiment": {
+    "subcommands": {
+      "add": {
+        "options": [
+          "--project",
+          "--request-id",
+          "--revision",
+          "--url",
+        ],
+      },
+      "create": {
+        "options": [
+          "--agent-version",
+          "--agents-md",
+          "--codebase",
+          "--count",
+          "--criteria",
+          "--description",
+          "--empty",
+          "--extensions",
+          "--gates",
+          "--max-iterations",
+          "--mcp-servers",
+          "--message",
+          "--model",
+          "--name",
+          "--observations",
+          "--output",
+          "--persona",
+          "--preview",
+          "--profile",
+          "--profile-variations-file",
+          "--project",
+          "--reasoning-effort",
+          "--report-template",
+          "--request-id",
+          "--resource-param",
+          "--resources",
+          "--scenario",
+          "--skills",
+          "--traits",
+          "--url",
+          "--worker",
+        ],
+      },
+      "delete": {
+        "options": [
+          "--no-wait",
+          "--output",
+          "--project",
+          "--url",
+        ],
+      },
+      "executions": {
+        "options": [
+          "--cursor",
+          "--limit",
+          "--output",
+          "--project",
+          "--url",
+        ],
+      },
+      "get": {
+        "options": [
+          "--include-deleted",
+          "--output",
+          "--project",
+          "--url",
+        ],
+      },
+      "list": {
+        "options": [
+          "--cursor",
+          "--include-deleted",
+          "--limit",
+          "--output",
+          "--project",
+          "--url",
+        ],
+      },
+      "logs": {
+        "options": [
+          "--from-start",
+          "--project",
+          "--url",
+        ],
+      },
+      "remove": {
+        "options": [
+          "--project",
+          "--request-id",
+          "--revision",
+          "--url",
+        ],
+      },
+      "report-retry": {
+        "options": [
+          "--execution",
+          "--project",
+          "--template",
+          "--url",
+        ],
+      },
+      "report-templates": {
+        "options": [
+          "--project",
+          "--revision",
+          "--template",
+          "--url",
+        ],
+      },
+      "reports": {
+        "options": [
+          "--output",
+          "--project",
+          "--report",
+          "--structured",
+          "--template",
+          "--url",
+        ],
+      },
+      "restore": {
+        "options": [
+          "--no-wait",
+          "--output",
+          "--project",
+          "--url",
+        ],
+      },
+      "retry": {
+        "options": [
+          "--execution",
+          "--project",
+          "--url",
+        ],
+      },
+      "status": {
+        "options": [
+          "--output",
+          "--project",
           "--url",
         ],
       },
@@ -569,11 +720,14 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
         "options": [
           "--id",
           "--output",
+          "--structured",
           "--url",
         ],
       },
       "list": {
         "options": [
+          "--experiment",
+          "--experiment-execution",
           "--output",
           "--project",
           "--run",
@@ -594,10 +748,12 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "create": {
         "options": [
           "--description",
+          "--disabled",
           "--id",
           "--model",
           "--name",
           "--project",
+          "--subject",
           "--system-prompt-content",
           "--system-prompt-mode",
           "--timeout-ms",
@@ -632,8 +788,10 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       },
       "list": {
         "options": [
+          "--include-disabled",
           "--output",
           "--project",
+          "--subject",
           "--url",
         ],
       },
@@ -645,6 +803,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "update": {
         "options": [
           "--description",
+          "--enabled",
           "--id",
           "--model",
           "--name",
@@ -657,6 +816,15 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--trigger-type",
           "--url",
           "--user-prompt",
+        ],
+      },
+      "versions": {
+        "options": [
+          "--id",
+          "--output",
+          "--project",
+          "--url",
+          "--version",
         ],
       },
     },
@@ -758,11 +926,11 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
       "download-batch": {
         "options": [
           "--dir",
+          "--experiment-id",
           "--extract",
           "--ids",
           "--output",
           "--project",
-          "--submission-id",
           "--url",
         ],
       },
@@ -779,6 +947,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--created-after",
           "--created-before",
           "--criteria",
+          "--experiment-id",
           "--include-deleted",
           "--max-iterations",
           "--model",
@@ -792,7 +961,6 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--sort-by",
           "--sort-dir",
           "--status",
-          "--submission-id",
           "--task",
           "--turns",
           "--url",
@@ -835,6 +1003,7 @@ exports[`CLI command registration > full command tree matches snapshot 1`] = `
           "--message",
           "--model",
           "--no-stream",
+          "--observations",
           "--persona",
           "--profile",
           "--profile-variations-file",

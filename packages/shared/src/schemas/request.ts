@@ -86,6 +86,7 @@ export const ConversationTurnSchema = z
     passed: z.boolean(),
     timestamp: z.coerce.date(),
     criteriaResults: z.array(CriterionResultSchema).optional(),
+    observationResults: z.array(CriterionResultSchema).optional(),
     harUrl: z.string().optional(),
     videoUrls: z.array(z.string()).optional(),
     tokenUsage: TokenUsageSchema.optional(),
@@ -136,11 +137,18 @@ export const CreateRequestInputSchema = z
     /** Resources to provision for this run, in setup order. Each entry is a
      *  bare spec (slug, `slug@rN`, or revision id) or an object carrying
      *  parameter values. Resolved at submit time and shared by every variation
-     *  in a grouped submission, so each profile gets an identical environment. */
+     *  in an experiment, so each profile gets an identical environment. */
     resources: z.array(ResourceBindingSpecSchema).optional(),
     extensions: z.array(z.string()).optional(),
     profileId: z.string().optional(),
-    profileVariations: z.array(z.string()).optional(),
+    profileVariations: z
+      .array(z.string())
+      .optional()
+      .openapi({
+        deprecated: true,
+        description:
+          "Deprecated for composition. Use POST /api/v1/experiments and its requests array.",
+      }),
     priority: z.number().int().optional(),
     // Raw AGENTS.md body to deliver to the worker workspace. When present, the
     // API findOrCreates an `agents.md`-typed prompt and stores its id on the
@@ -151,6 +159,8 @@ export const CreateRequestInputSchema = z
     // [i, j] = merge of two parents.
     agentsMdParentIds: z.array(z.string()).optional(),
     gates: z.array(GateConfigSchema).optional(),
+    observations: z.array(z.string()).optional(),
+    reportTemplateIds: z.array(z.string().min(1)).optional(),
   })
   .openapi("CreateRequestInput");
 
@@ -167,6 +177,14 @@ export const RequestResponseSchema = z
     personaInstructions: z.string().optional(),
     persona: PersonaSchema.optional(),
     deletedAt: z.coerce.date().optional(),
+    deletionProvenance: z
+      .object({
+        kind: z.literal("experiment"),
+        experimentId: z.string().min(1),
+        operationId: z.string().min(1),
+      })
+      .strict()
+      .optional(),
     taskPromptId: z.string().optional(),
     agentsMdPromptId: z.string().optional(),
     agentsMdParentIds: z.array(z.string()).optional(),
@@ -179,8 +197,16 @@ export const RequestResponseSchema = z
     profileId: z.string().optional(),
     profileVersionId: z.string().optional(),
     submissionId: z.string().optional(),
+    experimentId: z.string().optional(),
+    experimentExpectedRequestCount: z.number().int().min(0).optional(),
+    experimentRequestIndex: z.number().int().min(0).optional(),
+    experimentInitialRunId: z.string().optional(),
+    experimentFinalizedAt: z.coerce.date().optional(),
+    experimentMembershipOperationId: z.string().optional(),
+    experimentMembershipRevisionId: z.string().optional(),
     priority: z.number().int().default(0),
     gates: z.array(GateConfigSchema).optional(),
+    observations: z.array(z.string()).optional(),
     gateSummaries: z.array(GateRunSummarySchema).optional(),
     // Per-attempt state lives in the run sub-document.
     run: z
@@ -247,6 +273,12 @@ export const RunStateSchema = z
     rawChatFormat: z.string().optional(),
     pausedAt: z.coerce.date().optional(),
     resumedAt: z.coerce.date().optional(),
+    /** Whole-run observation results (one per selected subject:"run" observation
+     *  criterion), evaluated once against the merged trajectory. Per-iteration
+     *  observation results live on each turn's `observationResults`. #1156. */
+    observationResults: z.array(CriterionResultSchema).optional(),
+    /** Canonical run-scoped report-template IDs frozen for this exact attempt. */
+    reportTemplateIds: z.array(z.string().min(1)).optional(),
   })
   .openapi("RunState");
 
@@ -277,6 +309,7 @@ export const ListRequestsQuerySchema = z
     taskPromptId: z.string().optional(),
     criteria: z.string().optional(),
     submissionId: z.string().optional(),
+    experimentId: z.string().optional(),
     profileId: MultiValueParam,
     status: MultiValueParam,
     outcome: MultiValueParam,
@@ -286,7 +319,9 @@ export const ListRequestsQuerySchema = z
     agentVersion: MultiValueParam,
     // Free-text, case-insensitive search across run id, scenario task, model, worker.
     search: z.string().optional(),
-    groupBy: z.enum(["task", "submissionId", "profile"]).optional(),
+    groupBy: z
+      .enum(["task", "submissionId", "experimentId", "profile"])
+      .optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
     after: z.string().optional(),
     before: z.string().optional(),
@@ -360,6 +395,7 @@ export const GroupUniformValuesSchema = z
     extensions: z.array(z.string()).optional(),
     status: RequestStatusSchema.optional(),
     submissionId: z.string().optional(),
+    experimentId: z.string().optional(),
     task: z.string().optional(),
   })
   .openapi("GroupUniformValues");

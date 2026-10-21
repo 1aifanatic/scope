@@ -70,6 +70,63 @@ export const NON_GATE_PROMPT_TYPES = ["agents.md"] as const;
 export const PROMPT_TYPES = [...GATES, ...NON_GATE_PROMPT_TYPES] as const;
 
 /**
+ * Discriminator for what a criterion is used for. `"gate"` (default) gates the
+ * coding-agent session via the DAG; `"observation"` is record-only — it produces
+ * a per-iteration boolean + evidence and never feeds back, never pass/fails a
+ * gate, and never enters the gate DAG. See issue #1156.
+ */
+export type CriterionKind = "gate" | "observation";
+
+/** The hard-coded set of criterion kinds. */
+export const CRITERION_KINDS = ["gate", "observation"] as const;
+
+/** True when `value` is a valid criterion kind. */
+export function isCriterionKind(value: unknown): value is CriterionKind {
+  return typeof value === "string" && (CRITERION_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Granularity at which an observation criterion is evaluated. `"iteration"`
+ * evaluates each `run.turns[]` in isolation (result → `turn.observationResults`);
+ * `"run"` evaluates **once** over the whole run — the final snapshot + the merged
+ * trajectory across all iterations (result → run-level `run.observationResults`).
+ *
+ * Honored **only** by the observation/taxonomy pipeline. Gate criteria are always
+ * `"iteration"` (the API rejects `"run"` for gates). The kind-dependent default
+ * (observation ⇒ `"run"`, gate/legacy ⇒ `"iteration"`) is applied in the criteria
+ * store, not as a flat schema default. See issue #1156.
+ */
+export type CriterionSubject = "run" | "iteration";
+
+/** The hard-coded set of criterion subjects. */
+export const CRITERION_SUBJECTS = ["run", "iteration"] as const;
+
+/** True when `value` is a valid criterion subject. */
+export function isCriterionSubject(value: unknown): value is CriterionSubject {
+  return typeof value === "string" && (CRITERION_SUBJECTS as readonly string[]).includes(value);
+}
+
+/**
+ * Hard-coded taxonomy elements for observation criteria — the three quality
+ * dimensions from the R&A Readout design. Gates (select/build/test/run/deploy)
+ * are excluded as they live in the criterion `gates` field. Namespaced ids keep
+ * a future first-class taxonomy a clean migration. See issue #1156.
+ */
+export const TAXONOMY_ELEMENT_IDS = [
+  "dimension:idiomatic-use",
+  "dimension:dependency-currency",
+  "dimension:configuration-correctness",
+] as const;
+
+/** A single taxonomy element id. */
+export type TaxonomyElementId = (typeof TAXONOMY_ELEMENT_IDS)[number];
+
+/** True when `value` is a valid taxonomy element id. */
+export function isTaxonomyElementId(value: unknown): value is TaxonomyElementId {
+  return typeof value === "string" && (TAXONOMY_ELEMENT_IDS as readonly string[]).includes(value);
+}
+
+/**
  * A prompt's type discriminator. Either a gate id — the prompt that drives that
  * gate, where `select` is the request's task prompt — or a non-gate kind such
  * as `agents.md` (an AGENTS.md instruction file delivered into the agent
@@ -146,6 +203,10 @@ export interface ConversationTurn {
   passed: boolean;
   timestamp: Date;
   criteriaResults?: CriterionResult[];  // Per-criterion breakdown from DAG evaluation
+  /** Per-iteration observation results (kind:"observation" criteria), recorded
+   *  by the pp-taxonomy post-processor. Same shape as criteriaResults but never
+   *  gates the agent. Empty/absent when no observations were selected. #1156. */
+  observationResults?: CriterionResult[];
   harUrl?: string;         // Blob storage URL to the HAR file for this turn
   videoUrls?: string[];    // Blob storage URLs to session recording videos for this turn
   tokenUsage?: TokenUsage;  // LLM token usage for this iteration
@@ -284,6 +345,11 @@ export interface RequestDocument {
   personaInstructions?: string;  // Resolved persona prose (from traits.yaml)
   persona?: Persona;             // Original persona object for traceability
   deletedAt?: Date;              // Soft-delete timestamp (null/absent = active)
+  deletionProvenance?: {
+    kind: "experiment";
+    experimentId: string;
+    operationId: string;
+  };
   taskPromptId?: string;            // Materialized UUIDv5 of scenario.task (FK → TaskPromptDocument._id)
   /**
   * FK → TaskPromptDocument._id of an AGENTS.md-typed prompt to deliver into
@@ -323,7 +389,24 @@ export interface RequestDocument {
   agentVersion?: string;          // Agent software version prefix (e.g. "copilot-0.0.415") — FK → AgentVersion.agentVersion
   profileId?: string;             // FK → ProfileDocument._id (the profile lineage)
   profileVersionId?: string;      // FK → ProfileVersionDocument._id (exact version used)
-  submissionId?: string;           // FK → SubmissionDocument._id
+  submissionId?: string;          // Legacy request-batch correlation identifier (not a resource FK)
+  experimentId?: string;           // FK → ExperimentDocument._id
+  /** Expected native request count for interrupted ExperimentDocument finalization.
+   * Historical/imported requests omit it and remain view-only if their parent
+   * experiment document is missing. */
+  experimentExpectedRequestCount?: number;
+  /** Stable position within the experiment's immutable request vector. */
+  experimentRequestIndex?: number;
+  /** Run id minted for the experiment's first execution. It remains unchanged
+   * across request retries so recovery can rebuild the exact initial vector. */
+  experimentInitialRunId?: string;
+  /** Set after the parent ExperimentDocument has been idempotently finalized.
+   * Missing on interrupted native writes so the scheduler can recover them. */
+  experimentFinalizedAt?: Date;
+  /** Recoverable membership mutation that owns this denormalized assignment. */
+  experimentMembershipOperationId?: string;
+  /** Experiment revision that most recently claimed this request. */
+  experimentMembershipRevisionId?: string;
   /** Scheduling priority. Higher = processed first. Default: 0. */
   priority: number;
   /**
@@ -333,6 +416,13 @@ export interface RequestDocument {
    * docs/design/gates.md §4.3). Gates run in `GATE_ORDER`.
    */
   gates?: GateConfig[];
+  /**
+   * Observation-criteria ids (kind:"observation") selected at submit. The
+   * pp-taxonomy post-processor evaluates exactly this set after the run
+   * completes and writes per-turn `observationResults`. Empty/absent = none.
+   * See issue #1156.
+   */
+  observations?: string[];
   /**
    * Per-gate execution summary, populated as the run progresses. Derived
    * from `run.turns` but stored explicitly for cheap querying.
@@ -368,6 +458,14 @@ export interface QueueMessagePayload {
    * When omitted, treat as targeting the current `request.run`.
    */
   runId?: string;
+}
+
+/** Status of a single post-process handler for a specific run. */
+export interface HandlerRunStatus {
+  status: "queued" | "processing" | "done" | "failed";
+  version?: number;
+  updatedAt?: Date;
+  error?: string;
 }
 
 /**
@@ -452,12 +550,24 @@ export interface RunState {
   aiCallCount?: number;
   rawChatUrl?: string;
   rawChatFormat?: string;
-  /** Version of the post-processor that last successfully processed this run.
-   *  Used by the scheduler to detect runs needing (re-)processing when the
-   *  post-processor version advances. */
+  /** Canonical run-scoped report-template IDs frozen for this exact attempt. */
+  reportTemplateIds?: string[];
+  /** Per-handler post-processing status. Keys are handler IDs (e.g. "pp-atif"). */
+  handlerStatus?: Record<string, HandlerRunStatus>;
+  /** Whole-run observation results — one entry per selected `subject:"run"`
+   *  observation criterion, evaluated once against the final snapshot + the
+   *  merged trajectory across all iterations by pp-taxonomy. Per-iteration
+   *  (`subject:"iteration"`) observations live on `turn.observationResults`
+   *  instead. Empty/absent when no run-subject observations were selected. #1156. */
+  observationResults?: CriterionResult[];
+  /** Set once the scheduler has triggered report generation for this run after
+   *  the handler DAG drained (every handler reached a terminal state). Acts as
+   *  an exactly-once guard so the scheduler POSTs /api/v1/reports/trigger at
+   *  most once per run, even under notify/poll races. */
+  reportsTriggeredAt?: Date;
+  /** @deprecated Use handlerStatus["pp-atif"].version instead. Kept for migration compatibility. */
   postProcessorVersion?: number;
-  /** Lifecycle status of post-processing for this run. Prevents duplicate
-   *  enqueuing and tracks processing progress. */
+  /** @deprecated Use handlerStatus["pp-atif"].status instead. Kept for migration compatibility. */
   postProcessorStatus?: "queued" | "processing" | "done" | "failed";
 }
 
@@ -469,6 +579,41 @@ export interface RunHistoryDocument extends RunState {
   requestId: string;                        // FK → RequestDocument._id
   projectId: string;                        // FK → ProjectDocument._id (denormalized from request)
 }
+
+/** A post-process handler registered in the `services` collection. */
+export interface HandlerServiceDocument {
+  _id: string;
+  type: "post-process-handler";
+  version: number;
+  queue: string;
+  selector: string;
+  autoBackfill: boolean;
+  dependsOn: string[];
+}
+
+export interface ExperimentHandlerServiceDocument {
+  _id: string;
+  type: "experiment-handler";
+  version: number;
+  queue: string;
+  selector: string;
+  autoBackfill: boolean;
+  dependsOn: string[];
+  dependencyMode: "all-runs";
+}
+
+export type ServiceHandlerDocument =
+  | HandlerServiceDocument
+  | ExperimentHandlerServiceDocument;
+
+export interface ExperimentQueueMessagePayload {
+  type: string;
+  experimentId: string;
+  experimentExecutionId: string;
+}
+
+export const LEGACY_REQUEST_COMPOSITION_DEPRECATION_ID =
+  "legacy-request-composition" as const;
 
 /**
  * Field names whose values move from `RequestDocument` (top-level, legacy
@@ -603,7 +748,12 @@ export interface QueueProcessorConfig extends BaseQueueProcessorConfig {
 
 // --- Runs grouping types (shared between API and portal) ---
 
-export type GroupByKey = "none" | "task" | "submissionId" | "profile";
+export type GroupByKey =
+  | "none"
+  | "task"
+  | "submissionId"
+  | "experimentId"
+  | "profile";
 
 export interface AggregateStats {
   min: number;
@@ -622,6 +772,7 @@ export interface GroupUniformValues {
   extensions?: string[];
   status?: "pending" | "processing" | "done";
   submissionId?: string;
+  experimentId?: string;
   task?: string;
 }
 
@@ -653,6 +804,19 @@ export interface CriteriaConfig {
    *  (applies only to NEW criteria; legacy rows are backfilled to ["select"]
    *  by migration 018). See docs/design/gates.md §4.2. */
   gates?: GateId[];
+  /** Whether this criterion gates the agent or is a record-only observation.
+   *  Default "gate" applied at store/schema layer; legacy rows backfilled to
+   *  "gate" by migration. See issue #1156. */
+  kind?: CriterionKind;
+  /** Design-time classification under a hard-coded taxonomy element. Only set
+   *  on observation criteria. Static — never stored per run. See issue #1156. */
+  taxonomyElementId?: TaxonomyElementId;
+  /** Evaluation granularity for observation criteria. `"iteration"` (per-turn,
+   *  → `turn.observationResults`) or `"run"` (once over the whole run, →
+   *  `run.observationResults`). Honored only for observations; gates are always
+   *  `"iteration"`. Kind-dependent default applied in the store (observation ⇒
+   *  "run", gate/legacy ⇒ "iteration"). See issue #1156. */
+  subject?: CriterionSubject;
 }
 
 // Per-criterion result from judge evaluation
@@ -705,19 +869,41 @@ export interface Reporter {
   agentVersion: string;  // @github/copilot-sdk package version
 }
 
+export interface StructuredReportArtifact {
+  schemaId: string;
+  schemaVersion: string;
+  contentType: "application/json";
+  url: string;
+}
+
 /** Report document stored in MongoDB */
 export interface ReportDocument {
   _id: string;           // UUID
-  requestId: string;     // FK → RequestDocument._id
+  requestId?: string;    // FK → RequestDocument._id for run reports
+  runId?: string;        // Exact immutable run attempt for run reports
+  experimentId?: string; // FK → ExperimentDocument._id for Experiment reports
+  experimentExecutionId?: string; // Exact immutable Experiment execution
   projectId: string;     // FK → ProjectDocument._id (denormalized from request)
   templateId?: string;   // FK → ReportTemplateDocument.id (slug of template that generated this report)
+  templateVersionId?: string; // Exact immutable template version used
+  templateVersion?: number;
+  templateContentFingerprint?: string;
+  reportVersion?: number; // Append-only version within one logical exact-execution/template report
+  supersedesReportId?: string;
   reporter?: Reporter;   // Set by the worker when it picks up the job
   content?: string;      // Generated markdown report
+  structuredArtifact?: StructuredReportArtifact;
   status: ReportStatus;
   error?: string;
   insightReferences?: InsightReference[];  // Insights discovered/referenced by this report
   createdAt: Date;
   updatedAt?: Date;
+  deletedAt?: Date;
+  deletionProvenance?: {
+    kind: "experiment";
+    experimentId: string;
+    operationId: string;
+  };
 }
 
 /** Queue message payload for report generation */
@@ -752,12 +938,21 @@ export interface PromptFeatureTrigger {
   match?: "any" | "all";  // Default: "any"
 }
 
+/** Automatic Experiment trigger linked to exact run-template assignments. */
+export interface RunReportTemplatesTrigger {
+  type: "run-report-templates";
+  reportTemplateIds: string[];
+}
+
 /** Discriminated union of all report trigger types */
 export type ReportTrigger =
   | AlwaysTrigger
   | CriteriaTrigger
   | TaskPromptTrigger
-  | PromptFeatureTrigger;
+  | PromptFeatureTrigger
+  | RunReportTemplatesTrigger;
+
+export type ReportTemplateSubject = "run" | "experiment";
 
 /** System prompt customization for a report template */
 export interface ReportTemplateSystemPrompt {
@@ -770,6 +965,7 @@ export interface ReportTemplateDocument {
   _id: string;                           // Auto-generated UUID
   projectId: string;                     // FK → ProjectDocument._id (immutable scope)
   id: string;                            // Human-readable slug (e.g. "default", "failure-analysis")
+  subject: ReportTemplateSubject;
   name: string;                          // Display name
   description?: string;
   userPrompt: string;                    // REQUIRED — the instruction sent to the agent
@@ -777,9 +973,28 @@ export interface ReportTemplateDocument {
   trigger?: ReportTrigger;               // OPTIONAL — omit = always trigger
   model?: string;                        // OPTIONAL — LLM model override (falls back to REPORT_MODEL env var)
   timeoutMs?: number;                    // OPTIONAL — session timeout override in ms (falls back to SESSION_TIMEOUT_MS env var)
+  enabled: boolean;
+  currentVersionId: string;
+  currentVersion: number;
+  contentFingerprint: string;
   createdAt: Date;
   updatedAt?: Date;
   deletedAt?: Date;                      // Soft-delete timestamp
+}
+
+/** Immutable prompt/config revision for a stable report-template identity. */
+export interface ReportTemplateVersionDocument {
+  _id: string;
+  projectId: string;
+  templateId: string;
+  version: number;
+  contentFingerprint: string;
+  userPrompt: string;
+  systemPrompt?: ReportTemplateSystemPrompt;
+  trigger?: ReportTrigger;
+  model?: string;
+  timeoutMs?: number;
+  createdAt: Date;
 }
 
 // --- Insights System types ---

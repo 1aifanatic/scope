@@ -6,23 +6,31 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { PORTAL_AI_REGISTRATION_GUIDANCE } from "@/lib/portal-ai-copy";
 import { CriteriaPicker } from "@/components/CriteriaPicker";
 import { HelpTooltip } from "@/components/HelpTooltip";
 import { gatesSatisfyInvariant, GATE_METADATA, orderGateIds } from "@/lib/gates";
+import { TAXONOMY_ELEMENT_METADATA } from "@/types";
 import { Loader2, Check, RefreshCw } from "lucide-react";
 import type { CriteriaWizardState } from "@/hooks/useCriteriaWizard";
 
 interface CriteriaWizardStep2Props {
   wizard: CriteriaWizardState;
+  observationMode?: boolean;
 }
 
-export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
+export function CriteriaWizardStep2({
+  wizard,
+  observationMode = false,
+}: CriteriaWizardStep2Props) {
   const {
     behavior,
     id,
     dependsOn,
     setDependsOn,
     gates,
+    kind = "gate",
+    taxonomyElementId,
     prompt,
     setPrompt,
     aiGenerated,
@@ -44,20 +52,31 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
       <div className="space-y-3">
         <div>
           <p className="text-sm font-semibold">
-            Criteria for: {behavior}
+            {observationMode ? "Observation" : "Criteria"} for: {behavior}
           </p>
           <p className="text-xs text-muted-foreground uppercase tracking-wide mt-1">
-            Behavior to track
+            {observationMode ? "Behavior observed" : "Behavior to track"}
           </p>
         </div>
         <div>
           <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
-            Criteria ID
+            {observationMode ? "Observation ID" : "Criteria ID"}
           </p>
           <Badge variant="secondary" className="font-mono">
             {id}
           </Badge>
         </div>
+        {!observationMode && (
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+              Kind
+            </p>
+            <Badge variant={kind === "observation" ? "outline" : "secondary"}>
+              {kind === "observation" ? "Observation" : "Gate"}
+            </Badge>
+          </div>
+        )}
+        {kind === "gate" ? (
         <div>
           <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
             Gate compatibility
@@ -74,11 +93,20 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
             )}
           </div>
         </div>
+        ) : (
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
+              Observation dimension
+            </p>
+            <Badge variant="outline">
+              {taxonomyElementId ? TAXONOMY_ELEMENT_METADATA[taxonomyElementId].label : "Unclassified"}
+            </Badge>
+          </div>
+        )}
       </div>
 
       <Separator />
 
-      {/* Parents */}
       <div className="space-y-2">
         <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
           Parents
@@ -87,9 +115,15 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
           selected={dependsOn}
           onChange={setDependsOn}
           aiSuggested={suggestedParents}
-          filter={(c) => gatesSatisfyInvariant(c.gates, gates) && !acceptedChildren.includes(c.id)}
+          kind={observationMode ? "observation" : undefined}
+          entityLabel={observationMode ? "observations" : undefined}
+          filter={(c) =>
+            (c.kind ?? "gate") === kind &&
+            (kind === "observation" || gatesSatisfyInvariant(c.gates, gates)) &&
+            !acceptedChildren.includes(c.id)
+          }
         />
-        {!hasCompatibleParentCandidates && (
+        {!observationMode && !hasCompatibleParentCandidates && (
           <div className="flex items-center gap-1 text-xs font-medium text-amber-600" role="note">
             <span>No gate-compatible criteria available as parents.</span>
             <HelpTooltip
@@ -100,8 +134,9 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
           </div>
         )}
         <p className="text-xs text-muted-foreground">
-          Criteria that must pass before this one is evaluated. Only criteria compatible with
-          every selected gate are shown. List only direct parents —
+          {observationMode
+            ? "Observations that must be evaluated before this one. Only observations are shown."
+            : `Criteria that must pass before this one is evaluated. ${kind === "gate" ? "Only criteria compatible with every selected gate are shown." : "Only observation criteria are shown."}`} List only direct parents —
           the judge automatically evaluates all transitive ancestors in topological order,
           so you don't need to repeat a parent's own dependencies here.
         </p>
@@ -109,7 +144,6 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
 
       <Separator />
 
-      {/* Children */}
       <div className="space-y-2">
         <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
           Children
@@ -118,9 +152,15 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
           selected={acceptedChildren}
           onChange={setAcceptedChildren}
           aiSuggested={suggestedChildren}
-          filter={(c) => gatesSatisfyInvariant(gates, c.gates) && !dependsOn.includes(c.id)}
+          kind={observationMode ? "observation" : undefined}
+          entityLabel={observationMode ? "observations" : undefined}
+          filter={(c) =>
+            (c.kind ?? "gate") === kind &&
+            (kind === "observation" || gatesSatisfyInvariant(gates, c.gates)) &&
+            !dependsOn.includes(c.id)
+          }
         />
-        {!hasCompatibleChildCandidates && (
+        {!observationMode && !hasCompatibleChildCandidates && (
           <div className="flex items-center gap-1 text-xs font-medium text-amber-600" role="note">
             <span>No gate-compatible criteria available as children.</span>
             <HelpTooltip
@@ -131,21 +171,28 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
           </div>
         )}
         <p className="text-xs text-muted-foreground">
-          These criteria will be updated to depend on <span className="font-mono">{id || "this criterion"}</span> after creation.
-          Only criteria compatible with a subset of the selected gates are shown.
+          {observationMode ? "These observations" : "These criteria"} will be updated to depend on{" "}
+          <span className="font-mono">
+            {id || (observationMode ? "this observation" : "this criterion")}
+          </span>{" "}
+          after creation.
+          {observationMode
+            ? " Only observations are shown."
+            : kind === "gate"
+              ? " Only criteria compatible with a subset of the selected gates are shown."
+              : " Only observation criteria are shown."}
         </p>
       </div>
 
       <Separator />
 
-      {/* Criteria Prompt */}
       <div className="space-y-2">
         <Label className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
           {generateMutation.isPending
-            ? "Generating criteria prompt…"
+            ? `Generating ${observationMode ? "observation" : "criteria"} prompt…`
             : aiGenerated
-              ? "Criteria Prompt (AI Generated)"
-              : "Criteria Prompt"}
+              ? `${observationMode ? "Observation" : "Criteria"} Prompt (AI Generated)`
+              : `${observationMode ? "Observation" : "Criteria"} Prompt`}
         </Label>
 
         {generateMutation.isPending ? (
@@ -161,7 +208,11 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
               if (aiGenerated) setAiGenerated(false);
             }}
             rows={6}
-            placeholder="Write your evaluation prompt here. Describe what the judge should check for in the codebase…"
+            placeholder={
+              observationMode
+                ? "Write the observation prompt here. Describe what evidence the judge should record…"
+                : "Write your evaluation prompt here. Describe what the judge should check for in the codebase…"
+            }
             className="font-mono text-sm"
           />
         )}
@@ -170,7 +221,7 @@ export function CriteriaWizardStep2({ wizard }: CriteriaWizardStep2Props) {
           <p className="text-xs text-amber-600">
             AI generation failed — {generateMutation.error instanceof Error
               ? generateMutation.error.message
-              : "register an Azure AI Foundry or GitHub Models key at /secrets/keys/new, or write your prompt manually"}
+              : PORTAL_AI_REGISTRATION_GUIDANCE}
           </p>
         )}
 

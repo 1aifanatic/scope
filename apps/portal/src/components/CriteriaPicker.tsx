@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, X, Sparkles } from "lucide-react";
 import { GATE_METADATA, isCriterionCompatibleWithGate, type GateId } from "@/lib/gates";
-import type { CriteriaDocument } from "@/types";
+import type { CriteriaDocument, CriterionKind } from "@/types";
 
 interface CriteriaPickerProps {
   selected: string[];
@@ -23,6 +23,10 @@ interface CriteriaPickerProps {
   trailingAction?: ReactNode;
   /** Restrict suggestions to criteria compatible with this gate */
   gate?: GateId;
+  /** Restrict suggestions by criterion kind. Missing kind is treated as "gate". */
+  kind?: CriterionKind;
+  /** User-facing noun used by specialized creation flows. */
+  entityLabel?: "criteria" | "observations";
   /**
    * Additional predicate restricting which criteria are offered as suggestions.
    * Used to enforce gate-compatibility invariants (e.g. only show criteria that
@@ -31,7 +35,17 @@ interface CriteriaPickerProps {
   filter?: (criterion: CriteriaDocument) => boolean;
 }
 
-export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, trailingAction, gate, filter }: CriteriaPickerProps) {
+export function CriteriaPicker({
+  selected,
+  onChange,
+  aiSuggested = [],
+  inputId,
+  trailingAction,
+  gate,
+  kind,
+  entityLabel,
+  filter,
+}: CriteriaPickerProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -49,6 +63,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, 
   const suggestions = useMemo(() => {
     const available = criteria.filter((c) =>
       !selected.includes(c.id) &&
+      (!kind || (c.kind ?? "gate") === kind) &&
       (!gate || isCriterionCompatibleWithGate(c.gates, gate)) &&
       (!filter || filter(c))
     );
@@ -57,7 +72,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, 
     return available.filter(
       (c) => c.id.toLowerCase().includes(q) || c.prompt.toLowerCase().includes(q),
     );
-  }, [criteria, selected, query, gate, filter]);
+  }, [criteria, selected, query, gate, kind, filter]);
 
   // Reset highlight when suggestions change
   useEffect(() => {
@@ -212,7 +227,15 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, 
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={handleKeyDown}
-          placeholder={gate ? `Search ${GATE_METADATA[gate].label} criteria…` : "Type to search criteria…"}
+          placeholder={
+            entityLabel
+              ? `Search ${entityLabel}…`
+              : kind === "observation"
+                ? "Search observation criteria…"
+                : gate
+                  ? `Search ${GATE_METADATA[gate].label} criteria…`
+                  : "Type to search criteria…"
+          }
           className="h-9 font-mono text-sm"
         />
         {trailingAction}
@@ -246,7 +269,7 @@ export function CriteriaPicker({ selected, onChange, aiSuggested = [], inputId, 
 
       {open && query && suggestions.length === 0 && createPortal(
         <div ref={dropdownRef} data-criteria-picker-portal style={dropdownStyle} className="rounded-md border bg-popover shadow-md p-3 text-sm text-muted-foreground text-center">
-          No matching criteria
+          No matching {entityLabel ?? "criteria"}
         </div>,
         document.body,
       )}
