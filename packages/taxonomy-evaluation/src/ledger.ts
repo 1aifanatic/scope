@@ -66,7 +66,13 @@ export class CallLedger {
     });
   }
   async finish(id: number, ok: boolean, latency_ms: number, usage: Record<string, unknown> | null, model_attempts: number | null): Promise<void> {
-    await this.locked(async () => { await this.append({ type: "finished", id, ok, latency_ms, usage, model_attempts }); });
+    await this.locked(async () => {
+      const events = await this.events();
+      if (!events.some(e => e.type === "reserved" && e.id === id) || events.some(e => e.type === "finished" && e.id === id)) {
+        throw new Error("Ledger completion must reference one unfinished reservation");
+      }
+      await this.append(eventSchema.parse({ type: "finished", id, ok, latency_ms, usage, model_attempts }));
+    });
   }
   async summary() {
     const events = await this.events();

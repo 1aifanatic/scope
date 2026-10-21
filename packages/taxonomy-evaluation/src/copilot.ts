@@ -9,7 +9,7 @@ import type { AxAIService, AxAIServiceOptions, AxChatRequest, AxChatResponse, Ax
 import type { ElementId, TaxonomyInput } from "./contracts.js";
 import type { PromptExecutor } from "./engine.js";
 import { CallLedger } from "./ledger.js";
-import { createSkippedProgram, promptEvidence, OBSERVATION_CONTRACT } from "./prompt.js";
+import { createSkippedProgram, promptEvidence } from "./prompt.js";
 import { executeSdkCall } from "./sdk-call.js";
 
 export { CallLedger } from "./ledger.js";
@@ -32,12 +32,17 @@ export async function openCopilotTransport(
     mode: "empty", gitHubToken: token, useLoggedInUser: false, baseDirectory: dir, workingDirectory: dir,
     logLevel: "error", env: { PATH: process.env.PATH, HOME: dir, TMPDIR: process.env.TMPDIR },
   });
+  async function cleanup() {
+    const errors: unknown[] = [];
+    try { await client.stop(); } catch (error) { errors.push(error); }
+    try { await rm(dir, { recursive: true, force: true }); } catch (error) { errors.push(error); }
+    if (errors.length) throw new AggregateError(errors, "Copilot SDK client cleanup failed");
+  }
   try {
     await client.start();
     if (!(await client.getAuthStatus()).isAuthenticated) throw new Error("Copilot SDK token authentication failed");
   } catch (error) {
-    await client.stop();
-    await rm(dir, { recursive: true, force: true });
+    try { await cleanup(); } catch (cleanupError) { throw new AggregateError([error, cleanupError], "Copilot SDK initialization and cleanup failed"); }
     throw error;
   }
   let failed = false;
@@ -58,15 +63,16 @@ export async function openCopilotTransport(
       try { return await executeSdkCall(session, ledger, model, purpose, user, () => client.deleteSession(session.sessionId), signal); }
       catch (error) { failed = true; throw error; }
     },
-    async close() { await client.stop(); await rm(dir, { recursive: true, force: true }); },
+    close: cleanup,
   };
 }
 
 /** Ax's public provider interface; every student/teacher request uses this SDK transport. */
-export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, systemPrefix = OBSERVATION_CONTRACT): AxAIService {
+export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, systemPrefix = ""): AxAIService {
   let options: AxAIServiceOptions = { stream: false, debug: false };
   const samples: number[] = [];
   let errors = 0;
+  let samplingWarning = false;
   return {
     getId: () => "taxonome-copilot-sdk",
     getName: () => "GitHub Copilot SDK",
@@ -93,6 +99,10 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
     speak: async () => { throw new Error("Speech is not supported"); },
     async chat(request: Readonly<AxChatRequest>, callOptions?: Readonly<AxAIServiceOptions>): Promise<AxChatResponse> {
       if (callOptions?.stream) throw new Error("Streaming is not supported by the one-call SDK adapter");
+      if (request.modelConfig && Object.keys(request.modelConfig).length && !samplingWarning) {
+        samplingWarning = true;
+        process.stderr.write("taxonome: SDK-managed sampling; Ax temperature/token-limit hints cannot be applied by this SDK. Actual settings remain fixed low reasoning; see artifact transport settings.\n");
+      }
       if (request.functions?.length || request.chatPrompt.some(m => m.role === "function" || (m.role === "assistant" && m.functionCalls?.length))) {
         throw new Error("Taxonome's SDK provider does not allow tools");
       }
@@ -107,7 +117,14 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
       const started = Date.now();
       try {
         const result = await transport.complete([systemPrefix, ...system].filter(Boolean).join("\n\n"), messages.join("\n\n"), callOptions?.abortSignal ?? options.abortSignal);
-        return { results: [{ index: 0, content: result.content, finishReason: "stop" }] };
+        if (typeof result.usage?.model === "string" && result.usage.model !== model) throw new Error("SDK usage reports an unexpected model; no silent model substitution is allowed");
+        const input = result.usage?.inputTokens, output = result.usage?.outputTokens;
+        return {
+          results: [{ index: 0, content: result.content, finishReason: "stop" }],
+          ...(typeof input === "number" && typeof output === "number" ? {
+            modelUsage: { ai: "GitHub Copilot SDK", model, tokens: { promptTokens: input, completionTokens: output, totalTokens: input + output } },
+          } : {}),
+        };
       } catch (error) { errors++; throw error; }
       finally { samples.push(Date.now() - started); }
     },

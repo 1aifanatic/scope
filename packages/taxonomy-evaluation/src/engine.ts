@@ -40,6 +40,13 @@ export async function evaluateElement(
   let result: Observation;
   const applicable = input.context.applicability?.[definition.id];
   if (applicable === false) result = { state: "inapplicable", reason: "Element is explicitly outside this scenario's assessment." };
+  else if (definition.id === "beh-skipped-invocation" && input.context.completeness !== "complete") {
+    result = { state: "indeterminate", reason: "Skipped Invocation requires complete post-discovery run evidence to establish non-use." };
+  }
+  else if (definition.id === "beh-skipped-invocation" && !input.context.scenario?.task &&
+    !input.atif.steps.some(s => s.source === "user" && s.message.trim())) {
+    result = { state: "indeterminate", reason: "Task context is missing; discovery relevance cannot be assessed." };
+  }
   else {
     try {
       if (definition.kind === "deterministic") result = validateResult(definition.id, definition.evaluate(input), input);
@@ -48,7 +55,10 @@ export async function evaluateElement(
         result = validateResult(definition.id, await executor.evaluate(definition.id, input), input);
       }
     } catch (error) {
-      result = { state: "error", error: error instanceof Error ? error.message : String(error) };
+      const message = error instanceof AggregateError
+        ? `${error.message}: ${error.errors.map(e => e instanceof Error ? e.message : String(e)).join("; ")}`
+        : error instanceof Error ? error.message : String(error);
+      result = { state: "error", error: message };
     }
   }
   return { schema_version: SCHEMA_VERSION, element_id: definition.id, implementation: definition.kind, result };

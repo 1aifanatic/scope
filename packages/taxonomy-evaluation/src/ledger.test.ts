@@ -17,6 +17,8 @@ describe("durable all-in budget", () => {
     await first.initialize();
     for (let i = 1; i <= 500; i++) expect(await new CallLedger(path).reserve("mock", i % 2 ? "student" : "teacher")).toBe(i);
     await first.finish(1, false, 1, null, null);
+    await expect(first.finish(1, false, 1, null, null)).rejects.toThrow("unfinished reservation");
+    await expect(first.initialize(501)).rejects.toThrow();
     const restarted = new CallLedger(path);
     await restarted.initialize();
     await expect(restarted.reserve("mock", "retry/replay")).rejects.toThrow("500/500");

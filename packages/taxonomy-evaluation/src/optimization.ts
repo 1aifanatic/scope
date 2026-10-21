@@ -26,7 +26,10 @@ export const artifactSchema = z.object({
   model: z.string().min(1), contract_hash: z.string(), corpus_hash: z.string(),
   train_ids: z.array(z.string()), validation_ids: z.array(z.string()),
   settings: z.object({ maxMetricCalls: z.number(), seed: z.number(), bootstrap: z.boolean() }).strict(),
+  optimizer_options: z.record(z.unknown()).optional(),
+  transport_settings: z.object({ reasoning_effort: z.literal("low"), sampling: z.literal("sdk-managed"), ax_sampling_hints_applied: z.literal(false) }).strict().optional(),
   optimized: serializedSchema,
+  metric_trace: z.array(z.object({ case_id: z.string(), score: z.number(), errors: z.array(z.string()), prediction: z.unknown() }).strict()),
 }).strict();
 export type OptimizationArtifact = z.infer<typeof artifactSchema>;
 export function restoreArtifact(value: unknown, model: string): OptimizationArtifact {
@@ -41,28 +44,47 @@ export async function optimizeSkipped(
   const selected = cases.filter(c => c.elements.includes("beh-skipped-invocation"));
   const train = selected.filter(c => c.split === "train"), validation = selected.filter(c => c.split === "validation");
   if (!train.length || !validation.length) throw new Error("Optimization requires disjoint train and validation cases");
-  const lookup = new Map(selected.map(c => [promptEvidence(c.input), c]));
+  const lookup = new Map([...train, ...validation].map(c => [promptEvidence(c.input), c]));
+  for (const row of train) if (validation.some(v => v.family === row.family || v.originating_run === row.originating_run)) throw new Error("Train/validation family or originating-run leakage");
+  const trace: OptimizationArtifact["metric_trace"] = [];
   const example = (c: EvaluationCase) => {
     const expected = gold[c.id]?.["beh-skipped-invocation"];
     if (!expected) throw new Error(`Missing gold for ${c.id}`);
-    // Gold stays in the metric lookup, never in the program input.
-    return { evidence: promptEvidence(c.input) };
+    let observation: unknown;
+    if (expected.state === "completed" && expected.observed) {
+      observation = {
+        state: "completed", observed: true,
+        occurrences: expected.occurrences?.map(o => ({
+          source: c.input.context.sources.find(s => s.id === o.source_id),
+          extension_point: o.extension_point_contains, discovery_turn: o.discovery_turn,
+        })),
+      };
+    } else if (expected.state === "completed") observation = { state: "completed", observed: false };
+    else observation = { state: expected.state, reason: expected.state === "indeterminate" ? "Run evidence is incomplete or its completeness is unknown." : "Explicitly excluded assessment." };
+    return { evidence: promptEvidence(c.input), observation: skippedResultSchema.parse(observation) };
   };
   const program = createSkippedProgram();
+  const optimizerOptions = {
+    maxMetricCalls, maxIterations: 2, earlyStoppingPatience: 2, skipPerfectScore: false,
+    bootstrap: { maxRounds: 1, maxExamples: train.length, maxDemos: 2, batchSize: 1, dynamicTemperature: false, adaptiveBatching: false },
+    seed: 42, verbose: false,
+  };
   const optimized = await optimize(program, train.map(example), ({ prediction, example: raw }) => {
     const ex = z.object({ evidence: z.string() }).passthrough().parse(raw);
     const row = lookup.get(ex.evidence);
     if (!row) throw new Error("Optimizer attempted to score an unregistered case");
+    let errors: string[];
     try {
       const p = z.object({ observation: skippedResultSchema }).passthrough().parse(prediction);
       const result = validateResult("beh-skipped-invocation", p.observation, row.input);
-      return assertObservation(result, gold[row.id]["beh-skipped-invocation"]!).length ? 0 : 1;
-    } catch { return 0; }
+      errors = assertObservation(result, gold[row.id]["beh-skipped-invocation"]!);
+    } catch (error) { errors = [error instanceof Error ? error.message : String(error)]; }
+    const score = errors.length ? 0 : 1;
+    trace.push({ case_id: row.id, score, errors, prediction });
+    return score;
   }, {
-    studentAI, teacherAI, validationExamples: validation.map(example),
-    maxMetricCalls, maxIterations: 2, earlyStoppingPatience: 2, skipPerfectScore: false,
-    bootstrap: { maxRounds: 1, maxExamples: train.length, maxDemos: 2, batchSize: 1, dynamicTemperature: false, adaptiveBatching: false },
-    seed: 42, verbose: false, logger: () => {}, optimizerLogger: () => {},
+    studentAI, teacherAI, validationExamples: validation.map(c => ({ evidence: promptEvidence(c.input) })),
+    ...optimizerOptions, logger: () => {}, optimizerLogger: () => {},
   });
   if (!optimized.optimizedProgram) throw new Error("Ax did not return a serializable optimized program");
   return {
@@ -70,6 +92,9 @@ export async function optimizeSkipped(
     model, contract_hash: contractHash(), corpus_hash: hash({ train, validation, gold: Object.fromEntries([...train, ...validation].map(c => [c.id, gold[c.id]])) }),
     train_ids: train.map(c => c.id), validation_ids: validation.map(c => c.id),
     settings: { maxMetricCalls, seed: 42, bootstrap: true },
+    optimizer_options: optimizerOptions,
+    transport_settings: { reasoning_effort: "low", sampling: "sdk-managed", ax_sampling_hints_applied: false },
     optimized: axSerializeOptimizedProgram(optimized.optimizedProgram),
+    metric_trace: trace,
   };
 }

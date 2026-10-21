@@ -29,4 +29,20 @@ describe("static prompt family composition and curated contract (offline, not mo
     const trainingFamilies = new Set(cases.filter(c => c.split === "train").map(c => c.family));
     expect(cases.filter(c => c.split === "heldout").some(c => trainingFamilies.has(c.family))).toBe(false);
   });
+  it("keeps identifiers opaque and renaming does not alter evidence/gold or the contract", async () => {
+    const rows = await loadCases(fixture("inputs.jsonl"));
+    for (const row of rows) expect(row.input.atif.session_id).toMatch(/^traj-\d+$/);
+    const input = structuredClone(rows[0].input);
+    const original = structuredClone(input);
+    input.atif.session_id = "z-identifier";
+    if (input.context.run_id) input.context.run_id = "r-identifier";
+    const output = await standaloneTargets["taxonome-skipped-invocation/default"].run(input, {
+      complete: async (_system, user) => {
+        expect(user).toContain("z-identifier"); expect(user).not.toContain(original.atif.session_id);
+        expect(user).toContain(original.atif.steps[1].message);
+        return { content: `Observation: ${JSON.stringify({ state: "completed", observed: true, occurrences: [{ source: input.context.sources[0], extension_point: "storage-skill", discovery_turn: 2 }] })}` };
+      }, close: async () => {},
+    }, "mock");
+    expect(output).toMatchObject({ state: "completed", observed: true });
+  });
 });

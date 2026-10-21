@@ -8,6 +8,8 @@ import { executeSdkCall } from "./sdk-call.js";
 import { loadCases } from "./cases.js";
 import { fileURLToPath } from "node:url";
 import { OBSERVATION_CONTRACT, SKIPPED_INSTRUCTIONS } from "./prompt.js";
+import { createSkippedProgram } from "./prompt.js";
+import { evaluate } from "./engine.js";
 
 function fixture() {
   const session: Pick<CopilotSession, "on" | "sendAndWait" | "abort" | "disconnect" | "sessionId"> = {
@@ -30,6 +32,7 @@ describe("Ax custom SDK provider contract (offline)", () => {
     expect(complete).toHaveBeenCalledTimes(1);
     const [system, user] = complete.mock.calls[0];
     expect(system.startsWith(OBSERVATION_CONTRACT)).toBe(true);
+    expect(system.split(OBSERVATION_CONTRACT)).toHaveLength(2);
     expect(system).toContain(SKIPPED_INSTRUCTIONS);
     expect(user).toContain(input.atif.session_id);
     expect(user).not.toContain("expected");
@@ -41,6 +44,24 @@ describe("Ax custom SDK provider contract (offline)", () => {
     const input = (await loadCases(fileURLToPath(new URL("../fixtures/inputs.jsonl", import.meta.url))))[0].input;
     await expect(skippedExecutor(ai).evaluate("beh-skipped-invocation", input)).rejects.toThrow();
     expect(complete).toHaveBeenCalledTimes(1);
+  });
+  it("enforces one call even when Ax BootstrapFewShot supplies a retry override", async () => {
+    const complete = vi.fn(async () => ({ content: "malformed output" }));
+    const ai = copilotAI({ complete, close: async () => {} });
+    await expect(createSkippedProgram().forward(ai, { evidence: "{}" }, { maxRetries: 1, maxSteps: 2 })).rejects.toThrow();
+    expect(complete).toHaveBeenCalledTimes(1);
+  });
+  it("enforces authoritative preconditions without making a model assertion or erasing explicit Timeout", async () => {
+    const row = (await loadCases(fileURLToPath(new URL("../fixtures/final-inputs.jsonl", import.meta.url)))).find(c => c.id === "final-partial-mixed")!;
+    const executor = { evaluate: vi.fn(async () => ({ state: "completed", observed: false })) };
+    const [skipped, timeout] = await evaluate(row.input, row.elements, executor);
+    expect(skipped.result.state).toBe("indeterminate");
+    expect(timeout.result).toMatchObject({ state: "completed", observed: true });
+    expect(executor.evaluate).not.toHaveBeenCalled();
+    const excluded = structuredClone(row.input);
+    excluded.context.applicability = { "beh-skipped-invocation": false };
+    expect((await evaluate(excluded, ["beh-skipped-invocation"], executor))[0].result.state).toBe("inapplicable");
+    expect(executor.evaluate).not.toHaveBeenCalled();
   });
   it("forwards cancellation and rejects unsupported tools/streaming", async () => {
     const complete = vi.fn(async (_system: string, _user: string, _signal?: AbortSignal) => ({ content: "ok" }));

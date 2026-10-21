@@ -69,7 +69,12 @@ reconciliation, not automatic deletion. This is a per-experiment safety guard,
 not an authorization system against a user intentionally choosing another
 file. Keep the experiment ledger outside the checkout.
 
-Ax repair retries are zero and each program evaluation has one step. SDK
+Ax repair retries are zero and each program evaluation has one step. A thin
+typed `AxGen` subclass enforces these limits even when Ax BootstrapFewShot
+supplies its own retry override. A custom Ax prompt template preserves the
+immutable schema/trust wrapper for student and bootstrap-teacher execution;
+GEPA reflection uses its own typed program, without observation formatting.
+SDK
 error hooks request abort/no retries; model-failure events trigger abort.
 Unexpected multiple model-attempt events are charged and stop that transport;
 reconcile them before another experiment. SDK internals do not expose a
@@ -190,8 +195,11 @@ Both avoid invented occurrence metadata.
 
 ## Cases, optimization, and readout
 
-`fixtures/inputs.jsonl` and `gold.json` are separate: expected outputs never
-reach the program. Each row records a family, originating run, split, and
+`fixtures/inputs.jsonl` and `gold.json` are separate: ordinary evaluation never
+receives its expected output. Ax bootstrap requires labeled training examples
+as supervised seed demonstrations, excluding the current query. The task
+program strips output fields from its actual forward input. Validation and
+heldout labels stay exclusively in the metric. Each row records a family, originating run, split, and
 provenance. Loading rejects family/run leakage between train, validation and
 heldout. Synthetic edges are clearly labeled. The reviewed haiku ATIF
 reconstruction preserves the exact user/agent messages and token metrics
@@ -213,6 +221,19 @@ statistics, is retained and restored with `applyOptimization`. Contract/model
 hash mismatches fail instead of replaying against a changed baseline.
 `maxMetricCalls` is not an all-in limit; student, teacher, retry, and replay
 submissions all share the durable ledger.
+
+Known Skipped Invocation preconditions are enforced before inference:
+explicitly excluded assessments are inapplicable, and incomplete/unknown run
+completeness or missing task evidence is indeterminate. These preflights make
+zero calls and are reported separately from eligible prompt predictions.
+Every eligible prompt evaluation makes exactly one SDK request. Explicit
+Timeout positives are not blocked by the complete-run requirement.
+
+The SDK cannot apply Ax's temperature/token-limit hints. The adapter emits a
+diagnostic and records `sdk-managed` sampling/low reasoning rather than
+claiming these hints were applied. Ax optimization statistics are retained
+verbatim, but their zero/default resource estimates are not actual usage;
+the SDK event ledger is the usage authority.
 
 `readout <results.json> --markdown preview.md` consumes an explicit array of
 `{context:{run_id,scenario,profile},results:[...]}`. It produces deterministic

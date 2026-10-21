@@ -33,6 +33,7 @@ export async function validateCoverage(
   packageRoot = PACKAGE_ROOT,
 ): Promise<{
   qualityTargets: number;
+  standaloneTargets: number;
 }> {
   const manifest = YAML.parse(
     await readFile(resolve(packageRoot, "evaluation-manifest.yaml"), "utf8"),
@@ -49,6 +50,7 @@ export async function validateCoverage(
 
   return {
     qualityTargets: adapterQuality.length,
+    standaloneTargets: listStandaloneTargets().length,
   };
 }
 
@@ -57,9 +59,9 @@ const isMain =
   resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
   validateCoverage()
-    .then(({ qualityTargets }) => {
+    .then(({ qualityTargets, standaloneTargets }) => {
       console.log(
-        `Validated ${qualityTargets} quality targets`,
+        `Validated ${qualityTargets} quality targets and ${standaloneTargets} standalone SDK target`,
       );
     })
     .catch((error: unknown) => {

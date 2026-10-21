@@ -22,4 +22,14 @@ describe("standalone CLI process contract", () => {
     const command = exec(process.execPath, ["--conditions=source", "--import", "tsx", "apps/taxonome/src/index.ts", "run", "missing.json", "--context", "missing.json"], { cwd: root });
     await expect(command).rejects.toMatchObject({ code: 1, stdout: "", stderr: expect.stringContaining("taxonome:") });
   });
+  it("does not initialize SDK/auth/ledger for a known incomplete-run precondition", async () => {
+    const { stdout, stderr } = await exec(process.execPath, [
+      "--conditions=source", "--import", "tsx", "apps/taxonome/src/index.ts",
+      "run", "packages/taxonomy-evaluation/fixtures/timeout.atif.json",
+      "--context", "packages/taxonomy-evaluation/fixtures/partial-context.json", "--elements", "beh-skipped-invocation",
+    ], { cwd: root, env: { ...process.env, COPILOT_GITHUB_TOKEN: "", GH_TOKEN: "", GITHUB_TOKEN: "" } });
+    const output: unknown = JSON.parse(stdout);
+    expect(output).toMatchObject({ results: [{ result: { state: "indeterminate" } }], metadata: { initialized: false, budget: null } });
+    expect(stderr).toBe("");
+  });
 });

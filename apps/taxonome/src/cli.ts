@@ -3,21 +3,54 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { Command } from "commander";
-import { contextSchema, elementIdSchema, evaluate, loadJson, buildReadout, readoutMarkdown, prepareInput, type ElementId, type Evaluation } from "taxonomy-evaluation";
+import { contextSchema, elementIdSchema, evaluate, loadJson, buildReadout, readoutMarkdown, prepareInput, type ElementId, type Evaluation, type PromptExecutor } from "taxonomy-evaluation";
 import { checkCase, loadCases, loadGold } from "taxonomy-evaluation/cases";
 
 interface ModelOptions { model: string; ledger?: string; artifact?: string }
 function ids(value: string): ElementId[] { return value.split(",").map(id => elementIdSchema.parse(id)); }
 async function runtime(options: ModelOptions, selected: readonly ElementId[], purpose: string) {
-  if (!selected.includes("beh-skipped-invocation")) return { executor: undefined, close: async () => {} };
-  if (!options.ledger) throw new Error("--ledger is required for all live calls, including eval/optimization/replay");
-  const { CallLedger, openCopilotTransport, copilotAI, skippedExecutor } = await import("taxonomy-evaluation/copilot");
-  const ledger = new CallLedger(options.ledger);
-  await ledger.initialize();
-  const { restoreArtifact } = await import("taxonomy-evaluation/optimization");
-  const artifact = options.artifact ? restoreArtifact(await loadJson(options.artifact), options.model) : undefined;
-  const transport = await openCopilotTransport(ledger, options.model, purpose);
-  return { executor: skippedExecutor(copilotAI(transport, options.model), artifact?.optimized), close: () => transport.close() };
+  if (!selected.includes("beh-skipped-invocation")) {
+    if (options.artifact) throw new Error("--artifact requires a prompt element selection");
+    return { executor: undefined, close: async () => {}, metadata: async () => ({ strategy: "deterministic" }) };
+  }
+  let active: { executor: PromptExecutor; close(): Promise<void>; contract_hash: string; artifact_hash: string | null } | undefined;
+  let starting: Promise<NonNullable<typeof active>> | undefined;
+  async function ledger() {
+    if (!options.ledger) throw new Error("--ledger is required for all live calls, including eval/optimization/replay");
+    const { CallLedger } = await import("taxonomy-evaluation/ledger");
+    const budget = new CallLedger(options.ledger); await budget.initialize(); return budget;
+  }
+  async function start() {
+    const budget = await ledger();
+    const { openCopilotTransport, copilotAI, skippedExecutor } = await import("taxonomy-evaluation/copilot");
+    const { restoreArtifact, contractHash, hash } = await import("taxonomy-evaluation/optimization");
+    const artifact = options.artifact ? restoreArtifact(await loadJson(options.artifact), options.model) : undefined;
+    const transport = await openCopilotTransport(budget, options.model, purpose);
+    try {
+      active = {
+        executor: skippedExecutor(copilotAI(transport, options.model), artifact?.optimized),
+        close: () => transport.close(), contract_hash: contractHash(), artifact_hash: artifact ? hash(artifact) : null,
+      };
+    } catch (error) {
+      try { await transport.close(); } catch (cleanupError) { throw new AggregateError([error, cleanupError], "Prompt initialization and cleanup failed"); }
+      throw error;
+    }
+    return active;
+  }
+  return {
+    executor: { evaluate: async (id, input) => {
+      starting ??= start();
+      return (await starting).executor.evaluate(id, input);
+    } } satisfies PromptExecutor,
+    close: async () => { await active?.close(); },
+    metadata: async () => {
+      const snapshot = options.ledger ? await (await ledger()).summary() : undefined;
+      return {
+        model: options.model, initialized: !!active, contract_hash: active?.contract_hash, artifact_hash: active?.artifact_hash,
+        budget: snapshot ? { cap: snapshot.cap, used: snapshot.used, remaining: snapshot.remaining } : null,
+      };
+    },
+  };
 }
 function modelOptions(command: Command) {
   return command.option("--model <id>", "Copilot model (pinned for comparisons)", "gpt-5.6-sol-fast")
@@ -35,7 +68,7 @@ export function createCli(): Command {
       const selected = ids(options.elements), rt = await runtime(options, selected, "run");
       try {
         const results = await evaluate(input, selected, rt.executor);
-        emit({ context: input.context, results });
+        emit({ context: input.context, results, metadata: await rt.metadata() });
         if (results.some(r => r.result.state === "error")) process.exitCode = 1;
       } finally { await rt.close(); }
     });
@@ -53,18 +86,27 @@ export function createCli(): Command {
       if (!Number.isInteger(count) || count < 1 || count > 10) throw new Error("--samples must be 1..10");
       const override = options.elements ? ids(options.elements) : undefined;
       const rt = await runtime(options, override ?? [...new Set(cases.flatMap(c => c.elements))], "eval");
-      const rows: { case_id: string; split: string; sample: number; results: Evaluation[]; errors: string[]; latency_ms: number; context: unknown }[] = [];
+      const before = await rt.metadata();
+      const rows: { case_id: string; split: string; sample: number; results: Evaluation[]; errors: string[]; latency_ms: number; context: unknown; prompt_predictions: unknown[] }[] = [];
       try {
         for (let sample = 0; sample < count; sample++) for (const row of cases) {
           const selected = override ?? row.elements;
           for (const id of selected) if (!gold[row.id]?.[id]) throw new Error(`Missing gold for ${row.id}/${id}`);
           const started = Date.now();
-          const results = await evaluate(row.input, selected, rt.executor), errors = checkCase(row, results, gold, selected);
-          rows.push({ case_id: row.id, split: row.split, sample, results, errors, latency_ms: Date.now() - started, context: row.input.context });
+          const prompt_predictions: unknown[] = [];
+          const executor = rt.executor;
+          const captured: PromptExecutor | undefined = executor ? {
+            evaluate: async (id, input) => {
+              const prediction = await executor.evaluate(id, input);
+              prompt_predictions.push({ element_id: id, prediction }); return prediction;
+            },
+          } : undefined;
+          const results = await evaluate(row.input, selected, captured), errors = checkCase(row, results, gold, selected);
+          rows.push({ case_id: row.id, split: row.split, sample, results, errors, latency_ms: Date.now() - started, context: row.input.context, prompt_predictions });
           process.stderr.write(`${row.id} sample=${sample}: ${errors.length ? "FAIL" : "PASS"}\n`);
         }
         const passed = rows.filter(r => !r.errors.length).length;
-        emit({ passed, total: rows.length, pass_rate: passed / rows.length, rows });
+        emit({ passed, total: rows.length, pass_rate: passed / rows.length, metadata: { before, after: await rt.metadata() }, rows });
         if (passed !== rows.length) process.exitCode = 1;
       } finally { await rt.close(); }
     });

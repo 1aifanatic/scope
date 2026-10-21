@@ -137,6 +137,12 @@ export function prepareInput(value: unknown): TaxonomyInput {
 
 export function validateResult(id: ElementId, value: unknown, input: TaxonomyInput): Observation {
   const result = (id === "beh-timeout" ? timeoutResultSchema : skippedResultSchema).parse(value);
+  if (result.state === "inapplicable" && input.context.applicability?.[id] !== false) {
+    throw new Error("Inapplicable requires explicit assessment exclusion, not an irrelevant reference or unmet reference-reading condition");
+  }
+  if (id === "beh-skipped-invocation" && result.state === "completed" && input.context.completeness !== "complete") {
+    throw new Error("Skipped Invocation cannot assert non-use or absence from incomplete run evidence");
+  }
   if (result.state !== "completed" || !result.observed) return result;
   const unique = new Set<string>();
   for (const occurrence of result.occurrences) {

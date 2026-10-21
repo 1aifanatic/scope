@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { evaluate, evaluateElement, prepareInput, type TaxonomyInput } from "./index.js";
 import { assertObservation, checkCase, loadCases, loadGold, type Expectation } from "./cases.js";
+vi.mock("@github/copilot-sdk", () => { throw new Error("Deterministic execution must not load the SDK"); });
+vi.mock("@ax-llm/ax", () => { throw new Error("Deterministic execution must not load Ax"); });
 
 const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
 async function base(): Promise<TaxonomyInput> {
