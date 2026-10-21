@@ -180,6 +180,15 @@ Built on `mongo-migrate-ts`. Migrations are TypeScript files with `up()` and `do
 - Run: `pnpm migrate:up`, `pnpm migrate:down`, `pnpm migrate:status`
 - Framework docs: [docs/architecture/db-migrations.md](docs/architecture/db-migrations.md)
 
+## Code Readability
+
+- Write for humans: descriptive names, small focused functions, simple control flow, minimal abstraction.
+- Separate logical steps with blank lines; avoid dense one-liners and unrelated statements packed together.
+- Give every non-trivial function and logical code block a short comment explaining what it does; add intent, assumptions, invariants, or surprising reasons where useful.
+- Document function parameters, types, and their fields/properties with concise JSDoc/TSDoc explaining meaning, constraints, units, optionality, and defaults where relevant.
+- Do not narrate trivial or self-evident code. Document public contracts and failure behavior when names and types are insufficient.
+- Follow local conventions and formatters; review readability as well as correctness.
+
 ## Development
 
 ```bash
@@ -272,6 +281,7 @@ not open the PR against the fork unless the user explicitly asks you to.
 | [docs/architecture/app-design.md](docs/architecture/app-design.md) | Data models, API design, package dependency graph |
 | [docs/architecture/experiments.md](docs/architecture/experiments.md) | Canonical Experiment revisions, execution attempts, fixed-vector storage, publication, and client contract |
 | [docs/architecture/prompt-evaluations.md](docs/architecture/prompt-evaluations.md) | Static prompt quality, datasets, commands, and maintenance rules |
+| [docs/architecture/taxonome.md](docs/architecture/taxonome.md) | Standalone two-element Taxonome spike, ATIF/JSON API, evals and replay |
 | [docs/architecture/data-organization-projects.md](docs/architecture/data-organization-projects.md) | Projects (a single container) to isolate/group data within a cluster; composes with data-tags and auth-rbac |
 | [docs/architecture/auth-rbac.md](docs/architecture/auth-rbac.md) | Explicit-login IdP auth, Redis user-access cache, Portal handshake; deferred RBAC/internal-token roadmap |
 | [docs/architecture/vscode-web-worker.md](docs/architecture/vscode-web-worker.md) | XState chat machine, GitHub auth flow, ARIA snapshots |

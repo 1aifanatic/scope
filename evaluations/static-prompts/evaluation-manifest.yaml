@@ -22,3 +22,12 @@ qualityFamilies:
     variants: [default, append, override-control, experiment-readout]
   - id: experiment-report
     variants: [default, append, override-control]
+standaloneFamilies:
+  - id: taxonome-skipped-invocation
+    variants: [default]
+    transport: copilot-sdk
+    adapter: adapter/standalone.ts
+    cases: ../../packages/taxonomy-evaluation/fixtures/inputs.jsonl
+    assertions: ../../packages/taxonomy-evaluation/fixtures/gold.json
+    command: node apps/taxonome/dist/index.js eval
+    rubric: exact state/polarity, occurrence cardinality, grounded source/turn/call identities, schema validity
