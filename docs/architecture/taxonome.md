@@ -282,6 +282,15 @@ short explanation of what it does, while trivial/self-evident code remains
 unnarrated. The manifest records hashes for all 26 audited files, zero model
 calls, and unchanged prompt/contracts/fixtures/gold/outputs/ledger.
 
+Local commit `2cd0234d06d35595ed489aab6f5dddb9d601cd37` adds semantic
+JSDoc/TSDoc for function parameters, options, types, and fields/properties
+across the same spike surface. The comments cover meaning, constraints, units,
+optionality, and defaults without adding runtime schema descriptions. It also
+adds the root `CLAUDE.md` loader (`@AGENTS.md`) and keeps its only rule loader
+specific: all project instructions belong in `AGENTS.md`. The manifest records
+all 27 guidance/loader/TypeScript hashes, zero model calls, and unchanged frozen
+evidence.
+
 | Experiment | Case result | Actual SDK requests | Interpretation |
 |---|---:|---:|---|
 | Original neutral-ID baseline, 18 cases twice | 33/36 | 36 | Two relevance/inapplicability confusions and one false certainty with unknown completeness |

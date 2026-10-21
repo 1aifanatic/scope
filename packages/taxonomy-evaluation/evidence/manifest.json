@@ -284,7 +284,7 @@
     "readout.atif.json": "d5671045bd8b2a12914a5195742caa26dcf201ddf6e8717970cb27f0d35f5766",
     "timeout.atif.json": "4ab30ba785d9ad390d25d9246907c419ab204700bde35e35adb4d57fa0fcd110"
   },
-  "source_fingerprint_semantics": "final_review_source_hashes identify the source snapshot that produced the frozen model evidence at 7d217d727ac0adaa4cc4121767316fab62d09f3c; readability_revision records the behavior-preserving refactor; comment_coverage_revision records the later guidance and explanatory-comment audit. Frozen model artifacts/cases/ledger retain their original hashes.",
+  "source_fingerprint_semantics": "final_review_source_hashes identify the source snapshot that produced frozen model evidence; readability_revision records the behavior-preserving refactor; comment_coverage_revision records WHAT-comment coverage; tsdoc_revision records semantic parameter/type/field documentation plus the CLAUDE loader. Frozen artifacts/cases/ledger retain original hashes.",
   "readability_revision": {
     "guidance_commit": "05bd8b7e",
     "evidence_source_commit": "7d217d727ac0adaa4cc4121767316fab62d09f3c",
@@ -365,6 +365,62 @@
       "packages/taxonomy-evaluation/src/sdk-call.ts": "513205af021bfb909b50fe1b454bd32aa4cb4781d88ce687fd49b8c5f2808bc3",
       "packages/taxonomy-evaluation/src/timeout.test.ts": "79fc1f20143de57c9e1fe6b956987569805a3cb7ca34f890df7feda0711efcdb",
       "packages/taxonomy-evaluation/src/timeout.ts": "14ab1e0f29cc9ec23d3d7f019f8c48f38e880604e49c26337ad01a158bfde9db"
+    }
+  },
+  "tsdoc_revision": {
+    "commit": "2cd0234d06d35595ed489aab6f5dddb9d601cd37",
+    "parent_local_revision": "03704786b7fff7d3446e242dfdb8374a0d1e17ba",
+    "rule": "Document function parameters, types, and fields/properties with concise semantic JSDoc/TSDoc covering meaning, constraints, units, optionality, and defaults where relevant.",
+    "claude_loader": {
+      "path": "CLAUDE.md",
+      "imports": "@AGENTS.md",
+      "loader_only_rule": "Keep this file as a loader only. Never add instructions here; put them in AGENTS.md."
+    },
+    "audited_scope": "AGENTS.md, CLAUDE.md, and every Taxonome PR TypeScript runtime, CLI, test, and standalone-adapter file.",
+    "documentation_only": true,
+    "runtime_schema_descriptions_added": false,
+    "model_calls": 0,
+    "model_evidence_regenerated": false,
+    "preserved_prompt_text_contracts_fixtures_gold_outputs_and_ledger": true,
+    "validation": [
+      "taxonomy-evaluation build/typecheck",
+      "taxonome build/typecheck",
+      "61 focused offline tests",
+      "static prompt build/typecheck",
+      "32 static prompt tests",
+      "license headers",
+      "NOTICE check",
+      "23 frozen artifact/case hashes",
+      "private and committed 256-call ledger byte equality"
+    ],
+    "audited_file_hashes": {
+      "AGENTS.md": "bfa150ea31aa95809b6c5672940af083c1ecfc6d119cfb8b98832aaacb69b83b",
+      "CLAUDE.md": "2a678389000ba0588085126da15a84a585e5e4b7b97f9358f2682c14d74f7423",
+      "apps/taxonome/src/cli.test.ts": "8f1ebe82505a2f72c3f68777611ae68ef86010164059d6ebb2c6437bc5004d96",
+      "apps/taxonome/src/cli.ts": "83f5628720f8f43988c82aa2befa71533955c554f72ef1b6b79cebdfb8a836b6",
+      "apps/taxonome/src/index.ts": "769fc6214c396319992e84b3ad8cf48fca758b059766bb9ab17c2847d2bb1750",
+      "evaluations/static-prompts/adapter/standalone.ts": "edd9b944fe5791660ae5d2ac2f8a3eb38e305ed6105ec0e4325d21e295f3bfec",
+      "packages/taxonomy-evaluation/src/cases.test.ts": "e7288122933e236b40fc0b46fe9307bebd83c44003997dcab0dc681bbd7b63be",
+      "packages/taxonomy-evaluation/src/cases.ts": "980aa1e8f55087ab7aef70ae945d1de5c37f920826816d6c7fc83111c83a6b39",
+      "packages/taxonomy-evaluation/src/contracts.test.ts": "92fe2dc969463469c3021323c40044bb795141553e5e9ac97ab7baedf68a469a",
+      "packages/taxonomy-evaluation/src/contracts.ts": "5a1bcee6a12a3d92ac7a3aa1b94062666db4124fd354d4fba2c9355d831edde2",
+      "packages/taxonomy-evaluation/src/copilot.test.ts": "f4d4b249904a1c5981595c382f8f7c7350bb96b5e7cdf070918ab828bf753dc8",
+      "packages/taxonomy-evaluation/src/copilot.ts": "8b99a364d7656ce2e68d4d1aac64a54effbdf89ccbe9f7567b7429f4dd521cad",
+      "packages/taxonomy-evaluation/src/engine.ts": "d53a031c448665dc8a7a45ac9c209a5e4ebe1ea0d8c604a749a53a9ae52a8376",
+      "packages/taxonomy-evaluation/src/evidence.test.ts": "a534516595dbe529cf7a0840c1d51c101002d4de7eecf94bbee677fbbe40a762",
+      "packages/taxonomy-evaluation/src/index.ts": "cb0636019f04b6396f2ba28b7087aaa360cf98016f14bf5d2f52b3d087b5586e",
+      "packages/taxonomy-evaluation/src/input.test.ts": "5770253c8836ca4ffe2f452f82426847bd438f98fc0bd1b6f77d66dc07ebf18f",
+      "packages/taxonomy-evaluation/src/input.ts": "b9d8f3af840bb966736a4dc83bab0c9b3338150554e14a66958c66bf26e639d5",
+      "packages/taxonomy-evaluation/src/ledger.test.ts": "838621ce1d329a5012e4332634252d54e444c5fdc661cdcb533b3d5796c51276",
+      "packages/taxonomy-evaluation/src/ledger.ts": "9a3ffcb7d6ba45a32923c121f3aa335ef0bb70fbf0d288a5d46a91f0baa98fc5",
+      "packages/taxonomy-evaluation/src/optimization.ts": "9208b9bfc90895bf9be1e4e36ac9aa04bb9d6aa6a286b0eb30f2a1ddcd5de004",
+      "packages/taxonomy-evaluation/src/prompt.test.ts": "ac23c64052ad476f3533e22cb2d186ab2ef2456d38ca15c2ac622cceda64401a",
+      "packages/taxonomy-evaluation/src/prompt.ts": "de76c3a492ade6bb2e881aa00b08af2d766e491f1c9055b0952670d7c5760b26",
+      "packages/taxonomy-evaluation/src/readout.test.ts": "05ec946aa3083aabcaf8cb32b0b7b66fc1635755b89b64ab26e5502019d2827c",
+      "packages/taxonomy-evaluation/src/readout.ts": "e647ecd8da6d78eb7ac84670f594b87dd7c00d3c5369c9416d0878b490e698c1",
+      "packages/taxonomy-evaluation/src/sdk-call.ts": "54324eea90266e85b8ceb164e98b75e8edcdade259bb1675522ea413886251c7",
+      "packages/taxonomy-evaluation/src/timeout.test.ts": "5a855815e275eac99b2c42f263cf32c2ce9521b0f5228de0b3680d13965d3292",
+      "packages/taxonomy-evaluation/src/timeout.ts": "43545ebbba944cf1320ea71d1286317be4b47984f1e60b11de095047c9d3846b"
     }
   }
 }
