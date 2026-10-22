@@ -2,11 +2,23 @@
 // Licensed under the MIT License.
 
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import {
+  flattenDiagnosticMessageText,
+  ModuleKind,
+  ScriptTarget,
+  transpileModule,
+} from "typescript";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const exec = promisify(execFile);
@@ -50,24 +62,35 @@ function runCli(
 
 describe("YAML/archive/plugin CLI process contract", () => {
   beforeAll(async () => {
-    // Compile into a unique project-local directory so clean CI jobs and
-    // parallel test processes never depend on or race over ignored dist files.
+    // Emit trusted fixture JavaScript without depending on ignored package
+    // declarations. Normal package builds separately type-check the example.
     pluginOutputDirectory = await mkdtemp(join(
       example,
       ".taxonome-test-plugin-",
     ));
     pluginSpecifier = `./${basename(pluginOutputDirectory)}/handlers/index.js`;
-    await exec("pnpm", [
-      "exec",
-      "tsc",
-      "-p",
-      "tsconfig.json",
-      "--outDir",
-      pluginOutputDirectory,
-    ], {
-      cwd: example,
-      env: childEnvironment(),
+    const source = await readFile(
+      join(example, "src/handlers/index.ts"),
+      "utf8",
+    );
+    const compiled = transpileModule(source, {
+      fileName: "index.ts",
+      reportDiagnostics: true,
+      compilerOptions: {
+        module: ModuleKind.ESNext,
+        target: ScriptTarget.ES2022,
+      },
     });
+    if (compiled.diagnostics?.length) {
+      throw new Error(compiled.diagnostics
+        .map(diagnostic =>
+          flattenDiagnosticMessageText(diagnostic.messageText, "\n")
+        )
+        .join("; "));
+    }
+    const handlerDirectory = join(pluginOutputDirectory, "handlers");
+    await mkdir(handlerDirectory);
+    await writeFile(join(handlerDirectory, "index.js"), compiled.outputText);
   });
 
   afterAll(async () => {
