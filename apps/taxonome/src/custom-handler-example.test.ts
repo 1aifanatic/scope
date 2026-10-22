@@ -12,6 +12,7 @@ import {
   loadCasesV2,
   loadGoldV2,
 } from "taxonomy-evaluation/cases-v2";
+import { taxonomyPromptEvidence } from "../../../packages/taxonomy-evaluation/src/prompt.js";
 import {
   retryHandler,
   retryOutputSchema,
@@ -108,7 +109,7 @@ describe("custom retry handler output contract", () => {
     });
   });
 
-  it("loads a disjoint custom prompt corpus with separate reviewed gold", async () => {
+  it("keeps model-visible identities opaque in the production prompt projection", async () => {
     const handlers = new HandlerRegistry();
     handlers.register({ "acme/retry-loop-v1": retryHandler }, {
       name: "taxonome-custom-handler-example",
@@ -124,11 +125,11 @@ describe("custom retry handler output contract", () => {
       { handlers },
     );
     const cases = await loadCasesV2(
-      new URL("cases/prompt-cases.jsonl", root).pathname,
+      new URL("cases/neutral-prompt-cases.jsonl", root).pathname,
       taxonomy,
     );
     const gold = await loadGoldV2(
-      new URL("cases/prompt-gold.json", root).pathname,
+      new URL("cases/neutral-prompt-gold.json", root).pathname,
     );
 
     expect(taxonomy.elementById.get("acme-repeated-request")?.implementation)
@@ -145,10 +146,34 @@ describe("custom retry handler output contract", () => {
     expect(new Set(cases.map(row => row.originating_run)))
       .toHaveLength(cases.length);
     expect(Object.keys(gold)).toEqual(cases.map(row => row.id));
-    const transcript = cases
-      .flatMap(row => row.atif.steps.map(step => step.message))
-      .join("\n");
-    expect(transcript).not.toContain("acme-repeated-request");
-    expect(transcript).not.toContain("Repeated Information Request");
+
+    for (const row of cases) {
+      const projected = JSON.parse(taxonomyPromptEvidence({
+        atif: row.atif,
+        taxonomy,
+      })) as {
+        atif: typeof row.atif;
+      };
+      const serialized = JSON.stringify(projected);
+      expect(serialized).not.toContain(row.id);
+      expect(serialized).not.toContain(row.family);
+      expect(serialized).not.toContain(row.originating_run);
+
+      const run = projected.atif.extra?.scope?.run;
+      const identities = [
+        projected.atif.session_id,
+        run?.id,
+        run?.scenario_id,
+        run?.profile_id,
+      ];
+      for (const identity of identities) {
+        expect(identity).toMatch(/^(session|run|scenario|profile)-[a-f0-9]{4}$/);
+        expect(identity).not.toMatch(
+          /repeat|choice|format|confirm|path|detail|positive|negative/i,
+        );
+      }
+      expect(run?.scenario_label).toMatch(/^Scenario [A-F0-9]{4}$/);
+      expect(run?.profile_label).toMatch(/^Profile [A-F0-9]{4}$/);
+    }
   });
 });

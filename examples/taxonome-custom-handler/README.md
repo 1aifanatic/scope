@@ -12,8 +12,9 @@ The relevant project files are:
 - `src/handlers/index.ts` — typed config/output schemas, handler, and plugin export;
 - `dist/handlers/index.js` — compiled explicit plugin entry point;
 - `inputs/run.atif.json` and `inputs/run.tar.gz` — equivalent deterministic inputs;
-- `cases/prompt-cases.jsonl` and `cases/prompt-gold.json` — disjoint prompt
-  train/validation/held-out evidence and separate reviewed assertions.
+- `cases/neutral-prompt-cases.jsonl` and `cases/neutral-prompt-gold.json` —
+  disjoint prompt train/validation/held-out evidence with opaque model-visible
+  identities and separate reviewed assertions.
 
 ```bash
 cd examples/taxonome-custom-handler
@@ -37,10 +38,12 @@ these real SDK/Ax commands:
 
 ```bash
 taxonome eval --taxonomy taxonomy.yaml \
-  --cases cases/prompt-cases.jsonl --gold cases/prompt-gold.json \
+  --cases cases/neutral-prompt-cases.jsonl \
+  --gold cases/neutral-prompt-gold.json \
   --split heldout --elements acme-repeated-request --ledger <shared-ledger>
 taxonome optimize --taxonomy taxonomy.yaml \
-  --cases cases/prompt-cases.jsonl --gold cases/prompt-gold.json \
+  --cases cases/neutral-prompt-cases.jsonl \
+  --gold cases/neutral-prompt-gold.json \
   --element acme-repeated-request --output artifacts/repeated-request.ax.json \
   --max-metric-calls 12 --ledger <shared-ledger>
 ```

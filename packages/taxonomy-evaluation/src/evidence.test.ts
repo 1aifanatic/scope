@@ -163,4 +163,72 @@ describe("committed real experiment artifacts (offline verification only)", () =
     expect(finished).toHaveLength(11);
     expect(finished.every(event => event.ok === true)).toBe(true);
   });
+
+  it("records the opaque-ID control without rewriting the confounded demo", async () => {
+    const manifest = z.object({
+      supersedes_quality_claim_from: z.literal(
+        "packages/taxonomy-evaluation/evidence/yaml-prompt-demo",
+      ),
+      historical_evidence_preserved: z.object({
+        original_snapshot_calls: z.literal(256),
+        first_yaml_demo_calls: z.literal(11),
+        files_rewritten: z.literal(false),
+      }),
+      neutral_control_budget: z.object({
+        cap: z.literal(500),
+        starting_used: z.literal(267),
+        new_calls: z.literal(11),
+        cumulative_used: z.literal(278),
+        remaining: z.literal(222),
+      }),
+      identity_control: z.object({
+        case_metadata_forwarded_by_production_projection: z.literal(false),
+        outcome_coded_identifiers: z.literal(false),
+        semantic_gold_changed: z.literal(false),
+      }).passthrough(),
+      results: z.object({
+        heldout_baseline: z.object({
+          passed: z.literal(2),
+          total: z.literal(2),
+          pass_rate: z.literal(1),
+        }).passthrough(),
+        optimization: z.object({
+          learned_traces: z.literal(3),
+          instruction_proposals: z.literal(0),
+        }).passthrough(),
+        heldout_replay: z.object({
+          passed: z.literal(2),
+          total: z.literal(2),
+          pass_rate: z.literal(1),
+          accuracy_gain: z.literal(false),
+        }).passthrough(),
+      }).passthrough(),
+      artifact_sha256: z.record(z.string()),
+    }).passthrough().parse(
+      await json("evidence/yaml-prompt-neutral-control/manifest.json"),
+    );
+
+    for (const [name, expected] of Object.entries(manifest.artifact_sha256)) {
+      expect(createHash("sha256")
+        .update(await readFile(
+          file(`evidence/yaml-prompt-neutral-control/${name}`),
+        ))
+        .digest("hex")).toBe(expected);
+    }
+
+    const events = (await readFile(
+      file("evidence/yaml-prompt-neutral-control/call-ledger-delta.jsonl"),
+      "utf8",
+    )).trim().split("\n").map(line => JSON.parse(line) as {
+      type: string;
+      id: number;
+      ok?: boolean;
+    });
+    expect(events.filter(event => event.type === "reserved").map(event => event.id))
+      .toEqual(Array.from({ length: 11 }, (_, index) => index + 268));
+    expect(events.filter(event => event.type === "finished"))
+      .toHaveLength(11);
+    expect(events.filter(event => event.type === "finished")
+      .every(event => event.ok === true)).toBe(true);
+  });
 });
