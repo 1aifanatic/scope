@@ -4,7 +4,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPortal } from "react-dom";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { McpServerDocument } from "@/types";
 
@@ -57,6 +57,31 @@ async function fillValidHttpServer(slug: string) {
 }
 
 describe("McpServerForm", () => {
+  it("uses unique field IDs for each mounted form instance", () => {
+    const { container } = renderWithClient(
+      <>
+        <McpServerForm onCreated={vi.fn()} />
+        <McpServerForm onCreated={vi.fn()} />
+      </>,
+    );
+
+    const forms = Array.from(container.querySelectorAll("form"));
+    expect(forms).toHaveLength(2);
+
+    const firstName = within(forms[0]).getByLabelText("Name *");
+    const secondName = within(forms[1]).getByLabelText("Name *");
+    const firstDescription = within(forms[0]).getByLabelText("Description");
+    const secondDescription = within(forms[1]).getByLabelText("Description");
+
+    expect(firstName.id).not.toBe(secondName.id);
+    expect(firstDescription.id).not.toBe(secondDescription.id);
+
+    const allIds = forms.flatMap((form) =>
+      Array.from(form.querySelectorAll<HTMLElement>("[id]"), (element) => element.id)
+    );
+    expect(new Set(allIds).size).toBe(allIds.length);
+  });
+
   it("blocks a slug that already exists in the project", async () => {
     renderWithClient(<McpServerForm onCreated={vi.fn()} />);
     await fillValidHttpServer("learn-docs");

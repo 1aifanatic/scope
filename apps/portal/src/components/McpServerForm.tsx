@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type {
@@ -58,6 +58,18 @@ export function McpServerForm({
   stickyFooter = false,
 }: McpServerFormProps) {
   const queryClient = useQueryClient();
+  const fieldIdPrefix = useId();
+  const fieldIds = {
+    slug: `${fieldIdPrefix}-slug`,
+    name: `${fieldIdPrefix}-name`,
+    type: `${fieldIdPrefix}-type`,
+    url: `${fieldIdPrefix}-url`,
+    command: `${fieldIdPrefix}-command`,
+    args: `${fieldIdPrefix}-args`,
+    version: `${fieldIdPrefix}-version`,
+    sessionMode: `${fieldIdPrefix}-session-mode`,
+    description: `${fieldIdPrefix}-description`,
+  };
 
   // Load the active project's servers so we can flag a duplicate slug before submit.
   // (The list is project-scoped; the API is the source of truth and also 409s.)
@@ -189,9 +201,9 @@ export function McpServerForm({
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="slug">Slug (ID) *</Label>
+              <Label htmlFor={fieldIds.slug}>Slug (ID) *</Label>
               <Input
-                id="slug"
+                id={fieldIds.slug}
                 placeholder="e.g., my-search-server"
                 value={slug}
                 onChange={(e) => handleSlugChange(e.target.value)}
@@ -213,9 +225,9 @@ export function McpServerForm({
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="name">Name *</Label>
+              <Label htmlFor={fieldIds.name}>Name *</Label>
               <Input
-                id="name"
+                id={fieldIds.name}
                 placeholder="e.g., My Search Server"
                 value={name}
                 onChange={(e) => handleNameChange(e.target.value)}
@@ -225,9 +237,9 @@ export function McpServerForm({
 
           <div className="grid grid-cols-[10rem_1fr] gap-4">
             <div className="space-y-2">
-              <Label htmlFor="type">Transport Type *</Label>
+              <Label htmlFor={fieldIds.type}>Transport Type *</Label>
               <Select value={type} onValueChange={(v) => setType(v as McpTransportType)}>
-                <SelectTrigger id="type">
+                <SelectTrigger id={fieldIds.type}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -239,9 +251,9 @@ export function McpServerForm({
             </div>
             {!isStdio ? (
               <div className="space-y-2">
-                <Label htmlFor="url">URL *</Label>
+                <Label htmlFor={fieldIds.url}>URL *</Label>
                 <Input
-                  id="url"
+                  id={fieldIds.url}
                   type="url"
                   placeholder="https://example.com/mcp"
                   value={url}
@@ -251,9 +263,9 @@ export function McpServerForm({
               </div>
             ) : (
               <div className="space-y-2">
-                <Label htmlFor="command">Command *</Label>
+                <Label htmlFor={fieldIds.command}>Command *</Label>
                 <Input
-                  id="command"
+                  id={fieldIds.command}
                   placeholder="e.g., npx"
                   value={command}
                   onChange={(e) => setCommand(e.target.value)}
@@ -266,9 +278,9 @@ export function McpServerForm({
           {isStdio && (
             <>
               <div className="space-y-2">
-                <Label htmlFor="args">Arguments</Label>
+                <Label htmlFor={fieldIds.args}>Arguments</Label>
                 <Input
-                  id="args"
+                  id={fieldIds.args}
                   placeholder="e.g., -y @modelcontextprotocol/server-filesystem /workspace"
                   value={args}
                   onChange={(e) => setArgs(e.target.value)}
@@ -278,9 +290,9 @@ export function McpServerForm({
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="version">Version pin</Label>
+                  <Label htmlFor={fieldIds.version}>Version pin</Label>
                   <Input
-                    id="version"
+                    id={fieldIds.version}
                     placeholder="e.g., 2026.1.14"
                     value={version}
                     onChange={(e) => setVersion(e.target.value)}
@@ -289,9 +301,9 @@ export function McpServerForm({
                   <p className="text-xs text-muted-foreground">Pins npm package version</p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="sessionMode">Session Mode</Label>
+                  <Label htmlFor={fieldIds.sessionMode}>Session Mode</Label>
                   <Select value={sessionMode} onValueChange={(v) => setSessionMode(v as McpSessionMode)}>
-                    <SelectTrigger id="sessionMode">
+                    <SelectTrigger id={fieldIds.sessionMode}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -305,9 +317,9 @@ export function McpServerForm({
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
+            <Label htmlFor={fieldIds.description}>Description</Label>
             <Textarea
-              id="description"
+              id={fieldIds.description}
               placeholder="Optional description of what this MCP server provides"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
