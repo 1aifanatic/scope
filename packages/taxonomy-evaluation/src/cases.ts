@@ -9,9 +9,9 @@ import {
   prepareInput,
   validateResult,
   type ElementId,
-  type Evaluation,
+  type LegacyEvaluation,
   type Observation,
-  type TaxonomyInput,
+  type LegacyTaxonomyInput,
 } from "./contracts.js";
 
 /**
@@ -40,7 +40,7 @@ export const caseSchema = z.object({
  */
 export interface EvaluationCase extends Omit<z.infer<typeof caseSchema>, "input"> {
   /** Validated runtime input; gold expectations remain in a separate file. */
-  input: TaxonomyInput;
+  input: LegacyTaxonomyInput;
 }
 
 /**
@@ -181,7 +181,7 @@ export function assertObservation(actual: Observation, expected: Expectation): s
  */
 export function checkCase(
   row: EvaluationCase,
-  evaluations: readonly Evaluation[],
+  evaluations: readonly LegacyEvaluation[],
   gold: Gold,
   selection: readonly ElementId[] = row.elements,
 ): string[] {

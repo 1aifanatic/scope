@@ -12,14 +12,25 @@ import type {
   AxChatResponse,
   AxSerializedOptimizedProgram,
 } from "@ax-llm/ax";
-import type { ElementId, TaxonomyInput } from "./contracts.js";
+import type { ElementId, LegacyTaxonomyInput } from "./contracts.js";
 import type { PromptExecutor } from "./engine.js";
 import { CallLedger } from "./ledger.js";
-import { createSkippedProgram, promptEvidence } from "./prompt.js";
+import {
+  createSkippedProgram,
+  createTaxonomyPromptProgram,
+  promptEvidence,
+  taxonomyPromptEvidence,
+} from "./prompt.js";
 import { executeSdkCall } from "./sdk-call.js";
+import type { TaxonomyInput as LoadedTaxonomyInput } from "./scope-atif.js";
 
 export { CallLedger } from "./ledger.js";
-export { createSkippedProgram, promptEvidence } from "./prompt.js";
+export {
+  createSkippedProgram,
+  createTaxonomyPromptProgram,
+  promptEvidence,
+  taxonomyPromptEvidence,
+} from "./prompt.js";
 export const DEFAULT_MODEL = "gpt-5.6-sol-fast";
 
 /** Provider usage fields exposed by SDK assistant-usage events. */
@@ -356,21 +367,60 @@ export function copilotAI(transport: CopilotTransport, model = DEFAULT_MODEL, sy
  * @param artifact - Optional complete serialized optimized program.
  * @returns Prompt executor restricted to Skipped Invocation.
  */
-export function skippedExecutor(ai: AxAIService, artifact?: AxSerializedOptimizedProgram): PromptExecutor {
-  const program = createSkippedProgram(artifact);
+/** Legacy executor retained only for immutable v1 artifact verification. */
+export interface LegacyPromptExecutor {
+  evaluate(id: ElementId, input: LegacyTaxonomyInput): Promise<unknown>;
+}
 
+/** Restores the historical hard-coded Skipped Invocation program for v1 evidence tests. */
+export function skippedExecutor(
+  ai: AxAIService,
+  artifact?: AxSerializedOptimizedProgram,
+): LegacyPromptExecutor {
+  const program = createSkippedProgram(artifact);
   return {
-    /**
-     * Evaluates only Skipped Invocation through the restored one-call program.
-     *
-     * @param id - Must be `beh-skipped-invocation`.
-     * @param input - Prepared ATIF/context evidence.
-     */
-    async evaluate(id: ElementId, input: TaxonomyInput) {
+    async evaluate(id: ElementId, input: LegacyTaxonomyInput) {
       if (id !== "beh-skipped-invocation") {
-        throw new Error("Unsupported prompt element");
+        throw new Error("Unsupported legacy prompt element");
       }
-      const result = await program.forward(ai, { evidence: promptEvidence(input) }, { maxRetries: 0, maxSteps: 1, stream: false });
+      const result = await program.forward(ai, { evidence: promptEvidence(input) }, {
+        maxRetries: 0,
+        maxSteps: 1,
+        stream: false,
+      });
+      return result.observation;
+    },
+  };
+}
+
+/** Alias clarifying that the hard-coded executor is historical-only. */
+export const legacySkippedExecutor = skippedExecutor;
+
+/**
+ * Creates the production executor that builds programs from loaded YAML.
+ *
+ * @param ai - Ax service backed by the isolated Copilot SDK.
+ * @param artifacts - Optional compatible artifact by element ID.
+ */
+export function taxonomyPromptExecutor(
+  ai: AxAIService,
+  artifacts: ReadonlyMap<string, AxSerializedOptimizedProgram> = new Map(),
+): PromptExecutor {
+  const programs = new Map<string, ReturnType<typeof createTaxonomyPromptProgram>>();
+  return {
+    async evaluate(element, input: LoadedTaxonomyInput) {
+      let program = programs.get(element.id);
+      if (!program) {
+        program = createTaxonomyPromptProgram(element, artifacts.get(element.id));
+        programs.set(element.id, program);
+      }
+      const result = await program.forward(ai, {
+        evidence: taxonomyPromptEvidence(input),
+      }, {
+        maxRetries: 0,
+        maxSteps: 1,
+        stream: false,
+      });
       return result.observation;
     },
   };

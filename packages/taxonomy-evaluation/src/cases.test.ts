@@ -1,40 +1,67 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { fileURLToPath } from "node:url";
-import { expect, it } from "vitest";
-import { assertObservation, checkCase, loadCases, loadGold } from "./cases.js";
+import { describe, expect, it } from "vitest";
 import { evaluate } from "./engine.js";
+import { createBuiltInHandlerRegistry } from "./handlers.js";
+import {
+  assertObservationV2,
+  checkCaseV2,
+  loadCasesV2,
+  loadGoldV2,
+} from "./cases-v2.js";
+import { loadTaxonomy } from "./taxonomy.js";
 
-/**
- * Resolves shared case/gold assets relative to this test module.
- *
- * @param name - Fixture filename under the package fixtures directory.
- */
-const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
+async function packet() {
+  const taxonomy = await loadTaxonomy(
+    new URL("../taxonomies/agent-behavior/taxonomy.yaml", import.meta.url).pathname,
+    { handlers: createBuiltInHandlerRegistry() },
+  );
+  return {
+    taxonomy,
+    cases: await loadCasesV2(
+      new URL("../fixtures/v2/inputs.jsonl", import.meta.url).pathname,
+      taxonomy,
+    ),
+    gold: await loadGoldV2(
+      new URL("../fixtures/v2/gold.json", import.meta.url).pathname,
+    ),
+  };
+}
 
-it("fails missing, duplicate and unexpected element results; explicit subsets are supported", async () => {
-  // Reuse one mixed row to exercise full-selection and intentional-subset accounting.
-  const row = (await loadCases(fixture("inputs.jsonl"))).find(r => r.id === "train-used")!;
-  const gold = await loadGold(fixture("gold.json"));
-  expect(checkCase(row, [], gold)).toHaveLength(2);
-  const evaluations = await evaluate(row.input, ["beh-timeout"]);
-  expect(checkCase(row, evaluations, gold)).toHaveLength(1);
-  expect(checkCase(row, evaluations, gold, ["beh-timeout"])).toEqual([]);
-  expect(checkCase(row, [...evaluations, ...evaluations], gold, ["beh-timeout"])).not.toEqual([]);
-  expect(checkCase(row, evaluations, gold, ["beh-skipped-invocation"])).not.toEqual([]);
-});
-it("optional expectation fields are unconstrained, not assertions of absence", () => {
-  expect(assertObservation(
-    {
+describe("v2 case assertions", () => {
+  it("fails missing, duplicate, and unexpected results while supporting explicit subsets", async () => {
+    const { taxonomy, cases, gold } = await packet();
+    const row = cases.find(candidate => candidate.id === "train-used")!;
+    expect(checkCaseV2(row, [], gold)).toHaveLength(2);
+
+    const evaluations = await evaluate(
+      { atif: row.atif, taxonomy },
+      ["beh-timeout"],
+    );
+    expect(checkCaseV2(row, evaluations, gold)).toHaveLength(1);
+    expect(checkCaseV2(row, evaluations, gold, ["beh-timeout"])).toEqual([]);
+    expect(checkCaseV2(
+      row,
+      [...evaluations, ...evaluations],
+      gold,
+      ["beh-timeout"],
+    )).not.toEqual([]);
+  });
+
+  it("treats omitted occurrence expectation fields as unconstrained", () => {
+    expect(assertObservationV2({
       state: "completed",
       observed: true,
       occurrences: [{
         source: { id: "s", label: "Source", surface_id: "surface-mcp" },
         related_turns: [2],
-        tool_call_id: "c"
+        tool_call_id: "c",
       }],
-    },
-    { state: "completed", observed: true, occurrences: [{ tool_call_id: "c" }] }
-  )).toEqual([]);
+    }, {
+      state: "completed",
+      observed: true,
+      occurrences: [{ tool_call_id: "c" }],
+    })).toEqual([]);
+  });
 });

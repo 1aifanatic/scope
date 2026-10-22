@@ -25,7 +25,7 @@ class HttpFailure extends Error {
  * @param timeoutMs - Deadline in milliseconds covering redirects and body reads.
  * @returns UTF-8 response text.
  */
-async function downloadAttempt(location: string, byteLimit: number, timeoutMs: number): Promise<string> {
+async function downloadAttempt(location: string, byteLimit: number, timeoutMs: number): Promise<Buffer> {
   let url = new URL(location);
   if (url.username || url.password) {
     throw new Error("ATIF URL userinfo is not supported");
@@ -70,7 +70,7 @@ async function downloadAttempt(location: string, byteLimit: number, timeoutMs: n
       throw new HttpFailure(response.status, response.headers.get("retry-after"));
     }
     if (Number(response.headers.get("content-length")) > byteLimit) {
-      throw new Error(`JSON input exceeds ${byteLimit} bytes`);
+      throw new Error(`Input exceeds ${byteLimit} bytes`);
     }
 
     const reader = response.body?.getReader();
@@ -89,12 +89,12 @@ async function downloadAttempt(location: string, byteLimit: number, timeoutMs: n
 
         receivedBytes += item.value.byteLength;
         if (receivedBytes > byteLimit) {
-          throw new Error(`JSON input exceeds ${byteLimit} bytes`);
+          throw new Error(`Input exceeds ${byteLimit} bytes`);
         }
         chunks.push(item.value);
       }
 
-      return Buffer.concat(chunks).toString("utf8");
+      return Buffer.concat(chunks);
     } finally {
       reader.releaseLock();
     }
@@ -143,13 +143,13 @@ function retryDelay(header: string | null, attempt: number): number {
  * @param options.attempts - Total network attempts from 1 through 3; defaults to 3.
  * @returns Parsed JSON as unknown for caller-specific validation.
  */
-export async function loadJson(
+export async function loadBytes(
   location: string,
   options: { maxBytes?: number; timeoutMs?: number; attempts?: number } = {},
-): Promise<unknown> {
+): Promise<Buffer> {
   const byteLimit = options.maxBytes ?? MAX_BYTES;
-  if (!Number.isInteger(byteLimit) || byteLimit < 1 || byteLimit > MAX_BYTES) {
-    throw new Error("JSON byte limit must be 1..2097152");
+  if (!Number.isInteger(byteLimit) || byteLimit < 1 || byteLimit > 64 * 1024 * 1024) {
+    throw new Error("Input byte limit must be 1..67108864");
   }
   if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 1 || options.timeoutMs > 10_000)) {
     throw new Error("Download timeout must be 1..10000ms");
@@ -158,7 +158,6 @@ export async function loadJson(
     throw new Error("Download attempts must be 1..3");
   }
 
-  let text: string;
   if (!/^https?:\/\//i.test(location)) {
     // Local reads use an explicit-size buffer so file growth cannot bypass the bound.
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(location)) {
@@ -168,7 +167,7 @@ export async function loadJson(
     const file = await open(location, "r");
     try {
       if ((await file.stat()).size > byteLimit) {
-        throw new Error(`JSON input exceeds ${byteLimit} bytes`);
+        throw new Error(`Input exceeds ${byteLimit} bytes`);
       }
 
       const bytes = Buffer.alloc(byteLimit + 1);
@@ -182,9 +181,9 @@ export async function loadJson(
       }
 
       if (bytesRead > byteLimit) {
-        throw new Error(`JSON input exceeds ${byteLimit} bytes`);
+        throw new Error(`Input exceeds ${byteLimit} bytes`);
       }
-      text = bytes.subarray(0, bytesRead).toString("utf8");
+      return bytes.subarray(0, bytesRead);
     } finally {
       await file.close();
     }
@@ -198,7 +197,7 @@ export async function loadJson(
 
     const timeoutMs = options.timeoutMs ?? 10_000;
     const attempts = options.attempts ?? 3;
-    let body: string | undefined;
+    let body: Buffer | undefined;
     for (let attempt = 0; attempt < attempts; attempt++) {
       try {
         body = await downloadAttempt(location, byteLimit, timeoutMs);
@@ -221,8 +220,21 @@ export async function loadJson(
     if (body === undefined) {
       throw new Error("ATIF download failed");
     }
-    text = body;
+    return body;
   }
+}
+
+/**
+ * Reads and parses bounded JSON.
+ *
+ * @param location - Local path or HTTP(S) URL.
+ * @param options - Byte/deadline/attempt limits accepted by {@link loadBytes}.
+ */
+export async function loadJson(
+  location: string,
+  options: { maxBytes?: number; timeoutMs?: number; attempts?: number } = {},
+): Promise<unknown> {
+  const text = (await loadBytes(location, options)).toString("utf8");
 
   try {
     return JSON.parse(text) as unknown;

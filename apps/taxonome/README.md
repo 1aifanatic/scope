@@ -1,11 +1,16 @@
 # Taxonome
 
-Standalone experimental ATIF-to-JSON CLI for Skipped Invocation (Copilot SDK/Ax)
-and Timeout (pure TypeScript). No Scope backing services are needed.
+Standalone experimental YAML taxonomy CLI for plain ATIF and existing Scope run
+archives. The initial taxonomy evaluates Skipped Invocation through Ax and the
+Copilot SDK, and Timeout through deterministic TypeScript. Explicit local or
+installed-package plugins can add custom deterministic handlers without
+modifying Taxonome. No Scope backing services are needed.
 
 See [the architecture and usage guide](../../docs/architecture/taxonome.md)
-for build/run/eval/optimization/replay commands, TypeScript API examples,
-evidence policy, schema field review, and scope limitations.
+for YAML and `extra.scope` contracts, archive safety, plugin authoring,
+build/run/eval/optimization/replay commands, the typed API, evidence policy,
+and scope limitations. A runnable custom project lives in
+[`examples/taxonome-custom-handler`](../../examples/taxonome-custom-handler/README.md).
 
 The [recorded findings](../../docs/architecture/taxonome.md#recorded-spike-findings-2026-10-21)
 link the actual SDK baselines, complete Ax artifacts, fresh final comparisons,

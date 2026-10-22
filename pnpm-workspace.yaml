@@ -20,6 +20,7 @@ packages:
   - packages/telemetry
   - packages/test-utils
   - evaluations/*
+  - examples/*
 
 # Runtime language version pinning (for worker Docker images)
 # - python: 3.x (system package)

@@ -558,5 +558,65 @@
       "docs/architecture/prompt-evaluations.md": "ea6cb11de6622637b8d0faef91a0d41fc48172c71f64910fd01aa8f4c011456f",
       "evaluations/static-prompts/evaluation-manifest.yaml": "a8cd58704dc951faebe689145e35845a23c3ea5fde86ba28645841e9429e88a7"
     }
+  },
+  "yaml_archive_plugin_revision": {
+    "implementation_commit": "e3e40e418a3d8e9e9c7fc9a849a41a02f485870b",
+    "implementation_tree": "5a1c37186d7bedfbc0e9bd05040cd11144569341",
+    "packaging_parent": "5496ab4d30f67d6a2fbce801a55026ff9fba00b0",
+    "prepared_parent_ancestor": "6ae17ce30247bb893ab85af170c4c5e290228dd5",
+    "published_snapshot_when_implemented": "5496ab4d30f67d6a2fbce801a55026ff9fba00b0",
+    "taxonomy_schema": "scope/taxonomy/v1",
+    "atif_extension": "scope.atif-extension.v1",
+    "evaluation_schema": "scope/taxonomy-evaluation/v1",
+    "optimization_artifact": "scope/taxonome-ax/v2",
+    "plugin_api": "scope/taxonome-plugin/v1",
+    "model_calls": 0,
+    "model_evidence_regenerated": false,
+    "frozen_v1_evidence_changed": false,
+    "frozen_ledger_bytes_match_private_copy": true,
+    "budget_after_revision": {
+      "cap": 500,
+      "used": 256,
+      "remaining": 244
+    },
+    "validation": [
+      "offline frozen-lockfile install",
+      "shared, taxonomy-evaluation, taxonome, and custom-handler builds",
+      "taxonomy-evaluation and taxonome typechecks",
+      "86 focused offline tests / 20 files",
+      "36 TypeScript static-prompt tests / 6 files",
+      "94 Python static-prompt tests",
+      "226 approved static-prompt cases",
+      "19 quality targets + 1 standalone SDK target",
+      "1087 license headers",
+      "NOTICE check",
+      "private and committed 256-call ledger byte equality",
+      "plain ATIF and Scope archive custom-plugin CLI runs"
+    ],
+    "current_source_hashes": {
+      "packages/taxonomy-evaluation/taxonomies/agent-behavior/taxonomy.yaml": "ac5605febbb8d068c19acba7721b5f5f54243922b40a7f682eb6d4d0929f96b7",
+      "packages/taxonomy-evaluation/taxonomies/agent-behavior/elements/skipped-invocation.yaml": "85d5cd39d23a1b2d2a7a7f46b43a2b788a700da07b193a485f55ebbef7ddb9e5",
+      "packages/taxonomy-evaluation/taxonomies/agent-behavior/elements/timeout.yaml": "31884354c17d994695c9339a150135896a9a97ea32ff537a47511d68a376fcbe",
+      "packages/taxonomy-evaluation/src/taxonomy.ts": "c8dccc1186dd954dbc88930b15c46f6431358077995afe2edb5153e0534d4edc",
+      "packages/taxonomy-evaluation/src/archive.ts": "60c64f7d26a28e19849423e35d83dc573713471a73c8c89f578bb0004f89deca",
+      "packages/taxonomy-evaluation/src/handlers.ts": "0211f3e806d40f64f88fe92c8f0723c8f7991c48a3eec450575398db25c51f1d",
+      "packages/taxonomy-evaluation/src/plugins.ts": "b4cf12e9df89b83fc7cf94b7d95feba195822e1f206e8b4a2c1fa7ad38b408a5",
+      "packages/taxonomy-evaluation/src/scope-atif.ts": "b3fd52e23619330b1683685672510315639ec6f7ce250d0067201bdcd25a1aae",
+      "packages/taxonomy-evaluation/src/engine.ts": "edc966eeeac692cc569e4fc5b902877053f3d89080b517571c12993e132012fd",
+      "packages/taxonomy-evaluation/src/prompt.ts": "06fa7614ac9b6325c2bbc930e00c6b6154b478f94c78eea871bac6f923fd8721",
+      "packages/taxonomy-evaluation/src/optimization-v2.ts": "07565fc4e3776426b031f14efc8f82708491c99572f0ca099e6e43b04561196c",
+      "packages/taxonomy-evaluation/src/readout-v2.ts": "80a02e20135b51bfc1200396192cf22642018be9d65fb2bcacdadeb980c0d5d5",
+      "apps/taxonome/src/cli.ts": "77a3425129e91e28e02e0a0dd159673e97b674256840b07d322b52f920f0ace2",
+      "evaluations/static-prompts/adapter/standalone.ts": "ee544af639e73236467fc8583acdc9238ead7285de7a9037f1d9aac27f4f43a3",
+      "evaluations/static-prompts/evaluation-manifest.yaml": "f24ee743140f522c84cef7b20b76a8232a3d77fbdb844843568252aa5b938674",
+      "examples/taxonome-custom-handler/taxonomy.yaml": "710b06461433a1380619555d223c2325da685aa49970f1550bd151f1e5e7d6b4",
+      "examples/taxonome-custom-handler/elements/retry-loop.yaml": "4420be57c0c48a14310d9013b29c0500c700bc9e2113a585d505d89172465d59",
+      "examples/taxonome-custom-handler/src/handlers/index.ts": "6cc113df6d845ede5e24a4866c1eab728f8dfef832dac3406224b4f29c22f90f",
+      "examples/taxonome-custom-handler/inputs/run.atif.json": "91f8ce3459b39e4277f4eab864880d24228e374a79d6f9b18a33cb8b5a5bd970",
+      "examples/taxonome-custom-handler/inputs/run.tar.gz": "73cf67c46d63ddcca23920032839c53f158159a58e3b7c4f096dac46b638639a",
+      "packages/taxonomy-evaluation/evidence/call-ledger.jsonl": "89a42e00cbc3c3a62fc14d47995704c64bc5a169d2d8670a9435c75749ba303a",
+      "pnpm-lock.yaml": "f773ee8666c53c626554807ba031d8497e04a4bdde99d3289b730233589dbb58",
+      "docs/architecture/taxonome.md": "7a7cb58fe6de1997660b617042ad409a6a1841ea57d06792b77274858b4f003f"
+    }
   }
 }

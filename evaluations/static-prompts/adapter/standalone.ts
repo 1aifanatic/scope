@@ -1,8 +1,26 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import { prepareInput, validateResult } from "taxonomy-evaluation";
-import { copilotAI, skippedExecutor, type CopilotTransport } from "taxonomy-evaluation/copilot";
+import {
+  createBuiltInHandlerRegistry,
+  evaluate,
+  loadTaxonomy,
+  parseScopeAtif,
+  validateScopeAtif,
+} from "taxonomy-evaluation";
+import {
+  copilotAI,
+  taxonomyPromptExecutor,
+  type CopilotTransport,
+} from "taxonomy-evaluation/copilot";
+
+const productionTaxonomy = loadTaxonomy(
+  new URL(
+    "../../../packages/taxonomy-evaluation/taxonomies/agent-behavior/taxonomy.yaml",
+    import.meta.url,
+  ).pathname,
+  { handlers: createBuiltInHandlerRegistry() },
+);
 
 /** JSONL target registry for standalone SDK-only families (not the Azure runner). */
 export const standaloneTargets = {
@@ -10,8 +28,8 @@ export const standaloneTargets = {
     family: "taxonome-skipped-invocation",
     variant: "default",
     transport: "copilot-sdk",
-    cases: "packages/taxonomy-evaluation/fixtures/inputs.jsonl",
-    assertions: "packages/taxonomy-evaluation/fixtures/gold.json",
+    cases: "packages/taxonomy-evaluation/fixtures/v2/inputs.jsonl",
+    assertions: "packages/taxonomy-evaluation/fixtures/v2/gold.json",
     /**
      * Runs one case through the production Ax/SDK adapter and shared grounding validator.
      *
@@ -20,11 +38,16 @@ export const standaloneTargets = {
      * @param model - Exact model ID used by the adapter.
      */
     async run(input: unknown, transport: CopilotTransport, model: string) {
-      // This adapter exercises the production program and validator, not an evaluation-only prompt copy.
-      const prepared = prepareInput(input);
-      const prediction = await skippedExecutor(copilotAI(transport, model)).evaluate("beh-skipped-invocation", prepared);
-
-      return validateResult("beh-skipped-invocation", prediction, prepared);
+      // This adapter loads the production YAML; it has no evaluation-only prompt copy.
+      const taxonomy = await productionTaxonomy;
+      const atif = parseScopeAtif(input);
+      validateScopeAtif(atif, taxonomy);
+      const [evaluation] = await evaluate(
+        { atif, taxonomy },
+        ["beh-skipped-invocation"],
+        taxonomyPromptExecutor(copilotAI(transport, model)),
+      );
+      return evaluation.result;
     },
   },
 } as const;
