@@ -2,12 +2,24 @@
 // Licensed under the MIT License.
 
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import {
+  flattenDiagnosticMessageText,
+  ModuleKind,
+  ScriptTarget,
+  transpileModule,
+} from "typescript";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -15,6 +27,8 @@ const example = fileURLToPath(
   new URL("../../../examples/taxonome-custom-handler/", import.meta.url),
 );
 const ANSI_PATTERN = /\u001b\[[0-9;]*m/;
+let pluginOutputDirectory: string | undefined;
+let pluginSpecifier: string;
 
 /** Returns a child environment with every supported credential removed. */
 function childEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -47,6 +61,44 @@ function runCli(
 }
 
 describe("YAML/archive/plugin CLI process contract", () => {
+  beforeAll(async () => {
+    // Emit trusted fixture JavaScript without depending on ignored package
+    // declarations. Normal package builds separately type-check the example.
+    pluginOutputDirectory = await mkdtemp(join(
+      example,
+      ".taxonome-test-plugin-",
+    ));
+    pluginSpecifier = `./${basename(pluginOutputDirectory)}/handlers/index.js`;
+    const source = await readFile(
+      join(example, "src/handlers/index.ts"),
+      "utf8",
+    );
+    const compiled = transpileModule(source, {
+      fileName: "index.ts",
+      reportDiagnostics: true,
+      compilerOptions: {
+        module: ModuleKind.ESNext,
+        target: ScriptTarget.ES2022,
+      },
+    });
+    if (compiled.diagnostics?.length) {
+      throw new Error(compiled.diagnostics
+        .map(diagnostic =>
+          flattenDiagnosticMessageText(diagnostic.messageText, "\n")
+        )
+        .join("; "));
+    }
+    const handlerDirectory = join(pluginOutputDirectory, "handlers");
+    await mkdir(handlerDirectory);
+    await writeFile(join(handlerDirectory, "index.js"), compiled.outputText);
+  });
+
+  afterAll(async () => {
+    if (pluginOutputDirectory) {
+      await rm(pluginOutputDirectory, { recursive: true, force: true });
+    }
+  });
+
   it("requires --taxonomy and emits no success-shaped stdout on configuration errors", async () => {
     const commands = [
       [
@@ -127,7 +179,7 @@ describe("YAML/archive/plugin CLI process contract", () => {
       "--taxonomy",
       "taxonomy.yaml",
       "--plugin",
-      "./dist/handlers/index.js",
+      pluginSpecifier,
       "--elements",
       "acme-retry-loop",
     ], example);
@@ -138,7 +190,7 @@ describe("YAML/archive/plugin CLI process contract", () => {
           provider: {
             name: "taxonome-custom-handler-example",
             origin: "local",
-            entry: "./dist/handlers/index.js",
+            entry: pluginSpecifier,
             integrity: expect.stringMatching(/^[a-f0-9]{64}$/),
           },
         },
@@ -161,7 +213,7 @@ describe("YAML/archive/plugin CLI process contract", () => {
       "--taxonomy",
       "taxonomy.yaml",
       "--plugin",
-      "./dist/handlers/index.js",
+      pluginSpecifier,
       "--elements",
       "acme-retry-loop",
     ], example);
@@ -196,7 +248,7 @@ describe("YAML/archive/plugin CLI process contract", () => {
         "--taxonomy",
         "taxonomy.yaml",
         "--plugin",
-        "./dist/handlers/index.js",
+        pluginSpecifier,
         "--elements",
         "acme-retry-loop",
       ], example);
@@ -217,7 +269,7 @@ describe("YAML/archive/plugin CLI process contract", () => {
         "--taxonomy",
         "taxonomy.yaml",
         "--plugin",
-        "./dist/handlers/index.js",
+        pluginSpecifier,
         "--markdown",
         markdownPath,
       ], example);
@@ -250,7 +302,7 @@ describe("YAML/archive/plugin CLI process contract", () => {
         "--taxonomy",
         "taxonomy.yaml",
         "--plugin",
-        "./dist/handlers/index.js",
+        pluginSpecifier,
       ], example)).rejects.toMatchObject({
         code: 1,
         stdout: "",
