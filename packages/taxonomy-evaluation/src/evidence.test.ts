@@ -103,4 +103,64 @@ describe("committed real experiment artifacts (offline verification only)", () =
     expect(reservations).toHaveLength(256);
     expect(finished).toHaveLength(256);
   });
+
+  it("keeps the YAML prompt demo evidence separate from the frozen 256-call snapshot", async () => {
+    const manifest = z.object({
+      historical_snapshot: z.object({
+        calls: z.literal(256),
+        cap: z.literal(500),
+        ledger_sha256: z.string(),
+        preserved_unchanged: z.literal(true),
+      }),
+      fresh_cumulative_budget: z.object({
+        cap: z.literal(500),
+        used: z.literal(267),
+        remaining: z.literal(233),
+        new_calls: z.literal(11),
+      }),
+      results: z.object({
+        heldout_baseline: z.object({
+          passed: z.literal(2),
+          total: z.literal(2),
+          pass_rate: z.literal(1),
+        }),
+        heldout_replay: z.object({
+          passed: z.literal(2),
+          total: z.literal(2),
+          pass_rate: z.literal(1),
+          accuracy_gain: z.literal(false),
+        }),
+      }).passthrough(),
+      artifact_sha256: z.record(z.string()),
+    }).passthrough().parse(
+      await json("evidence/yaml-prompt-demo/manifest.json"),
+    );
+
+    expect(manifest.historical_snapshot.ledger_sha256).toBe(
+      createHash("sha256")
+        .update(await readFile(file("evidence/call-ledger.jsonl")))
+        .digest("hex"),
+    );
+    for (const [name, expected] of Object.entries(manifest.artifact_sha256)) {
+      expect(createHash("sha256")
+        .update(await readFile(file(`evidence/yaml-prompt-demo/${name}`)))
+        .digest("hex")).toBe(expected);
+    }
+
+    const events = (await readFile(
+      file("evidence/yaml-prompt-demo/call-ledger-delta.jsonl"),
+      "utf8",
+    )).trim().split("\n").map(line => JSON.parse(line) as {
+      type: string;
+      id: number;
+      ok?: boolean;
+    });
+    const reservations = events.filter(event => event.type === "reserved");
+    const finished = events.filter(event => event.type === "finished");
+    expect(reservations.map(event => event.id)).toEqual(
+      Array.from({ length: 11 }, (_, index) => index + 257),
+    );
+    expect(finished).toHaveLength(11);
+    expect(finished.every(event => event.ok === true)).toBe(true);
+  });
 });

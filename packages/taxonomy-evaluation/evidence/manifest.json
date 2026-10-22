@@ -618,5 +618,72 @@
       "pnpm-lock.yaml": "f773ee8666c53c626554807ba031d8497e04a4bdde99d3289b730233589dbb58",
       "docs/architecture/taxonome.md": "7a7cb58fe6de1997660b617042ad409a6a1841ea57d06792b77274858b4f003f"
     }
+  },
+  "yaml_prompt_demo_revision": {
+    "source_commit": "77443f87438f496666951129c96793e24603610d",
+    "evidence_commit": "95260a84b1ef95c1c400e083a9c8fb7dabf98fdf",
+    "evidence_path": "packages/taxonomy-evaluation/evidence/yaml-prompt-demo",
+    "evidence_manifest_sha256": "6543d18a4c4a65a951f562009fdc5b3e652130b336687c51278f5afeae7bfdaf",
+    "historical_snapshot": {
+      "cap": 500,
+      "used": 256,
+      "remaining": 244,
+      "ledger_sha256": "89a42e00cbc3c3a62fc14d47995704c64bc5a169d2d8670a9435c75749ba303a",
+      "preserved_unchanged": true
+    },
+    "fresh_cumulative_budget": {
+      "cap": 500,
+      "used": 267,
+      "remaining": 233,
+      "new_calls": 11
+    },
+    "fresh_usage": {
+      "calls": 11,
+      "input_tokens": 12768,
+      "output_tokens": 252,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "model_attempts": 11,
+      "failed_calls": 0,
+      "usd_cost": null
+    },
+    "call_breakdown": {
+      "run": 2,
+      "eval": 4,
+      "optimize_teacher": 3,
+      "optimize_student": 2
+    },
+    "results": {
+      "custom_prompt_run_observed": true,
+      "heldout_baseline": "2/2",
+      "optimization_best_score": 1,
+      "learned_traces": 3,
+      "examples": 2,
+      "metric_entries": 5,
+      "heldout_replay": "2/2",
+      "accuracy_gain": false,
+      "built_in_taxonomy_elements": 2
+    },
+    "validation": [
+      "typed producer Zod schema and RetryOutput declaration",
+      "typed RetryOccurrence collection and handler return",
+      "unattributed recovered retry returns indeterminate, never false",
+      "TypeScript producer samples accepted by YAML runtime schema",
+      "six cases across disjoint train/validation/heldout families and originating runs",
+      "no element ID or label in trajectory text",
+      "direct taxonome executable from developer project cwd",
+      "real custom prompt run, heldout eval, bounded Ax optimize, artifact replay",
+      "real full shipped taxonomy run with prompt and deterministic elements",
+      "original committed 256-call ledger snapshot unchanged"
+    ],
+    "current_source_hashes": {
+      "examples/taxonome-custom-handler/taxonomy.yaml": "35a6e8565b3c8cb122a94e397a4e7b97cab9e557309b3fae09095807cb6b537d",
+      "examples/taxonome-custom-handler/elements/repeated-request.yaml": "be764afa399a084ee028cbe30ebaaf33d4df3923423c0f39055a44efdc0a815c",
+      "examples/taxonome-custom-handler/cases/prompt-cases.jsonl": "3bc5e7bddb2508e3eae4c7c827b2c8bb2c9df55aadffac80626b1ae17214dc50",
+      "examples/taxonome-custom-handler/cases/prompt-gold.json": "d0529cd779d725e470176148e1153e4dba9204f0d8e8b3e2620f92f171c8e3f5",
+      "examples/taxonome-custom-handler/src/handlers/index.ts": "6fc0c6ab1b377db31d51e52b08239cd9a3e81804eb6c9f839785503f709b60d1",
+      "apps/taxonome/src/custom-handler-example.test.ts": "28169ecae151a7ad801a39410e037272b3123bb842d2fab6ef60b3e07ef39faa",
+      "packages/taxonomy-evaluation/src/evidence.test.ts": "9023767581318bff280794239e580b6b9551f9e5f445417d15cd6252a68b9e92"
+    }
   }
 }
