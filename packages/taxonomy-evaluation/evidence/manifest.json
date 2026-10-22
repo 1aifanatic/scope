@@ -692,5 +692,48 @@
       "apps/taxonome/src/custom-handler-example.test.ts": "28169ecae151a7ad801a39410e037272b3123bb842d2fab6ef60b3e07ef39faa",
       "packages/taxonomy-evaluation/src/evidence.test.ts": "9023767581318bff280794239e580b6b9551f9e5f445417d15cd6252a68b9e92"
     }
+  },
+  "yaml_prompt_neutral_control_revision": {
+    "source_commit": "a2486f842901cc06ec813edfb636d3b5e870981b",
+    "evidence_commit": "f6224e8aa4e87ad6c5328225c149e162737df53d",
+    "evidence_path": "packages/taxonomy-evaluation/evidence/yaml-prompt-neutral-control",
+    "evidence_manifest_sha256": "40d3b2d201d3de2dbcfa6a7c343d808963251c176944b510f00f3c1d8bdf6a64",
+    "starting_cumulative_used": 267,
+    "new_calls": 11,
+    "cumulative_used": 278,
+    "remaining": 222,
+    "fresh_usage": {
+      "input_tokens": 13691,
+      "output_tokens": 252,
+      "model_attempts": 11,
+      "failed_calls": 0,
+      "usd_cost": null
+    },
+    "identity_control": {
+      "production_projection_tested": true,
+      "case_metadata_forwarded": false,
+      "model_visible_ids_opaque": true,
+      "semantic_gold_changed": false,
+      "families_and_origins_disjoint": true
+    },
+    "results": {
+      "heldout_baseline": "2/2",
+      "heldout_replay": "2/2",
+      "accuracy_gain": false,
+      "learned_traces": 3,
+      "examples": 2,
+      "metric_entries": 5,
+      "instruction_proposals": 0,
+      "early_stopped": false,
+      "built_in_taxonomy_elements": 2
+    },
+    "interpretation": "The neutral-ID control removes the outcome-coded identity confound. Ax selected learned demos and converged without instruction proposals; no held-out accuracy improvement is claimed.",
+    "current_source_hashes": {
+      "examples/taxonome-custom-handler/cases/neutral-prompt-cases.jsonl": "9d7adef679325414a20a6e89635f32ea547807ed3d6b15968925d5bde6d831f7",
+      "examples/taxonome-custom-handler/cases/neutral-prompt-gold.json": "4fae12fb1d62e19d848fdc3e385aa5731f84c49ae47de7223721946737ecf0b6",
+      "examples/taxonome-custom-handler/inputs/repeated-request.atif.json": "5b762feb519865dca56c0456d3ee2a660b9759c154069d097b4f7a1fd4857838",
+      "apps/taxonome/src/custom-handler-example.test.ts": "d3ffd46238600bfcbce52eb96c5c5ff6183ab521b167700a5a14c6c0a0f6464d",
+      "packages/taxonomy-evaluation/src/evidence.test.ts": "a04403f3beee0bbd662e4f683ef59837ec12a309b3748fe55254478c4c0e4f1f"
+    }
   }
 }
