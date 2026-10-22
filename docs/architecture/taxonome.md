@@ -1,16 +1,45 @@
-# Taxonome: isolated taxonomy evaluation spike
+# Taxonome: YAML-driven taxonomy evaluation spike
 
 Taxonome is a **standalone, draft experimental slice**, not the production
-Observation model or a dependency on the Experiment stack. It evaluates two
-behaviors from ATIF v1.7: Skipped Invocation (an Ax typed program through the
-GitHub Copilot SDK) and Timeout (pure reviewed TypeScript). No Scope API, Judge,
-database, Redis, queue, or token manager is required. Production integration,
-the remaining taxonomy, narrative readout generation, and generated-code
-execution are deliberately excluded.
+Observation model or a dependency on the Experiment stack. It loads authored
+taxonomy definitions from YAML, evaluates ATIF v1.7 trajectories, and returns
+schema-validated structured observations. The initial slice contains:
 
-The spike starts at `microsoft/scope:main` commit
-`2101bd0d61c877caadb5c60d03056c67a0b08296`. It does not depend on #1206.
-Technical evidence is for review, not authorization to merge or exit Phase 1.
+- prompt-based Skipped Invocation through Ax and the GitHub Copilot SDK;
+- deterministic Timeout through reviewed TypeScript;
+- explicit third-party deterministic handler plugins;
+- plain ATIF JSON and existing Scope run archive inputs;
+- deterministic JSON/Markdown readout previews.
+
+No Scope API, Judge, database, Redis, queue, or token manager is required.
+Production adoption, the remaining taxonomy, generated-code execution,
+sandboxed plugins, and narrative readout generation remain out of scope.
+
+## Architecture
+
+The same normalized taxonomy, ATIF stream, registry, and result envelope serve
+single-element and mixed evaluation:
+
+```mermaid
+flowchart LR
+    Taxonomy[YAML taxonomy and element files] --> Loader[Safe normalized loader]
+    Plugin[Explicit local or package plugins] --> Registry[Handler registry]
+    BuiltIn[Built-in scope handlers] --> Registry
+    Plain[Plain ATIF JSON] --> Input[Input normalization]
+    Archive[Scope run tar.gz] --> Input
+    Loader --> Engine[Typed evaluation engine]
+    Registry --> Engine
+    Input --> Engine
+    Engine --> Prompt[Ax and Copilot SDK]
+    Engine --> Deterministic[Deterministic handler]
+    Prompt --> Result[Structured result envelope]
+    Deterministic --> Result
+    Result --> Readout[Deterministic readout]
+```
+
+The package root does not import Ax or the SDK. Prompt execution is explicitly
+provided by `taxonomy-evaluation/copilot`, so a deterministic-only process does
+not initialize the SDK and needs no token.
 
 ## Build and run
 
@@ -21,237 +50,255 @@ pnpm install --frozen-lockfile
 pnpm --filter taxonomy-evaluation build
 pnpm --filter taxonome build
 pnpm --silent taxonome run \
-  packages/taxonomy-evaluation/fixtures/timeout.atif.json \
-  --context packages/taxonomy-evaluation/fixtures/minimal-context.json \
+  packages/taxonomy-evaluation/fixtures/v2/timeout.atif.json \
+  --taxonomy packages/taxonomy-evaluation/taxonomies/agent-behavior/taxonomy.yaml \
   --elements beh-timeout
 ```
 
-This deterministic example needs no token. Use the repository-root
-`pnpm --silent taxonome ...` command for demos, development, and piped output;
-`--silent` suppresses pnpm's script banner so stdout remains one valid JSON
-document. Diagnostics/help go to stderr; evaluation failures have explicit JSON
-error states and a nonzero exit status. Interactive stderr/help uses restrained
-semantic color based on TTY support. Redirected/piped output and CI are plain by
-default; `NO_COLOR` and `FORCE_COLOR=0` disable color, while nonzero
-`FORCE_COLOR` explicitly enables diagnostic/help color. Result JSON/Markdown is
-never styled, and status/error meaning never depends on color alone.
+`run`, `eval`, and `optimize` require `--taxonomy`; there is no automatic
+taxonomy discovery. The exact authored schema identifier is
+`scope/taxonomy/v1`. The CLI accepts plain ATIF JSON or a Scope run `.tar.gz`
+archive and detects archive content by gzip bytes, not filename.
 
-For prompt or mixed execution, set `COPILOT_GITHUB_TOKEN` in the process
-environment. The CLI passes it explicitly as SDK `gitHubToken` and sets
-`useLoggedInUser: false`; there is no GH_TOKEN or logged-in-account fallback.
-Never put a token in a command-line flag or file. Use the same ledger file for
-every run, eval, optimization, and replay in an experiment:
+Use `pnpm --silent taxonome ...` for repository development and demos.
+`--silent` suppresses the pnpm banner, so stdout remains one valid JSON or
+Markdown document. Diagnostics and help go to stderr. Interactive diagnostics
+use restrained semantic color; redirected output, CI, `TERM=dumb`, `NO_COLOR`,
+and `FORCE_COLOR=0` are plain. Nonzero `FORCE_COLOR` enables diagnostic color.
+Machine output is never styled, and meaning never depends on color alone.
 
-```bash
-pnpm --silent taxonome eval \
-  --cases packages/taxonomy-evaluation/fixtures/inputs.jsonl \
-  --gold packages/taxonomy-evaluation/fixtures/gold.json \
-  --split heldout --samples 2 --ledger /absolute/path/calls.jsonl
-pnpm --silent taxonome optimize \
-  --cases packages/taxonomy-evaluation/fixtures/inputs.jsonl \
-  --gold packages/taxonomy-evaluation/fixtures/gold.json \
-  --max-metric-calls 48 --output /absolute/path/optimized.json \
-  --ledger /absolute/path/calls.jsonl
-pnpm --silent taxonome eval \
-  --cases packages/taxonomy-evaluation/fixtures/inputs.jsonl \
-  --gold packages/taxonomy-evaluation/fixtures/gold.json \
-  --split heldout --samples 2 --artifact /absolute/path/optimized.json \
-  --ledger /absolute/path/calls.jsonl
+Prompt execution requires `COPILOT_GITHUB_TOKEN` in the process environment.
+The CLI passes it explicitly as SDK `gitHubToken` with
+`useLoggedInUser: false`; there is no `GH_TOKEN` or logged-in-account fallback.
+Never put a token in a flag, taxonomy, plugin configuration, or committed file.
+
+## Authored taxonomy contract
+
+A taxonomy may embed element definitions or reference manifest-relative
+per-element YAML. Both forms normalize to the same immutable typed structure.
+References must remain under the taxonomy root and cannot traverse symlinks.
+YAML aliases/anchors, duplicate keys, repeated/cyclic references, unknown
+handlers, duplicate element IDs, and unsupported JSON Schema features fail
+explicitly.
+
+```yaml
+schema_version: scope/taxonomy/v1
+id: agent-behavior
+version: 2.0.0
+categories:
+  - id: behavior-category-invocation
+    label: Invocation behavior
+elements:
+  - path: elements/timeout.yaml
 ```
 
-`--model` defaults to pinned `gpt-5.6-sol-fast`; comparisons and saved artifacts
-must use the same model. Pinning an ID is not a promise of a fixed hosted model
-revision. Ax is pinned to 25.3.2, SDK to 1.0.1, bundled runtime to 1.0.63.
-The SDK does not expose temperature/seed control for inference. The optimizer
-seed controls its search, not hosted-model determinism.
+Element YAML owns metadata, declared surfaces, actual prompt instructions,
+implementation selection/configuration, evidence requirements, and output
+schema. Deterministic YAML refers to an origin-independent handler ID, never a
+module path:
 
-The shared ledger durably reserves before submission. Its immutable maximum
-is 500; failed and crash-interrupted reservations still count. Separate
-instances/processes share exclusive filesystem locking and cannot reset a
-ledger. A lock left by a crashed process fails closed and needs explicit
-reconciliation, not automatic deletion. This is a per-experiment safety guard,
-not an authorization system against a user intentionally choosing another
-file. Keep the experiment ledger outside the checkout.
+```yaml
+schema_version: scope/taxonomy/v1
+id: beh-timeout
+label: Timeout
+category_id: behavior-category-invocation
+implementation:
+  type: deterministic
+  handler: scope/timeout-v1
+  config:
+    threshold_ms: 1000
+evidence:
+  complete_for_negative: true
+output_schema:
+  type: object
+  required: [state]
+  additionalProperties: false
+  properties:
+    state:
+      enum: [completed, indeterminate, inapplicable, error]
+```
 
-Ax repair retries are zero and each program evaluation has one step. A thin
-typed `AxGen` subclass enforces these limits even when Ax BootstrapFewShot
-supplies its own retry override. A custom Ax prompt template preserves the
-immutable schema/trust wrapper for student and bootstrap-teacher execution;
-GEPA reflection uses its own typed program, without observation formatting.
-SDK error hooks request abort/no retries; model-failure events trigger abort.
-Unexpected multiple model-attempt events are charged and stop that transport;
-reconcile them before another experiment. SDK internals do not expose a
-pre-attempt hook or guarantees about infrastructure retries; retain the event
-ledger rather than claiming invisible service attempts were measured.
+The supported authored JSON Schema subset is deliberately non-executable:
+`type`, `const`, `enum`, `properties`, `required`,
+`additionalProperties`, `items`, `minItems`, `minimum`, and `oneOf`.
+`$ref`, recursive schemas, and custom keywords are rejected. Schema depth and
+node counts are bounded. The taxonomy digest is a canonical semantic SHA-256,
+so formatting and key order do not change it.
 
-## API and deterministic authoring
+## Handler registry and plugins
 
-The root entry point does **not import Ax or the SDK**. Prompt execution is
-explicitly opt-in through `taxonomy-evaluation/copilot`.
+One registry resolves built-in, local-project, and installed-package handlers.
+Built-ins reserve the `scope/` namespace. External plugins must use their own
+namespace, such as `acme/retry-loop-v1`; unknown and duplicate IDs fail without
+override.
+
+Plugins are loaded only through repeatable `--plugin` flags or an injected
+programmatic registry. A plugin exports the exact versioned contract
+`scope/taxonome-plugin/v1` and registers deterministic handlers with a config
+validator and implementation:
 
 ```typescript
-import { evaluate, evaluateElement, type DeterministicDefinition } from "taxonomy-evaluation";
+import type { TaxonomePlugin } from "taxonomy-evaluation";
 
-const input = {
-  atif: trajectory,
-  context: { completeness: "complete", sources: [], timeout_policy: { threshold_ms: 1000 } },
+export const taxonomePlugin: TaxonomePlugin = {
+  api_version: "scope/taxonome-plugin/v1",
+  name: "acme-taxonomy-handlers",
+  version: "1.0.0",
+  handlers: [retryLoopHandler],
 };
-const results = await evaluate(input, ["beh-timeout"]);
-
-const definition: DeterministicDefinition = {
-  id: "beh-timeout",
-  kind: "deterministic",
-  evaluate(input) {
-    // An example authoring seam; the shipped detector uses structured call evidence.
-    return { state: "indeterminate", reason: "This example has no timing detector." };
-  },
-};
-const result = await evaluateElement(definition, input);
 ```
 
-Single and mixed evaluation use the same API and validators. Definitions do not
-contain executable source strings. Runtime execution does not import gold or
-Vitest. Inputs are cloned before freezing; original ATIF fields, step IDs,
-ordering, metrics, timing extensions, and call identities are preserved.
+Relative plugin paths and installed package names resolve from the invocation
+working directory, including when Taxonome itself is globally installed.
+Dependencies resolve from the plugin location through normal Node module
+resolution. Taxonome does not scan directories or `node_modules`, install
+packages, perform network lookup, or import a module named by YAML.
 
-Co-located tests use the same ATIF/context case packet and assertion helpers
-as model evals:
+Plugin imports and top-level code run with the Taxonome process permissions.
+This is **not a sandbox**. Frozen input/config/output validation protects data
+contracts and mutation invariants, not the host from malicious plugin code.
+Provider origin, version, entry point, and integrity metadata appear in result
+provenance but do not change the origin-independent YAML handler ID.
+
+The complete developer example is
+[`examples/taxonome-custom-handler`](../../examples/taxonome-custom-handler/README.md).
+It builds a local plugin and runs the same taxonomy against plain ATIF and a
+Scope archive without publishing an npm package.
+
+## ATIF and `extra.scope`
+
+The engine receives `{ atif, taxonomy }`, never an opaque archive. Run-specific
+facts and evidence live under `extra.scope`; static policies and handler
+configuration live in YAML. Plain ATIF defaults to `complete` unless it
+explicitly declares `partial` or `unknown`.
+
+The extension version is `scope.atif-extension.v1`:
+
+- trajectory-level state, task, run/scenario/profile identity, available
+  sources, configured capabilities, and outcomes;
+- step-level source origin and discovery events;
+- call-level source, outcome, duration/timestamps, interruption, response, and
+  archive origin.
+
+Availability is not discovery, configuration is not invocation, and transcript
+prose is not silently promoted to structured evidence. Source IDs, surfaces,
+turns, calls, and cross-references are validated before evaluation. Missing or
+contradictory evidence produces `indeterminate`, not a fabricated negative.
+
+The historical spike's separate ATIF plus `minimal-context.json` input remains
+immutable evidence. `convertLegacyInput` provides an explicit deterministic
+conversion for compatibility tests; the normal CLI no longer accepts
+`--context` and does not silently reinterpret old artifacts.
+
+## Scope archive ingestion
+
+Taxonome reads the existing Scope export layout:
+
+```text
+<request-id>/
+  run.yaml
+  iteration-1.atif.trajectory.json
+  iteration-1.tool-calls.jsonl   # optional matching enrichment
+  iteration-2.atif.trajectory.json
+```
+
+Extraction is in memory and bounded by compressed bytes, expanded bytes, entry
+count, and path depth. Absolute/traversal/backslash paths, links, devices,
+FIFOs, duplicate paths, multiple run roots, malformed `run.yaml`, and missing
+iteration ATIF fail explicitly. Taxonome never regenerates ATIF from HAR and
+never fetches archived artifact URLs.
+
+Every archive iteration becomes one deterministic global ATIF step sequence.
+Step IDs are reassigned monotonically. Colliding call IDs receive an
+iteration-qualified identity, and observation references are rewritten.
+Original iteration/step/call identities remain under
+`extra.scope.origin`. Tool-call JSONL may enrich only exact matching ATIF calls;
+unmatched records fail.
+
+Archive completeness derives from both terminal run state and artifact
+coverage. A `done` run with every declared iteration ATIF is `complete`; other
+states are `partial`, and an explicitly partial/unknown constituent trajectory
+cannot be upgraded by a terminal run. A terminal run must include `finishedAt`.
+Requested skills/MCP/extensions/resources stay in `configured_capabilities`;
+only ATIF-declared availability or successful recorded MCP/resource outcomes
+enter `available_sources`. This preserves positive, completed-negative, and
+unknown distinctions across iterations without treating configuration as use.
+
+## Typed API and result contract
 
 ```typescript
-import { expect, it } from "vitest";
-import { evaluate } from "taxonomy-evaluation";
-import { assertObservation } from "taxonomy-evaluation/cases";
+import { readFile } from "node:fs/promises";
+import {
+  createBuiltInHandlerRegistry,
+  evaluate,
+  loadTaxonomy,
+  parseScopeAtif,
+} from "taxonomy-evaluation";
 
-it("explicit timeout", async () => {
-  const [result] = await evaluate(input, ["beh-timeout"]);
-  expect(assertObservation(result.result, expected)).toEqual([]);
-});
+const handlers = createBuiltInHandlerRegistry();
+const taxonomy = await loadTaxonomy("taxonomy.yaml", { handlers });
+const atif = parseScopeAtif(JSON.parse(await readFile("run.atif.json", "utf8")));
+const results = await evaluate({ atif, taxonomy }, ["beh-timeout"]);
 ```
 
-Only the two registered identities are included; a generalized taxonomy
-registration/store/export system is not part of this spike.
+Programmatic callers can load plugins into the same registry or directly
+register reviewed handlers. Inputs are cloned and frozen before handler
+execution; original ATIF order, fields, metrics, timing, and identities are not
+mutated.
 
-## Input and evidence contract
+The result envelope version is `scope/taxonomy-evaluation/v1`. It contains:
 
-`run <atif>` accepts a local file or HTTP(S) ATIF JSON and a separate explicit
-`--context` JSON. Files/downloads are bounded to 2 MiB. HTTP acquisition has
-three bounded transient attempts, 10-second attempt deadlines, three
-redirects, no HTTPS downgrade, and no token forwarding. Embedded URLs are
-never fetched. Errors do not echo URL queries. ATIF v1.7 with text messages is
-the supported slice; unsupported versions/shapes fail explicitly.
+- taxonomy schema/id/version/digest;
+- element ID/label/category metadata;
+- implementation type, origin-independent handler ID, and provider provenance;
+- a result validated against the element's authored output schema;
+- grounded occurrence references for source/turn/call drill-downs.
 
-Evaluator context requires `completeness` (`complete`, `partial`, `unknown`)
-and the supplied typed `sources` array (which may be empty). Optional
-`applicability` explicitly excludes an element. Run/scenario/profile metadata
-is optional for evaluation; it is required at the readout boundary. For
-Skipped Invocation, the task must be available in recorded user turns or
-explicit `scenario.task`. Source availability alone is not discovery.
+Completed absence is `{"state":"completed","observed":false}`. Unknown evidence
+is `{"state":"indeterminate","reason":"..."}`. Confidence is intentionally
+absent. Invalid or ungrounded output is an explicit error and never triggers a
+second model repair call.
 
-Timeout reads namespaced evidence in `tool_calls[].extra`:
+## Prompt execution, cases, optimization, and readout
 
-| Field | Meaning |
-|---|---|
-| `outcome` | `timeout`, `completed`, `error`, `abandoned`, or `pending` |
-| `duration_ms` | Reliable measured duration, not a prose estimate |
-| `started_at`, `ended_at` | ISO timestamps; contradictory/reversed timings are unknown |
-| `progress_interrupted` | Explicit evidence that delay interrupted progress |
-| `source_id` | Optional reference to a supplied typed source |
+The prompt element's YAML instructions and output schema are wrapped in a
+generic immutable trust boundary. Ax performs one typed program step and the
+Copilot adapter makes one SDK request per eligible prompt element. There is no
+cross-element batching, repair-loop exploration, or inference fallback.
+Deterministic elements make zero Ax/SDK calls.
 
-These are explicit supplemental evidence fields, not claims that every ATIF
-producer exports them. Existing ATIF timings elsewhere are retained but not
-guessed or silently normalized into this policy. An explicit timeout proves
-an occurrence without a universal cutoff. Otherwise, duration at/above
-`timeout_policy.threshold_ms` plus interruption/abandonment/pending evidence
-proves a policy-bounded delay occurrence. Slow completion alone is not a
-timeout. Missing/contradictory timing remains indeterminate; complete no-call
-evidence is a negative. A proven timeout can survive partial evidence about
-other calls because its existence is already established. Skipped Invocation
-needs post-discovery run completeness to establish non-use.
+Cases and gold remain separate. Every case records split, family, originating
+run, ATIF, and requested elements. Loading rejects family or originating-run
+leakage across train, validation, and held-out sets. Fixed assertions validate
+state, polarity, cardinality, source, turn, call, and extension-point identity.
 
-## Structured contract and field review
+Optimization artifacts use `scope/taxonome-ax/v2` and bind the complete Ax
+serialization, including learned demos, to the exact taxonomy digest, element,
+model, prompt contract, and corpus. Historical `taxonome.ax.v1` artifacts fail
+clearly instead of being replayed under revised YAML semantics. The real Ax
+convenience optimizer remains bounded bootstrap plus GEPA. `maxMetricCalls` is
+not an all-in budget; every student, teacher, reflection, retry, and replay SDK
+attempt shares the durable cumulative ledger.
 
-Schema revision: `taxonome.observation.v1`. Category remains definition
-metadata, derived by consumers. Confidence is rejected, not just omitted by
-convention. The original schema-declared hypothesis is simplified, not a
-mandatory second Boolean implementation:
+The ledger reserves before submission and has an immutable maximum of 500 for
+the recorded experiment. Failed and crash-interrupted reservations still
+count. Separate processes use exclusive filesystem locking. Keep experiment
+ledgers outside the checkout.
 
-The SDK does not expose native JSON-Schema constrained decoding here. Ax
-declares/parses JSON in the prompt and the shared Zod schema validates it;
-invalid results are explicit errors, never repaired by a second element call.
+`readout <results.json> --taxonomy taxonomy.yaml --markdown preview.md`
+optionally verifies the taxonomy digest before producing deterministic JSON
+and Markdown. It reports behavior/source frequencies, distinct runs versus
+occurrences, total/assessed/unknown/excluded/error coverage, and stable evidence
+drill-downs. It does not scrape prose, re-infer omitted findings, make another
+model call, or replace production readout.
 
-| Field | Producer and concrete consumer | Decision / simpler alternative |
-|---|---|---|
-| `schema_version` | Engine; artifact/replay compatibility | Keep in envelope, not each occurrence |
-| `element_id` | Engine; report grouping | Keep; label/category are derivable definition metadata |
-| `implementation` | Engine; review/provenance and zero-call accounting | Keep outside semantic result |
-| `state` | Engine/detector; coverage denominators | Keep: completed absence must differ from unknown, excluded, and execution failure |
-| `observed` | Detector; behavior frequency | Keep only for completed assessment; no null fake verdict |
-| `occurrences[]` | Detector; repeated/source frequencies | Required nonempty only for positives; negatives omit it |
-| `source {id,label,surface_id}` | Supplied context copied by detector; source grouping/display | Keep together per occurrence; known surfaces only; generic Timeout may omit it |
-| `extension_point` | Skipped detector; exact unused artifact/tool | Keep for skipped invocation; a source can contain references |
-| `discovery_turn` | Skipped detector; discovery ordering/drilldown | Keep; also serves as the turn reference, avoiding duplicate related-turn arrays |
-| `related_turns`, `tool_call_id` | Timeout detector; call-level drilldown | Keep for Timeout; no fabricated extension/discovery fields |
-| `reason` / `error` | Detector/executor; explain unassessed/failure | Conditional only; no generic success prose to scrape |
-| `confidence`, output `category_id`, result `surface_id` | No necessary readout consumer | Remove/reject |
-| `expected_invocation` | Can be reconstructed from explicit scenario/reference context | Omit from this narrow slice; no tested consumer needs generated advice |
+## Compatibility boundary
 
-For example, a completed negative is just
-`{"state":"completed","observed":false}`. An unknown is
-`{"state":"indeterminate","reason":"Post-discovery evidence is partial."}`.
-Both avoid invented occurrence metadata.
-
-## Cases, optimization, and readout
-
-`fixtures/inputs.jsonl` and `gold.json` are separate: ordinary evaluation never
-receives its expected output. Ax bootstrap requires labeled training examples
-as supervised seed demonstrations, excluding the current query. The task
-program strips output fields from its actual forward input. Validation and
-heldout labels stay exclusively in the metric. Each row records a family, originating run, split, and
-provenance. Loading rejects family/run leakage between train, validation and
-heldout. Synthetic edges are clearly labeled. The reviewed haiku ATIF
-reconstruction preserves the exact user/agent messages and token metrics
-asserted by the committed post-processor WebSocket HAR test; it is a narrow
-format/negative reference, not a sampled production benchmark. Broader
-real-run generalization is not established by this packet.
-
-Fixed assertions check state/polarity, cardinality, expected source/turn/call
-identity and extension-point names. External schemas reject invented sources,
-turns, call/source mismatches, duplicate occurrences, and forbidden metadata.
-Unit tests additionally cover boundary timings, repeated sources, immutability,
-timestamp shifts, unknown evidence, no-token execution, and CLI stdout/stderr.
-
-The real Ax convenience optimizer is used, with bounded bootstrap plus GEPA,
-not a renamed hand-written prompt search. Only training data may become
-demonstrations; validation drives selection; heldout is never passed to the
-optimizer. The complete Ax serialization, including demos/components and
-statistics, is retained and restored with `applyOptimization`. Contract/model
-hash mismatches fail instead of replaying against a changed baseline.
-`maxMetricCalls` is not an all-in limit; student, teacher, retry, and replay
-submissions all share the durable ledger.
-
-Known Skipped Invocation preconditions are enforced before inference:
-explicitly excluded assessments are inapplicable, and incomplete/unknown run
-completeness or missing task evidence is indeterminate. These preflights make
-zero calls and are reported separately from eligible prompt predictions.
-Every eligible prompt evaluation makes exactly one SDK request. Explicit
-Timeout positives are not blocked by the complete-run requirement.
-Preflight-only cases remain in the functional regression/final packets but
-are excluded from prompt optimization, which cannot improve an authoritative
-metadata decision.
-
-The SDK cannot apply Ax's temperature/token-limit hints. The adapter emits a
-diagnostic and records `sdk-managed` sampling/low reasoning rather than
-claiming these hints were applied. Ax optimization statistics are retained
-verbatim, but their zero/default resource estimates are not actual usage;
-the SDK event ledger is the usage authority.
-
-`readout <results.json> --markdown preview.md` consumes an explicit array of
-`{context:{run_id,scenario,profile},results:[...]}`. It produces deterministic
-JSON plus optional Markdown: behavior and behavior/source frequencies,
-distinct-run versus occurrence counts, total/assessed/unknown/excluded/error
-coverage, and stable evidence drilldowns. Missing assessments count unknown;
-duplicate runs/assessments fail rather than double-counting. This is not a
-scorecard, fix list, narrative model call, or production readout v2.
+The YAML/archive/plugin revision preserves the complete historical v1 evidence
+directory and its 256-call ledger byte-for-byte. Historical output remains
+accurately labeled for its original contracts and source commits. New inputs,
+results, and optimization artifacts are versioned separately. Compatibility is
+explicit conversion or rejection; there is no silent reinterpretation.
 
 ## Recorded spike findings (2026-10-21)
 

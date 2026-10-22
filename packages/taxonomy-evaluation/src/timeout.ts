@@ -1,7 +1,96 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-import type { TaxonomyInput, TimeoutResult } from "./contracts.js";
+import type { LegacyTaxonomyInput, TimeoutResult } from "./contracts.js";
+import { z } from "zod";
+import type { DeterministicHandler } from "./handlers.js";
+import type { TaxonomyInput as LoadedTaxonomyInput } from "./scope-atif.js";
+
+export const timeoutConfigSchema = z.object({
+  threshold_ms: z.number().finite().positive().optional(),
+}).strict();
+export type TimeoutConfig = z.infer<typeof timeoutConfigSchema>;
+
+/**
+ * Pure built-in Timeout handler over namespaced Scope call evidence.
+ *
+ * @param input - Frozen stitched/plain ATIF plus loaded taxonomy.
+ * @param config - YAML policy; `threshold_ms` is optional milliseconds.
+ */
+function evaluateTimeout(
+  input: LoadedTaxonomyInput,
+  config: TimeoutConfig,
+): unknown {
+  const sources = new Map(
+    (input.atif.extra?.scope?.available_sources ?? []).map(source => [source.id, source]),
+  );
+  const occurrences: Array<{
+    source?: { id: string; label: string; surface_id: string };
+    related_turns: number[];
+    tool_call_id: string;
+  }> = [];
+  let hasUnknownEvidence = input.atif.extra?.scope?.trajectory_state !== "complete";
+
+  for (const step of input.atif.steps) {
+    for (const call of step.tool_calls ?? []) {
+      const evidence = call.extra?.scope;
+      const startedAt = evidence?.started_at ? Date.parse(evidence.started_at) : undefined;
+      const endedAt = evidence?.ended_at ? Date.parse(evidence.ended_at) : undefined;
+      const elapsedMs = startedAt !== undefined && endedAt !== undefined ? endedAt - startedAt : undefined;
+      const durationMs = evidence?.duration_ms ?? elapsedMs;
+
+      if (
+        (elapsedMs !== undefined && elapsedMs < 0) ||
+        (elapsedMs !== undefined && evidence?.duration_ms !== undefined && Math.abs(elapsedMs - evidence.duration_ms) > 1)
+      ) {
+        hasUnknownEvidence = true;
+        continue;
+      }
+
+      const explicitTimeout = evidence?.outcome === "timeout";
+      const exceedsPolicy = durationMs !== undefined &&
+        config.threshold_ms !== undefined &&
+        durationMs >= config.threshold_ms;
+      const interrupted = evidence?.progress_interrupted === true ||
+        evidence?.outcome === "abandoned" ||
+        evidence?.outcome === "pending";
+
+      if (explicitTimeout || (exceedsPolicy && interrupted)) {
+        const source = evidence?.source_id ? sources.get(evidence.source_id) : undefined;
+        occurrences.push({
+          related_turns: [step.step_id],
+          tool_call_id: call.tool_call_id,
+          ...(source ? { source } : {}),
+        });
+      } else if (
+        durationMs === undefined ||
+        !evidence?.outcome ||
+        evidence.outcome === "pending" ||
+        (config.threshold_ms === undefined && evidence?.progress_interrupted !== false) ||
+        (exceedsPolicy && evidence?.progress_interrupted === undefined)
+      ) {
+        hasUnknownEvidence = true;
+      }
+    }
+  }
+
+  if (occurrences.length) {
+    return { state: "completed", observed: true, occurrences };
+  }
+  if (hasUnknownEvidence) {
+    return {
+      state: "indeterminate",
+      reason: "Complete evidence or reliable call timing/outcome and an applicable delay policy are missing or contradictory.",
+    };
+  }
+  return { state: "completed", observed: false };
+}
+
+/** Built-in registry entry referenced by YAML as `scope/timeout-v1`. */
+export const timeoutHandler: DeterministicHandler<TimeoutConfig> = {
+  configSchema: timeoutConfigSchema,
+  evaluate: evaluateTimeout,
+};
 
 /**
  * Pure detector over explicit timeout evidence or measured, policy-bounded delays.
@@ -11,7 +100,7 @@ import type { TaxonomyInput, TimeoutResult } from "./contracts.js";
  * supplied, is a positive duration in milliseconds.
  * @returns A deterministic observation with zero model calls or hidden I/O.
  */
-export function detectTimeout(input: TaxonomyInput): TimeoutResult {
+export function detectTimeout(input: LegacyTaxonomyInput): TimeoutResult {
   if (input.context.applicability?.["beh-timeout"] === false) {
     return { state: "inapplicable", reason: "Timeout is explicitly outside this scenario's assessment." };
   }

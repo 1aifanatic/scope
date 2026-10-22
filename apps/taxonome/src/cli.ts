@@ -2,44 +2,53 @@
 // Licensed under the MIT License.
 
 import { readFile, writeFile } from "node:fs/promises";
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import {
-  contextSchema,
-  elementIdSchema,
+  buildReadoutV2,
+  createBuiltInHandlerRegistry,
   evaluate,
-  loadJson,
-  buildReadout,
-  readoutMarkdown,
-  prepareInput,
-  type ElementId,
+  loadAtifInput,
+  loadPlugins,
+  loadTaxonomy,
+  readoutMarkdownV2,
   type Evaluation,
+  type NormalizedTaxonomy,
   type PromptExecutor,
+  type ScopeAtif,
 } from "taxonomy-evaluation";
-import { checkCase, loadCases, loadGold } from "taxonomy-evaluation/cases";
+import {
+  checkCaseV2,
+  loadCasesV2,
+  loadGoldV2,
+} from "taxonomy-evaluation/cases-v2";
+import type { CallLedger } from "taxonomy-evaluation/ledger";
+import type { CopilotTransport } from "taxonomy-evaluation/copilot";
 import {
   configureTaxonomeHelp,
   createTaxonomeStyle,
   type TaxonomeStyle,
 } from "./style.js";
 
-interface ModelOptions {
+interface ExecutionOptions {
+  /** Required taxonomy YAML path. */
+  taxonomy: string;
+  /** Explicit trusted compiled JavaScript plugin selections. */
+  plugin: string[];
   /** Exact Copilot model ID; defaults to the pinned spike model. */
   model: string;
   /** External shared call-ledger path; required only when prompt execution occurs. */
   ledger?: string;
-  /** Optional complete Ax artifact path used by run/eval replay, not optimization. */
+  /** Optional v2 Ax artifact path used by run/eval replay, not optimization. */
   artifact?: string;
 }
 
-interface RunOptions extends ModelOptions {
-  /** Path to explicit evaluation context JSON. */
-  context: string;
-  /** Comma-separated element selection; defaults to both spike elements. */
-  elements: string;
+interface RunOptions extends ExecutionOptions {
+  /** Comma-separated element IDs; defaults to every loaded taxonomy element. */
+  elements?: string;
 }
 
-interface EvalOptions extends ModelOptions {
-  /** Path to curated ATIF/context JSONL rows. */
+interface EvalOptions extends ExecutionOptions {
+  /** Path to curated v2 ATIF JSONL rows. */
   cases: string;
   /** Path to separate reviewed gold assertions. */
   gold: string;
@@ -51,11 +60,13 @@ interface EvalOptions extends ModelOptions {
   elements?: string;
 }
 
-interface OptimizeOptions extends ModelOptions {
-  /** Path to disjoint train/validation/heldout JSONL rows. */
+interface OptimizeOptions extends ExecutionOptions {
+  /** Path to disjoint train/validation/heldout v2 JSONL rows. */
   cases: string;
   /** Path to fixed reviewed assertions used by the metric. */
   gold: string;
+  /** Prompt element ID to optimize. */
+  element: string;
   /** New artifact destination; existing files are never overwritten. */
   output: string;
   /** Ax metric-evaluation cap from 1 through 100; default 48. */
@@ -63,141 +74,197 @@ interface OptimizeOptions extends ModelOptions {
 }
 
 interface ReadoutOptions {
+  /** Optional taxonomy YAML used to verify result digest. */
+  taxonomy?: string;
+  /** Explicit plugins needed only when verifying a custom deterministic taxonomy. */
+  plugin: string[];
   /** Optional Markdown destination; JSON always remains on stdout. */
   markdown?: string;
 }
 
-/**
- * Parses a comma-separated CLI selection.
- *
- * @param value - Comma-separated stable element IDs without whitespace normalization.
- */
-function parseElementIds(value: string): ElementId[] {
-  return value.split(",").map(id => elementIdSchema.parse(id));
+interface LoadedExecution {
+  /** Loaded taxonomy and resolved deterministic handlers. */
+  taxonomy: NormalizedTaxonomy;
+  /** Lazily initialized prompt executor. */
+  executor?: PromptExecutor;
+  /** Closes an initialized SDK transport. */
+  close(): Promise<void>;
+  /** Reproducibility metadata and ledger snapshot. */
+  metadata(): Promise<Record<string, unknown>>;
 }
 
-/**
- * Defers SDK imports/auth until an eligible element actually asks for inference.
- *
- * @param options - Model, optional ledger, and optional replay artifact from Commander.
- * @param selected - Element IDs requested by this command.
- * @param purpose - Stable ledger phase label (`run` or `eval`).
- * @returns Lazy executor, cleanup function, and reproducibility metadata accessor.
- */
-async function createRuntime(options: ModelOptions, selected: readonly ElementId[], purpose: string) {
-  if (!selected.includes("beh-skipped-invocation")) {
-    if (options.artifact) {
-      throw new Error("--artifact requires a prompt element selection");
-    }
+/** Collects repeatable Commander option values without scanning or discovery. */
+function collect(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
 
+/** Parses a comma-separated element list without accepting empty IDs. */
+function parseElementIds(value: string): string[] {
+  const ids = value.split(",").map(id => id.trim());
+  if (ids.some(id => !id)) throw new Error("--elements contains an empty ID");
+  return ids;
+}
+
+/** Adds required taxonomy, repeatable plugin, model, ledger, and replay options. */
+function addExecutionOptions(command: Command): Command {
+  return command
+    .requiredOption("--taxonomy <path>", "Taxonomy YAML manifest")
+    .addOption(new Option("--plugin <specifier>", "Trusted compiled JS plugin path or installed package").argParser(collect).default([]))
+    .option("--model <id>", "Copilot model (pinned for comparisons)", "gpt-5.6-sol-fast")
+    .option("--ledger <path>", "Shared durable all-in live-call ledger (cap 500)")
+    .option("--artifact <path>", "Compatible scope/taxonome-ax/v2 replay artifact");
+}
+
+/** Loads built-ins, explicit plugins, and the authored taxonomy from invocation cwd. */
+async function loadExecutionTaxonomy(
+  options: Pick<ExecutionOptions, "taxonomy" | "plugin">,
+): Promise<NormalizedTaxonomy> {
+  const handlers = createBuiltInHandlerRegistry();
+  await loadPlugins(options.plugin, process.cwd(), handlers);
+  return loadTaxonomy(options.taxonomy, { handlers });
+}
+
+/** Defers SDK initialization until an eligible prompt element reaches execution. */
+async function createRuntime(
+  options: ExecutionOptions,
+  taxonomy: NormalizedTaxonomy,
+  selected: readonly string[],
+  purpose: string,
+): Promise<LoadedExecution> {
+  const promptIds = selected.filter(id =>
+    taxonomy.elementById.get(id)?.implementation.type === "prompt"
+  );
+  if (!promptIds.length) {
+    if (options.artifact) {
+      throw new Error("--artifact requires at least one prompt element");
+    }
     return {
-      executor: undefined,
-      close: async () => { },
-      metadata: async () => ({ strategy: "deterministic" })
+      taxonomy,
+      close: async () => {},
+      metadata: async () => ({
+        taxonomy: {
+          id: taxonomy.id,
+          version: taxonomy.version,
+          digest: taxonomy.digest,
+        },
+        strategy: "deterministic",
+      }),
     };
   }
 
-  let active: {
-    executor: PromptExecutor;
-    close(): Promise<void>;
-    contract_hash: string;
-    artifact_hash: string | null;
-  } | undefined;
-  let starting: Promise<NonNullable<typeof active>> | undefined;
+  let transport: CopilotTransport | undefined;
+  let executor: PromptExecutor | undefined;
+  let artifactHash: string | null = null;
+  let starting: Promise<PromptExecutor> | undefined;
 
-  /** Opens or verifies the one shared cumulative ledger before any prompt request. */
-  async function openLedger() {
+  /** Opens/verifies the shared ledger before any model submission. */
+  async function openLedger(): Promise<CallLedger> {
     if (!options.ledger) {
-      throw new Error("--ledger is required for all live calls, including eval/optimization/replay");
+      throw new Error("--ledger is required when selected elements use prompts");
     }
-
     const { CallLedger } = await import("taxonomy-evaluation/ledger");
     const ledger = new CallLedger(options.ledger);
     await ledger.initialize();
     return ledger;
   }
 
-  /** Lazily creates the isolated transport and restores the optional complete artifact. */
-  async function start() {
+  /** Creates one SDK transport and restores an exact v2 artifact when supplied. */
+  async function start(): Promise<PromptExecutor> {
+    const {
+      copilotAI,
+      openCopilotTransport,
+      taxonomyPromptExecutor,
+    } = await import("taxonomy-evaluation/copilot");
+    const { restoreOptimizationArtifactV2 } =
+      await import("taxonomy-evaluation/optimization-v2");
     const ledger = await openLedger();
-    const { openCopilotTransport, copilotAI, skippedExecutor } = await import("taxonomy-evaluation/copilot");
-    const { restoreArtifact, contractHash, hash } = await import("taxonomy-evaluation/optimization");
-    const artifact = options.artifact ? restoreArtifact(await loadJson(options.artifact), options.model) : undefined;
-    const transport = await openCopilotTransport(ledger, options.model, purpose);
-
-    try {
-      active = {
-        executor: skippedExecutor(copilotAI(transport, options.model), artifact?.optimized),
-        close: () => transport.close(),
-        contract_hash: contractHash(),
-        artifact_hash: artifact ? hash(artifact) : null,
-      };
-    } catch (error) {
-      try {
-        await transport.close();
-      } catch (cleanupError) {
-        throw new AggregateError([error, cleanupError], "Prompt initialization and cleanup failed");
-      }
-      throw error;
+    const artifacts = new Map();
+    if (options.artifact) {
+      const value = JSON.parse(await readFile(options.artifact, "utf8")) as unknown;
+      const elementId = typeof value === "object" && value && "element_id" in value
+        ? String((value as { element_id: unknown }).element_id)
+        : promptIds[0];
+      const artifact = restoreOptimizationArtifactV2(
+        value,
+        taxonomy,
+        elementId,
+        options.model,
+      );
+      artifacts.set(elementId, artifact.optimized);
+      artifactHash = artifact.contract_hash;
     }
-
-    return active;
+    transport = await openCopilotTransport(ledger, options.model, purpose);
+    executor = taxonomyPromptExecutor(copilotAI(transport, options.model), artifacts);
+    return executor;
   }
 
   return {
+    taxonomy,
     executor: {
-      evaluate: async (id, input) => {
+      async evaluate(element, input) {
         starting ??= start();
-        return (await starting).executor.evaluate(id, input);
+        return (await starting).evaluate(element, input);
       },
-    } satisfies PromptExecutor,
+    },
     close: async () => {
-      await active?.close();
+      await transport?.close();
     },
     metadata: async () => {
-      const snapshot = options.ledger ? await (await openLedger()).summary() : undefined;
+      const ledger = options.ledger ? await openLedger() : undefined;
+      const summary = ledger ? await ledger.summary() : undefined;
       return {
+        taxonomy: {
+          id: taxonomy.id,
+          version: taxonomy.version,
+          digest: taxonomy.digest,
+        },
         model: options.model,
-        initialized: !!active,
-        contract_hash: active?.contract_hash,
-        artifact_hash: active?.artifact_hash,
-        budget: snapshot ? { cap: snapshot.cap, used: snapshot.used, remaining: snapshot.remaining } : null,
+        initialized: Boolean(transport),
+        artifact_contract_hash: artifactHash,
+        budget: summary
+          ? { cap: summary.cap, used: summary.used, remaining: summary.remaining }
+          : null,
       };
     },
   };
 }
 
-/**
- * Adds model/ledger/artifact options shared by prompt-capable commands.
- *
- * @param command - Commander command to extend.
- */
-function addModelOptions(command: Command) {
-  return command.option("--model <id>", "Copilot model (pinned for comparisons)", "gpt-5.6-sol-fast")
-    .option(
-      "--ledger <path>",
-      "Shared durable all-in live-call ledger (cap 500)"
-    )
-    .option(
-      "--artifact <path>",
-      "Complete saved Ax optimization artifact"
-    );
+/** Builds explicit readout grouping metadata from the Scope ATIF extension. */
+function readoutRunFromAtif(
+  atif: ScopeAtif,
+  results: Evaluation[],
+) {
+  const scope = atif.extra?.scope;
+  const run = scope?.run;
+  const scenarioId = run?.scenario_id ?? "unknown-scenario";
+  const profileId = run?.profile_id ?? "unknown-profile";
+  return {
+    run: {
+      id: run?.id ?? atif.session_id,
+      scenario: {
+        id: scenarioId,
+        label: run?.scenario_label ?? scenarioId,
+        ...(scope?.task ? { task: scope.task } : {}),
+      },
+      profile: {
+        id: profileId,
+        label: run?.profile_label ?? profileId,
+      },
+    },
+    results,
+  };
 }
 
-/**
- * Writes one pretty JSON document to stdout.
- *
- * @param value - JSON-serializable command result.
- */
-const emit = (value: unknown) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+/** Writes one pretty JSON document to stdout without diagnostic ANSI styling. */
+const emit = (value: unknown) =>
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 
-/**
- * Configures commands without running them; only JSON results are written to stdout.
- *
- * @returns Commander program for the standalone run/eval/optimize/readout surface.
- */
+/** Configures the standalone YAML/archive/plugin CLI without running it. */
 export function createCli(style: TaxonomeStyle = createTaxonomeStyle()): Command {
-  const cli = new Command().name("taxonome").description("Standalone two-element taxonomy evaluation spike").version("0.1.0");
+  const cli = new Command()
+    .name("taxonome")
+    .description("Evaluate authored taxonomy YAML against ATIF or Scope run archives")
+    .version("0.2.0");
   cli.configureOutput({
     writeOut: text => process.stderr.write(text),
     writeErr: text => process.stderr.write(text),
@@ -208,232 +275,229 @@ export function createCli(style: TaxonomeStyle = createTaxonomeStyle()): Command
   cli.action(() => cli.help());
   configureTaxonomeHelp(cli, style);
 
-  // Run one validated input through the same API used by programmatic callers.
-  const runCommand = addModelOptions(cli.command("run <atif>")
-    .description("Evaluate selected elements for one ATIF trajectory")
-    .requiredOption("--context <path>", "Explicit evidence context JSON")
-    .option(
-      "--elements <ids>",
-      "Comma-separated element IDs",
-      "beh-skipped-invocation,beh-timeout"
-    ));
+  const runCommand = addExecutionOptions(
+    cli.command("run <input>")
+      .description("Evaluate taxonomy elements for ATIF JSON or a Scope .tar.gz archive")
+      .option("--elements <ids>", "Comma-separated element IDs; defaults to all"),
+  );
   configureTaxonomeHelp(runCommand, style);
-  runCommand
-    .action(async (atif: string, options: RunOptions) => {
-      // Acquisition and context validation complete before any runtime is opened.
-      const input = prepareInput({ atif: await loadJson(atif), context: contextSchema.parse(await loadJson(options.context)) });
-      const selected = parseElementIds(options.elements);
-      const runtime = await createRuntime(options, selected, "run");
-
-      try {
-        const results = await evaluate(input, selected, runtime.executor);
-        emit({ context: input.context, results, metadata: await runtime.metadata() });
-        if (results.some(result => result.result.state === "error")) {
-          process.exitCode = 1;
-        }
-      } finally {
-        await runtime.close();
+  runCommand.action(async (location: string, options: RunOptions) => {
+    const taxonomy = await loadExecutionTaxonomy(options);
+    const selected = options.elements
+      ? parseElementIds(options.elements)
+      : taxonomy.elements.map(element => element.id);
+    const atif = await loadAtifInput(location, taxonomy);
+    const runtime = await createRuntime(options, taxonomy, selected, "run");
+    try {
+      const results = await evaluate({ atif, taxonomy }, selected, runtime.executor);
+      emit({
+        ...readoutRunFromAtif(atif, results),
+        metadata: await runtime.metadata(),
+      });
+      if (results.some(result =>
+        typeof result.result === "object" &&
+        result.result !== null &&
+        "state" in result.result &&
+        (result.result as { state?: unknown }).state === "error"
+      )) {
+        process.exitCode = 1;
       }
-    });
+    } finally {
+      await runtime.close();
+    }
+  });
 
-  // Evaluate a split repeatedly while keeping expected assertions outside model inputs.
-  const evalCommand = addModelOptions(cli.command("eval")
-    .description("Evaluate curated cases against fixed assertions")
-    .requiredOption("--cases <path>", "ATIF/context input JSONL")
-    .requiredOption(
-      "--gold <path>",
-      "Separate expected JSON/assertions"
-    )
-    .option(
-      "--split <split>",
-      "train, validation, heldout, unit, or all",
-      "heldout"
-    )
-    .option(
-      "--samples <n>",
-      "Repeated independent passes",
-      "1"
-    )
-    .option(
-      "--elements <ids>",
-      "Override case element selection"
-    ));
+  const evalCommand = addExecutionOptions(
+    cli.command("eval")
+      .description("Evaluate curated ATIF cases against fixed assertions")
+      .requiredOption("--cases <path>", "V2 ATIF case JSONL")
+      .requiredOption("--gold <path>", "Separate expected JSON/assertions")
+      .option("--split <split>", "train, validation, heldout, unit, or all", "heldout")
+      .option("--samples <n>", "Repeated independent passes", "1")
+      .option("--elements <ids>", "Override case element selection"),
+  );
   configureTaxonomeHelp(evalCommand, style);
-  evalCommand
-    .action(async (options: EvalOptions) => {
-      const allCases = await loadCases(options.cases);
-      const gold = await loadGold(options.gold);
-      if (!["train", "validation", "heldout", "unit", "all"].includes(options.split)) {
-        throw new Error("Invalid split");
-      }
+  evalCommand.action(async (options: EvalOptions) => {
+    const taxonomy = await loadExecutionTaxonomy(options);
+    const allCases = await loadCasesV2(options.cases, taxonomy);
+    const gold = await loadGoldV2(options.gold);
+    if (!["train", "validation", "heldout", "unit", "all"].includes(options.split)) {
+      throw new Error("Invalid split");
+    }
+    const cases = allCases.filter(row =>
+      options.split === "all" || row.split === options.split
+    );
+    if (!cases.length) throw new Error("No selected cases");
+    const sampleCount = Number(options.samples);
+    if (!Number.isInteger(sampleCount) || sampleCount < 1 || sampleCount > 10) {
+      throw new Error("--samples must be 1..10");
+    }
+    const override = options.elements ? parseElementIds(options.elements) : undefined;
+    const selectedPromptUniverse = override ??
+      [...new Set(cases.flatMap(row => row.elements))];
+    const runtime = await createRuntime(
+      options,
+      taxonomy,
+      selectedPromptUniverse,
+      "eval",
+    );
+    const before = await runtime.metadata();
+    const rows: unknown[] = [];
 
-      const cases = allCases.filter(row => options.split === "all" || row.split === options.split);
-      if (!cases.length) {
-        throw new Error("No selected cases");
-      }
-
-      const sampleCount = Number(options.samples);
-      if (!Number.isInteger(sampleCount) || sampleCount < 1 || sampleCount > 10) {
-        throw new Error("--samples must be 1..10");
-      }
-
-      const override = options.elements ? parseElementIds(options.elements) : undefined;
-      const runtime = await createRuntime(options, override ?? [...new Set(cases.flatMap(row => row.elements))], "eval");
-      const before = await runtime.metadata();
-      const rows: {
-        case_id: string;
-        split: string;
-        sample: number;
-        results: Evaluation[];
-        errors: string[];
-        latency_ms: number;
-        context: unknown;
-        prompt_predictions: unknown[];
-      }[] = [];
-
-      try {
-        // Preserve deterministic case/sample order so evidence rows and call accounting are reproducible.
-        for (let sample = 0; sample < sampleCount; sample++) {
-          for (const row of cases) {
-            const selected = override ?? row.elements;
-            for (const id of selected) {
-              if (!gold[row.id]?.[id]) {
-                throw new Error(`Missing gold for ${row.id}/${id}`);
-              }
-            }
-
-            const startedAt = Date.now();
-            const promptPredictions: unknown[] = [];
-            const executor = runtime.executor;
-
-            // Preflight results are not model predictions; capture only actual executor output.
-            const capturingExecutor: PromptExecutor | undefined = executor ? {
-              evaluate: async (id, input) => {
-                const prediction = await executor.evaluate(id, input);
-                promptPredictions.push({ element_id: id, prediction });
+    try {
+      for (let sample = 0; sample < sampleCount; sample++) {
+        for (const row of cases) {
+          const selected = override ?? row.elements;
+          const predictions: unknown[] = [];
+          const capturingExecutor: PromptExecutor | undefined = runtime.executor
+            ? {
+              async evaluate(element, input) {
+                const prediction = await runtime.executor!.evaluate(element, input);
+                predictions.push({ element_id: element.id, prediction });
                 return prediction;
               },
-            } : undefined;
-            const results = await evaluate(row.input, selected, capturingExecutor);
-            const errors = checkCase(row, results, gold, selected);
-
-            rows.push({
-              case_id: row.id,
-              split: row.split,
-              sample,
-              results,
-              errors,
-              latency_ms: Date.now() - startedAt,
-              context: row.input.context,
-              prompt_predictions: promptPredictions,
-            });
-            const context = `${row.id} sample=${sample}`;
-            const status = errors.length ? style.fail("FAIL") : style.pass("PASS");
-            process.stderr.write(`${style.dim(context)} ${status}\n`);
-          }
+            }
+            : undefined;
+          const startedAt = Date.now();
+          const results = await evaluate(
+            { atif: row.atif, taxonomy },
+            selected,
+            capturingExecutor,
+          );
+          const errors = checkCaseV2(row, results, gold, selected);
+          rows.push({
+            case_id: row.id,
+            split: row.split,
+            sample,
+            results,
+            errors,
+            latency_ms: Date.now() - startedAt,
+            prompt_predictions: predictions,
+          });
+          process.stderr.write(
+            `${style.dim(`${row.id} sample=${sample}`)} ${errors.length ? style.fail("FAIL") : style.pass("PASS")}\n`,
+          );
         }
-
-        // Emit one machine-readable report after all rows and cleanup metadata are available.
-        const passed = rows.filter(row => !row.errors.length).length;
-        emit({
-          passed,
-          total: rows.length,
-          pass_rate: passed / rows.length,
-          metadata: { before, after: await runtime.metadata() },
-          rows
-        });
-        if (passed !== rows.length) {
-          process.exitCode = 1;
-        }
-      } finally {
-        await runtime.close();
       }
-    });
+      const passed = rows.filter(row =>
+        !(row as { errors: unknown[] }).errors.length
+      ).length;
+      emit({
+        passed,
+        total: rows.length,
+        pass_rate: passed / rows.length,
+        metadata: { before, after: await runtime.metadata() },
+        rows,
+      });
+      if (passed !== rows.length) process.exitCode = 1;
+    } finally {
+      await runtime.close();
+    }
+  });
 
-  // Optimize only the prompt-backed element, using separate SDK transports for student and teacher calls.
-  const optimizeCommand = addModelOptions(cli.command("optimize")
-    .description("Optimize Skipped Invocation and save a replayable Ax artifact")
-    .requiredOption("--cases <path>", "Disjoint train/validation/heldout JSONL")
-    .requiredOption(
-      "--gold <path>",
-      "Fixed assertions"
-    )
-    .requiredOption(
-      "--output <path>",
-      "Complete Ax artifact destination"
-    )
-    .option(
-      "--max-metric-calls <n>",
-      "Finite Ax metric budget, not the all-in ledger cap",
-      "48"
-    ));
+  const optimizeCommand = addExecutionOptions(
+    cli.command("optimize")
+      .description("Optimize one YAML prompt element and save a v2 Ax artifact")
+      .requiredOption("--cases <path>", "Disjoint v2 train/validation/heldout JSONL")
+      .requiredOption("--gold <path>", "Fixed assertions")
+      .requiredOption("--element <id>", "Prompt element ID")
+      .requiredOption("--output <path>", "New complete artifact destination")
+      .option("--max-metric-calls <n>", "Finite Ax metric budget, not all-in call cap", "48"),
+  );
   configureTaxonomeHelp(optimizeCommand, style);
-  optimizeCommand
-    .action(async (options: OptimizeOptions) => {
-      if (!options.ledger) {
-        throw new Error("--ledger is required for optimization");
-      }
-      if (options.artifact) {
-        throw new Error("Optimization starts from the pinned baseline; --artifact is for run/eval replay");
-      }
+  optimizeCommand.action(async (options: OptimizeOptions) => {
+    if (!options.ledger) throw new Error("--ledger is required for optimization");
+    if (options.artifact) throw new Error("--artifact is for run/eval replay");
+    const taxonomy = await loadExecutionTaxonomy(options);
+    const cases = await loadCasesV2(options.cases, taxonomy);
+    const gold = await loadGoldV2(options.gold);
+    const maxMetricCalls = Number(options.maxMetricCalls);
+    if (
+      !Number.isInteger(maxMetricCalls) ||
+      maxMetricCalls < 1 ||
+      maxMetricCalls > 100
+    ) {
+      throw new Error("--max-metric-calls must be 1..100");
+    }
 
-      const { CallLedger, openCopilotTransport, copilotAI, closeTransports } = await import("taxonomy-evaluation/copilot");
-      const { optimizeSkipped } = await import("taxonomy-evaluation/optimization");
-      const cases = await loadCases(options.cases);
-      const gold = await loadGold(options.gold);
-      const maxMetricCalls = Number(options.maxMetricCalls);
-      if (!Number.isInteger(maxMetricCalls) || maxMetricCalls < 1 || maxMetricCalls > 100) {
-        throw new Error("--max-metric-calls must be 1..100");
-      }
+    const { CallLedger } = await import("taxonomy-evaluation/ledger");
+    const {
+      closeTransports,
+      copilotAI,
+      openCopilotTransport,
+    } = await import("taxonomy-evaluation/copilot");
+    const { optimizePromptElementV2 } =
+      await import("taxonomy-evaluation/optimization-v2");
+    const ledger = new CallLedger(options.ledger);
+    await ledger.initialize();
+    const student = await openCopilotTransport(
+      ledger,
+      options.model,
+      "optimize:student",
+    );
+    let teacher: Awaited<ReturnType<typeof openCopilotTransport>> | undefined;
+    let failure: unknown;
+    let output: unknown;
+    try {
+      teacher = await openCopilotTransport(
+        ledger,
+        options.model,
+        "optimize:teacher",
+      );
+      const artifact = await optimizePromptElementV2(
+        taxonomy,
+        options.element,
+        cases,
+        gold,
+        copilotAI(student, options.model),
+        copilotAI(teacher, options.model, ""),
+        options.model,
+        maxMetricCalls,
+      );
+      await writeFile(
+        options.output,
+        `${JSON.stringify(artifact, null, 2)}\n`,
+        { flag: "wx" },
+      );
+      output = {
+        artifact: options.output,
+        best_score: artifact.optimized.bestScore,
+        budget: await ledger.summary(),
+      };
+    } catch (error) {
+      failure = error;
+    }
+    await closeTransports(teacher ? [student, teacher] : [student], failure);
+    if (!output) throw new Error("Optimizer returned no artifact");
+    emit(output);
+  });
 
-      const ledger = new CallLedger(options.ledger);
-      await ledger.initialize();
-      const student = await openCopilotTransport(ledger, options.model, "optimize:student");
-      let teacher: Awaited<ReturnType<typeof openCopilotTransport>> | undefined;
-      let failure: unknown;
-      let output: unknown;
-
-      try {
-        // The complete artifact is written atomically only after Ax returns a selected program.
-        teacher = await openCopilotTransport(ledger, options.model, "optimize:teacher");
-        const artifact = await optimizeSkipped(
-          cases,
-          gold,
-          copilotAI(student, options.model),
-          copilotAI(teacher, options.model, ""),
-          options.model,
-          maxMetricCalls
-        );
-        await writeFile(options.output, `${JSON.stringify(artifact, null, 2)}\n`, { flag: "wx" });
-        output = {
-          artifact: options.output,
-          best_score: artifact.optimized.bestScore,
-          budget: await ledger.summary()
-        };
-      } catch (error) {
-        failure = error;
-      }
-
-      await closeTransports(teacher ? [student, teacher] : [student], failure);
-      if (!output) {
-        throw new Error("Optimizer returned no artifact");
-      }
-      emit(output);
-    });
-
-  // Convert validated structured results into deterministic JSON and optional Markdown.
   const readoutCommand = cli.command("readout <results>")
-    .description("Build deterministic behavior/source counts from result JSON")
+    .description("Build deterministic counts from v2 result JSON")
+    .option("--taxonomy <path>", "Optional taxonomy YAML digest verification")
+    .addOption(
+      new Option("--plugin <specifier>", "Plugin needed by taxonomy verification")
+        .argParser(collect)
+        .default([]),
+    )
     .option("--markdown <path>", "Write Markdown preview (stdout remains JSON)");
   configureTaxonomeHelp(readoutCommand, style);
-  readoutCommand
-    .action(async (path: string, options: ReadoutOptions) => {
-      const report = buildReadout(JSON.parse(await readFile(path, "utf8")) as unknown);
-      if (options.markdown) {
-        await writeFile(options.markdown, readoutMarkdown(report));
-      }
-      emit(report);
-    });
+  readoutCommand.action(async (path: string, options: ReadoutOptions) => {
+    const taxonomy = options.taxonomy
+      ? await loadExecutionTaxonomy({
+        taxonomy: options.taxonomy,
+        plugin: options.plugin,
+      })
+      : undefined;
+    const report = buildReadoutV2(
+      JSON.parse(await readFile(path, "utf8")) as unknown,
+      taxonomy,
+    );
+    if (options.markdown) {
+      await writeFile(options.markdown, readoutMarkdownV2(report));
+    }
+    emit(report);
+  });
 
   return cli;
 }

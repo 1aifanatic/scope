@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 import { z } from "zod";
-import { behaviorMetadata } from "./engine.js";
 import {
   contextSchema,
   elementIdSchema,
@@ -11,9 +10,23 @@ import {
   timeoutResultSchema,
   occurrenceIdentity,
   type ElementId,
-  type Evaluation,
+  type LegacyEvaluation,
   type Source,
 } from "./contracts.js";
+
+const behaviorMetadata: Record<ElementId, {
+  label: string;
+  category_id: string;
+}> = {
+  "beh-skipped-invocation": {
+    label: "Skipped Invocation",
+    category_id: "behavior-category-invocation",
+  },
+  "beh-timeout": {
+    label: "Timeout",
+    category_id: "behavior-category-invocation",
+  },
+};
 
 const groupingSchema = contextSchema.pick({ run_id: true, scenario: true, profile: true }).required().passthrough();
 
@@ -22,7 +35,7 @@ export interface ReadoutRun {
   /** Required run/scenario/profile grouping context; extra evaluation metadata is preserved. */
   context: z.infer<typeof groupingSchema>;
   /** Validated element evaluations available for this run. Missing elements count unknown. */
-  results: Evaluation[];
+  results: LegacyEvaluation[];
 }
 
 const runSchema = z.object({ context: groupingSchema, results: z.array(evaluationSchema), metadata: z.unknown().optional() }).strict();

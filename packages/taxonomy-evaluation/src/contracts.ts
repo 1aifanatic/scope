@@ -110,10 +110,10 @@ export const contextSchema = z.object({
 export const inputSchema = z.object({ atif: atifSchema, context: contextSchema }).strict();
 
 /** Validated ATIF plus explicit evaluation metadata consumed by every strategy. */
-export type TaxonomyInput = z.infer<typeof inputSchema>;
+export type LegacyTaxonomyInput = z.infer<typeof inputSchema>;
 
 /** The validated ATIF trajectory portion of {@link TaxonomyInput}. */
-export type Atif = TaxonomyInput["atif"];
+export type Atif = LegacyTaxonomyInput["atif"];
 
 /**
  * Positive Skipped Invocation occurrence.
@@ -212,7 +212,7 @@ export const evaluationSchema = z.object({
   }
 });
 
-export interface Evaluation {
+export interface LegacyEvaluation {
   /** Version of the shared observation envelope. */
   schema_version: typeof SCHEMA_VERSION;
   /** Element whose semantics produced `result`. */
@@ -231,7 +231,7 @@ export interface Evaluation {
  * @returns A cloned input safe for freezing and implementation dispatch.
  * @throws When schema, ordering, identity, source, or call references are invalid.
  */
-export function prepareInput(value: unknown): TaxonomyInput {
+export function prepareInput(value: unknown): LegacyTaxonomyInput {
   const input = structuredClone(inputSchema.parse(value));
 
   // Step order is part of the trajectory evidence contract.
@@ -280,7 +280,7 @@ export function prepareInput(value: unknown): TaxonomyInput {
  * @returns The narrowed observation.
  * @throws When shape, trusted metadata, or evidence grounding is invalid.
  */
-export function validateResult(id: ElementId, value: unknown, input: TaxonomyInput): Observation {
+export function validateResult(id: ElementId, value: unknown, input: LegacyTaxonomyInput): Observation {
   const result = (id === "beh-timeout" ? timeoutResultSchema : skippedResultSchema).parse(value);
 
   // Assessment-level states are governed by trusted metadata, not model interpretation.

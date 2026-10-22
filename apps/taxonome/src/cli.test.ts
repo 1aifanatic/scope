@@ -2,18 +2,21 @@
 // Licensed under the MIT License.
 
 import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
-/** Runs real child processes so stdout/stderr and caller-working-directory contracts are covered. */
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL("../../../", import.meta.url));
+const example = fileURLToPath(
+  new URL("../../../examples/taxonome-custom-handler/", import.meta.url),
+);
 const ANSI_PATTERN = /\u001b\[[0-9;]*m/;
 
-/** Returns an environment with all inherited authentication removed. */
+/** Returns a child environment with every supported credential removed. */
 function childEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
     ...process.env,
@@ -24,141 +27,272 @@ function childEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv 
   };
 }
 
-describe("standalone CLI process contract", () => {
-  it("runs minimal-context deterministic ATIF without tokens or Scope services, stdout is JSON only", async () => {
-    const { stdout, stderr } = await exec(
-      process.execPath,
+/** Runs the source CLI as if it were globally installed while preserving cwd. */
+function runCli(
+  args: string[],
+  cwd = root,
+  environment = childEnvironment(),
+) {
+  return exec(
+    process.execPath,
+    [
+      "--conditions=source",
+      "--import",
+      "tsx",
+      fileURLToPath(new URL("./index.ts", import.meta.url)),
+      ...args,
+    ],
+    { cwd, env: environment },
+  );
+}
+
+describe("YAML/archive/plugin CLI process contract", () => {
+  it("requires --taxonomy and emits no success-shaped stdout on configuration errors", async () => {
+    const commands = [
       [
-        "--conditions=source",
-        "--import",
-        "tsx",
-        "apps/taxonome/src/index.ts",
         "run",
-        "packages/taxonomy-evaluation/fixtures/timeout.atif.json",
-        "--context",
-        "packages/taxonomy-evaluation/fixtures/minimal-context.json",
-        "--elements",
-        "beh-timeout",
+        "packages/taxonomy-evaluation/fixtures/v2/timeout.atif.json",
       ],
-      { cwd: root, env: childEnvironment() }
-    );
-    const output: unknown = JSON.parse(stdout);
-    expect(output).toMatchObject({ results: [{ implementation: "deterministic", result: { state: "completed", observed: true } }] });
-    expect(stderr).toBe("");
-  });
-  it("reports input/configuration errors on stderr with no success-shaped stdout", async () => {
-    const command = exec(
-      process.execPath,
+      ["eval", "--cases", "cases.jsonl", "--gold", "gold.json"],
       [
-        "--conditions=source",
-        "--import",
-        "tsx",
-        "apps/taxonome/src/index.ts",
-        "run",
-        "missing.json",
-        "--context",
-        "missing.json"
-      ],
-      { cwd: root }
-    );
-    await expect(command).rejects.toMatchObject({ code: 1, stdout: "", stderr: expect.stringContaining("taxonome:") });
-  });
-  it("does not initialize SDK/auth/ledger for a known incomplete-run precondition", async () => {
-    const { stdout, stderr } = await exec(
-      process.execPath,
-      [
-        "--conditions=source",
-        "--import",
-        "tsx",
-        "apps/taxonome/src/index.ts",
-        "run",
-        "packages/taxonomy-evaluation/fixtures/timeout.atif.json",
-        "--context",
-        "packages/taxonomy-evaluation/fixtures/partial-context.json",
-        "--elements",
+        "optimize",
+        "--cases",
+        "cases.jsonl",
+        "--gold",
+        "gold.json",
+        "--element",
         "beh-skipped-invocation",
+        "--output",
+        "artifact.json",
       ],
-      { cwd: root, env: childEnvironment() }
-    );
-    const output: unknown = JSON.parse(stdout);
-    expect(output).toMatchObject({
-      results: [{ result: { state: "indeterminate" } }],
-      metadata: { initialized: false, budget: null }
-    });
-    expect(stderr).toBe("");
-  });
-  it("preserves caller cwd and JSON stdout through the repository-root script", async () => {
-    const { stdout, stderr } = await exec(
-      "pnpm",
-      [
-        "--silent",
-        "taxonome",
-        "run",
-        "packages/taxonomy-evaluation/fixtures/timeout.atif.json",
-        "--context",
-        "packages/taxonomy-evaluation/fixtures/minimal-context.json",
-        "--elements",
-        "beh-timeout",
-      ],
-      { cwd: root, env: childEnvironment() }
-    );
-    const output: unknown = JSON.parse(stdout);
-    expect(output).toMatchObject({ results: [{ result: { observed: true } }] });
-    expect(stderr).toBe("");
-  });
-  it("runs bounded HTTP ATIF acquisition through the same deterministic CLI path without credentials", async () => {
-    // Serve the committed ATIF over loopback and verify the child receives no inherited auth headers.
-    const body = await readFile(new URL("../../../packages/taxonomy-evaluation/fixtures/timeout.atif.json", import.meta.url));
-    const server = createServer((req, res) => {
-      expect(req.headers.authorization).toBeUndefined();
-      res.setHeader("Content-Type", "application/json");
-      res.end(body);
-    });
-    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("Missing local fixture listener");
-    try {
-      const { stdout, stderr } = await exec(
-        process.execPath,
-        [
-          "--conditions=source",
-          "--import",
-          "tsx",
-          "apps/taxonome/src/index.ts",
-          "run",
-          `http://127.0.0.1:${address.port}/atif`,
-          "--context",
-          "packages/taxonomy-evaluation/fixtures/minimal-context.json",
-          "--elements",
-          "beh-timeout",
-        ],
-        { cwd: root, env: childEnvironment() }
-      );
-      const output: unknown = JSON.parse(stdout);
-      expect(output).toMatchObject({ results: [{ result: { observed: true } }] });
-      expect(stderr).toBe("");
-    } finally {
-      await new Promise<void>((resolve, reject) => {
-        server.close(e => e ? reject(e) : resolve());
-        server.closeAllConnections();
+    ];
+
+    for (const args of commands) {
+      await expect(runCli(args)).rejects.toMatchObject({
+        code: 1,
+        stdout: "",
+        stderr: expect.stringContaining("required option '--taxonomy"),
       });
     }
   });
 
-  it("keeps redirected help and errors plain while preserving accessible text", async () => {
-    const help = await exec(
-      process.execPath,
-      ["--conditions=source", "--import", "tsx", "apps/taxonome/src/index.ts", "--help"],
-      { cwd: root, env: childEnvironment() },
-    );
+  it("runs a built-in deterministic YAML element without credentials or SDK calls", async () => {
+    const { stdout, stderr } = await runCli([
+      "run",
+      "packages/taxonomy-evaluation/fixtures/v2/timeout.atif.json",
+      "--taxonomy",
+      "packages/taxonomy-evaluation/taxonomies/agent-behavior/taxonomy.yaml",
+      "--elements",
+      "beh-timeout",
+    ]);
+
+    expect(JSON.parse(stdout)).toMatchObject({
+      results: [{
+        taxonomy: {
+          id: "agent-behavior",
+          version: "2.0.0",
+        },
+        element: { id: "beh-timeout" },
+        implementation: {
+          type: "deterministic",
+          handler: "scope/timeout-v1",
+        },
+        result: { state: "completed", observed: true },
+      }],
+      metadata: { strategy: "deterministic" },
+    });
+    expect(stderr).toBe("");
+  });
+
+  it("fails concisely without a custom plugin and succeeds with an explicit project-relative plugin", async () => {
+    const missing = runCli([
+      "run",
+      "inputs/run.atif.json",
+      "--taxonomy",
+      "taxonomy.yaml",
+      "--elements",
+      "acme-retry-loop",
+    ], example);
+    await expect(missing).rejects.toMatchObject({
+      code: 1,
+      stdout: "",
+      stderr: expect.stringContaining(
+        "Unknown deterministic handler 'acme/retry-loop-v1'",
+      ),
+    });
+
+    const { stdout } = await runCli([
+      "run",
+      "inputs/run.atif.json",
+      "--taxonomy",
+      "taxonomy.yaml",
+      "--plugin",
+      "./dist/handlers/index.js",
+      "--elements",
+      "acme-retry-loop",
+    ], example);
+    expect(JSON.parse(stdout)).toMatchObject({
+      results: [{
+        implementation: {
+          handler: "acme/retry-loop-v1",
+          provider: {
+            name: "taxonome-custom-handler-example",
+            origin: "local",
+            entry: "./dist/handlers/index.js",
+            integrity: expect.stringMatching(/^[a-f0-9]{64}$/),
+          },
+        },
+        result: {
+          state: "completed",
+          observed: true,
+          occurrences: [{
+            tool_call_id: "retry-1",
+            attempts: 3,
+          }],
+        },
+      }],
+    });
+  });
+
+  it("runs the same custom taxonomy/handler against an existing Scope archive", async () => {
+    const { stdout } = await runCli([
+      "run",
+      "inputs/run.tar.gz",
+      "--taxonomy",
+      "taxonomy.yaml",
+      "--plugin",
+      "./dist/handlers/index.js",
+      "--elements",
+      "acme-retry-loop",
+    ], example);
+    expect(JSON.parse(stdout)).toMatchObject({
+      run: {
+        id: "acme-run-archive",
+        scenario: { id: "retry" },
+      },
+      results: [{
+        result: {
+          observed: true,
+          occurrences: [{
+            related_turns: [2],
+            tool_call_id: "retry-1",
+            origin: {
+              iteration: 1,
+              step_id: 2,
+              tool_call_id: "retry-1",
+            },
+          }],
+        },
+      }],
+    });
+  });
+
+  it("builds readout JSON/Markdown and verifies the loaded taxonomy digest", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "taxonome-readout-"));
+    try {
+      const run = await runCli([
+        "run",
+        "inputs/run.atif.json",
+        "--taxonomy",
+        "taxonomy.yaml",
+        "--plugin",
+        "./dist/handlers/index.js",
+        "--elements",
+        "acme-retry-loop",
+      ], example);
+      const evaluated = JSON.parse(run.stdout) as {
+        run: unknown;
+        results: unknown[];
+      };
+      const resultsPath = join(directory, "results.json");
+      const markdownPath = join(directory, "preview.md");
+      await writeFile(resultsPath, JSON.stringify([{
+        run: evaluated.run,
+        results: evaluated.results,
+      }]));
+
+      const { stdout } = await runCli([
+        "readout",
+        resultsPath,
+        "--taxonomy",
+        "taxonomy.yaml",
+        "--plugin",
+        "./dist/handlers/index.js",
+        "--markdown",
+        markdownPath,
+      ], example);
+      const report = JSON.parse(stdout);
+      expect(report).toMatchObject({
+        schema_version: "scope/taxonomy-readout/v1",
+        groups: [{
+          behaviors: [{
+            element_id: "acme-retry-loop",
+            distinct_runs: 1,
+            occurrences: 1,
+          }],
+        }],
+      });
+      expect(await readFile(markdownPath, "utf8")).toContain(
+        "Recovered Retry Loop",
+      );
+
+      evaluated.results[0] = {
+        ...(evaluated.results[0] as Record<string, unknown>),
+        taxonomy: { id: "tampered", version: "1.0.0", digest: "tampered" },
+      };
+      await writeFile(resultsPath, JSON.stringify([{
+        run: evaluated.run,
+        results: evaluated.results,
+      }]));
+      await expect(runCli([
+        "readout",
+        resultsPath,
+        "--taxonomy",
+        "taxonomy.yaml",
+        "--plugin",
+        "./dist/handlers/index.js",
+      ], example)).rejects.toMatchObject({
+        code: 1,
+        stdout: "",
+        stderr: expect.stringContaining("does not match"),
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps pnpm machine stdout valid JSON and free of ANSI", async () => {
+    const { stdout, stderr } = await exec("pnpm", [
+      "--silent",
+      "taxonome",
+      "run",
+      "packages/taxonomy-evaluation/fixtures/v2/timeout.atif.json",
+      "--taxonomy",
+      "packages/taxonomy-evaluation/taxonomies/agent-behavior/taxonomy.yaml",
+      "--elements",
+      "beh-timeout",
+    ], {
+      cwd: root,
+      env: childEnvironment({ FORCE_COLOR: "1" }),
+    });
+
+    expect(stdout).not.toMatch(ANSI_PATTERN);
+    expect(() => JSON.parse(stdout) as unknown).not.toThrow();
+    expect(stderr).toBe("");
+  });
+
+  it("keeps redirected help/errors plain and accessible", async () => {
+    const help = await runCli(["run", "--help"]);
     expect(help.stdout).toBe("");
     expect(help.stderr).toContain("Usage:");
+    expect(help.stderr).toContain("--taxonomy");
+    expect(help.stderr).not.toContain("--context");
     expect(help.stderr).not.toMatch(ANSI_PATTERN);
 
-    const error = exec(
-      process.execPath,
-      ["--conditions=source", "--import", "tsx", "apps/taxonome/src/index.ts", "run", "missing.json", "--context", "missing.json"],
-      { cwd: root, env: childEnvironment({ NO_COLOR: "1", FORCE_COLOR: "1" }) },
+    const error = runCli(
+      ["run", "missing.json", "--taxonomy", "missing.yaml"],
+      root,
+      childEnvironment({ NO_COLOR: "1", FORCE_COLOR: "1" }),
     );
     await expect(error).rejects.toMatchObject({
       code: 1,
@@ -168,27 +302,5 @@ describe("standalone CLI process contract", () => {
     await expect(error).rejects.toMatchObject({
       stderr: expect.not.stringMatching(ANSI_PATTERN),
     });
-  });
-
-  it("keeps JSON stdout ANSI-free even when FORCE_COLOR enables diagnostic color", async () => {
-    const { stdout } = await exec(
-      process.execPath,
-      [
-        "--conditions=source",
-        "--import",
-        "tsx",
-        "apps/taxonome/src/index.ts",
-        "run",
-        "packages/taxonomy-evaluation/fixtures/timeout.atif.json",
-        "--context",
-        "packages/taxonomy-evaluation/fixtures/minimal-context.json",
-        "--elements",
-        "beh-timeout",
-      ],
-      { cwd: root, env: childEnvironment({ FORCE_COLOR: "1" }) },
-    );
-
-    expect(stdout).not.toMatch(ANSI_PATTERN);
-    expect(() => JSON.parse(stdout) as unknown).not.toThrow();
   });
 });
