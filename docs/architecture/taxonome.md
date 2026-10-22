@@ -177,9 +177,19 @@ The same example also contains a custom prompt element and a small disjoint
 train/validation/held-out packet. From the example directory, a real
 `taxonome` executable can run the prompt, evaluate fixed held-out assertions,
 perform one bounded Ax optimization, save the complete v2 artifact, and
-re-evaluate through normal artifact restore. These demo cases use distinct
-families and originating runs, keep gold separate, and avoid placing the
-element ID or label in trajectory text.
+re-evaluate through normal artifact restore. The current neutral-control cases
+use opaque model-visible session/run/scenario/profile identities, distinct
+families and originating runs, separate gold, and no element ID or label in
+trajectory text. A regression serializes each case with the production
+`taxonomyPromptEvidence()` projection and verifies that case/family/origin
+metadata is absent and every forwarded identity is outcome-neutral.
+
+The first 11-call YAML prompt demo under `evidence/yaml-prompt-demo/` is retained
+as historical execution evidence but is **ID-confounded**: its model-visible
+session IDs included descriptive positive/negative hints. Its results are not
+treated as a clean prompt-quality control and are not relabeled. The separately
+versioned neutral-ID control records new calls and artifacts without changing
+the original packet, gold semantics, or frozen 256-call experiment snapshot.
 
 ## ATIF and `extra.scope`
 

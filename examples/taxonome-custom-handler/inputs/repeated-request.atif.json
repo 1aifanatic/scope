@@ -1,6 +1,6 @@
 {
   "schema_version": "ATIF-v1.7",
-  "session_id": "custom-prompt-run",
+  "session_id": "session-9f31",
   "agent": {
     "name": "fixture-agent"
   },
@@ -22,11 +22,11 @@
       "trajectory_state": "complete",
       "task": "Generate and save the report.",
       "run": {
-        "id": "custom-prompt-run",
-        "scenario_id": "report-path",
-        "scenario_label": "Report path",
-        "profile_id": "custom",
-        "profile_label": "Custom prompt"
+        "id": "run-9f31",
+        "scenario_id": "scenario-9f31",
+        "scenario_label": "Scenario 9F31",
+        "profile_id": "profile-9f31",
+        "profile_label": "Profile 9F31"
       },
       "available_sources": []
     }

@@ -664,6 +664,13 @@
       "accuracy_gain": false,
       "built_in_taxonomy_elements": 2
     },
+    "quality_correction": {
+      "status": "historical_id_confounded",
+      "reason": "Model-visible ATIF session IDs encoded positive/negative case semantics.",
+      "clean_prompt_quality_claim": false,
+      "results_rewritten": false,
+      "superseded_by": "separately versioned neutral-ID control"
+    },
     "validation": [
       "typed producer Zod schema and RetryOutput declaration",
       "typed RetryOccurrence collection and handler return",
