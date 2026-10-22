@@ -31,6 +31,7 @@ import { ReportThumbnail } from "@/components/ReportThumbnail";
 import { CriteriaBadge } from "@/components/CriteriaBadge";
 import { TaskPromptBadge } from "@/components/TaskPromptBadge";
 import { AgentBadge } from "@/components/AgentBadge";
+import { ShortId } from "@/components/ShortId";
 import { SkillRevisionLinks } from "@/components/SkillRevisionLinks";
 import { AlertTriangle, ArrowLeft, Copy, Check, Sparkles, CheckCircle2, XCircle, MinusCircle, FileText, Plus, Download, Loader2, Archive, Video, LayoutGrid, List, Puzzle, RotateCcw, ChevronDown, Clock, Pause, Play, ArrowUpDown, X, Boxes } from "lucide-react";
 import { formatDate, formatId, formatDuration, cn } from "@/lib/utils";
@@ -674,6 +675,12 @@ export function RunDetail() {
 
             {/* Tier 2 — labeled configuration + metrics */}
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              {run.submissionId && (
+                <MetaItem
+                  label="Submission ID"
+                  value={<ShortId id={run.submissionId} label="submission ID" className="text-sm" />}
+                />
+              )}
               <MetaItem
                 label="Worker"
                 value={<AgentBadge agentId={run.workerType} version={run.agentVersion} />}

@@ -678,7 +678,8 @@ Both follow the same rules:
 
 A sibling affordance, `components/ShortId.tsx`, applies the same hoverable-tooltip pattern to
 **identifiers**: the Runs list renders run and submission IDs truncated to 8 chars
-(`formatId`), and on hover the tooltip reveals the full ID plus a copy-to-clipboard button. The
+(`formatId`), and Run detail shows the parent submission ID in its metadata. On
+hover the tooltip reveals the full ID plus a copy-to-clipboard button. The
 trigger stays an inline `<span>` (not a link) so the row click still navigates to the run; the
 copy button calls `e.stopPropagation()` so copying never triggers row navigation.
 
