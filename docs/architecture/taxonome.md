@@ -138,14 +138,18 @@ programmatic registry. A plugin exports the exact versioned contract
 validator and implementation:
 
 ```typescript
-import type { TaxonomePlugin } from "taxonomy-evaluation";
+import { defineTaxonomePlugin } from "taxonomy-evaluation/plugins";
 
-export const taxonomePlugin: TaxonomePlugin = {
+export const taxonomePlugin = defineTaxonomePlugin({
   api_version: "scope/taxonome-plugin/v1",
-  name: "acme-taxonomy-handlers",
-  version: "1.0.0",
-  handlers: [retryLoopHandler],
-};
+  provider: {
+    name: "acme-taxonomy-handlers",
+    version: "1.0.0",
+  },
+  handlers: {
+    "acme/retry-loop-v1": retryLoopHandler,
+  },
+});
 ```
 
 Relative plugin paths and installed package names resolve from the invocation
@@ -163,7 +167,19 @@ provenance but do not change the origin-independent YAML handler ID.
 The complete developer example is
 [`examples/taxonome-custom-handler`](../../examples/taxonome-custom-handler/README.md).
 It builds a local plugin and runs the same taxonomy against plain ATIF and a
-Scope archive without publishing an npm package.
+Scope archive without publishing an npm package. Its deterministic producer
+declares a Zod output schema, infers the `RetryOutput` type, types each
+occurrence, and returns `indeterminate` when explicit recovered-retry evidence
+lacks required source attribution. A focused test checks representative
+producer outputs against both the TypeScript schema and the YAML runtime schema.
+
+The same example also contains a custom prompt element and a small disjoint
+train/validation/held-out packet. From the example directory, a real
+`taxonome` executable can run the prompt, evaluate fixed held-out assertions,
+perform one bounded Ax optimization, save the complete v2 artifact, and
+re-evaluate through normal artifact restore. These demo cases use distinct
+families and originating runs, keep gold separate, and avoid placing the
+element ID or label in trajectory text.
 
 ## ATIF and `extra.scope`
 

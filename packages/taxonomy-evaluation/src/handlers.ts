@@ -40,15 +40,15 @@ export interface HandlerConfigSchema<Config> {
 }
 
 /** Pure deterministic implementation resolved by an origin-independent ID. */
-export interface DeterministicHandler<Config = unknown> {
+export interface DeterministicHandler<Config = unknown, Output = unknown> {
   /** Validates and normalizes the handler's YAML configuration. */
   configSchema: HandlerConfigSchema<Config>;
   /**
    * @param input - Frozen normalized ATIF evidence plus loaded taxonomy.
    * @param config - Validated YAML configuration.
-   * @returns Untrusted result validated against the element's YAML output schema.
+   * @returns Typed producer output, then validated against the element's YAML schema.
    */
-  evaluate(input: DeterministicHandlerInput, config: Config): unknown;
+  evaluate(input: DeterministicHandlerInput, config: Config): Output;
 }
 
 /** Provenance of the module that registered a deterministic handler. */

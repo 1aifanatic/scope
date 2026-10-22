@@ -6,3 +6,4 @@ surfaces:
     label: MCP
 elements:
   - path: elements/retry-loop.yaml
+  - path: elements/repeated-request.yaml
