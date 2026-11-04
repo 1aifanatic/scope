@@ -1,0 +1,18 @@
+Scope CLI — release — after
+Synthetic local release service; no live GitHub requests.
+Fixture: draft 9.0.0, preview 8.0.0, stable 7.0.0.
+
+$ scope --version
+0.0.0-dev
+[exit 0]
+
+$ scope update
+Checking for updates...
+→ New version available: 7.0.0 (current: 0.0.0-dev)
+✓ Updated scope to v7.0.0 at /var/folders/g8/l2hzj55x1g9djm1nvc2nbj500000gn/T/scope-cli-demo-5wsv84i4/scope
+[exit 0]
+
+$ scope --version
+7.0.0
+[exit 0]
+

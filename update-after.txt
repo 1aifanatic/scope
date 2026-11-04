@@ -1,0 +1,21 @@
+Scope CLI — update — after
+Synthetic local release service; no live GitHub requests.
+Fixture: release 9.0.0 downloads a bundle reporting 8.0.0.
+
+$ scope --version
+0.0.0-dev
+[exit 0]
+
+$ scope update
+Checking for updates...
+→ New version available: 9.0.0 (current: 0.0.0-dev)
+
+Update failed. You can reinstall manually:
+  curl --fail --location https://raw.githubusercontent.com/microsoft/scope/main/install-cli.sh | bash
+[exit 1]
+
+$ scope --version
+0.0.0-dev
+[exit 0]
+
+Installed bundle unchanged: True
